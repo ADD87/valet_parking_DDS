@@ -16,27 +16,24 @@ local_git:
 
 current_phase:
   id: Fast-2
-  name: .so + typed DDS + ROI_DECIDER 最小闭环
-  status: PASS_X86_AND_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PlanningTrajectory seed 输出；x86 已完成构建、安装和 valid/empty/overflow/nan 本机 DDS 运行验证；m57 交叉工具链已安装，m57 静态构建与 AArch64 ELF 验收通过，板端运行仍未验证。
+  name: .so + typed DDS + ROI_DECIDER/PATH_PROVIDER 最小闭环
+  status: PASS_QUICK_BUILD_X86_M57_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PlanningTrajectory seed 输出；x86 已完成构建、安装和 valid/empty/overflow/nan 本机 DDS 运行验证；m57 交叉工具链已安装，m57 静态构建与 AArch64 ELF 验收通过；已新增 WSL 快捷编译脚本并验证 x86/m57 均可生成链接 MagnaDDS 的 libvalet_parking.so，板端运行仍未验证。
 
 last_completed_snapshot:
-  id: '008'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/008_项目状态快照_m57工具链安装与静态构建通过.md
+  id: '009'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/009_项目状态快照_WSL快捷编译脚本与双平台验证.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-26
-  summary: 已安装 ARM GNU 9.2 2019.12 aarch64-none-linux-gnu 工具链，补齐 m57 thirdparty 版本化库入口 symlink，完成 m57 valet_parking_mvp 构建与静态 ELF 验收。
+  summary: 已新增 WSL 快捷编译脚本 applications/source/valet_parking_tools/build_valet_parking.sh，并通过该脚本完成 x86/m57 双平台 libvalet_parking.so 构建与 MagnaDDS 依赖检查。
   evidence:
-    - /usr/local/ARM-toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-gcc
-    - /usr/local/ARM-toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu/bin/aarch64-none-linux-gnu-g++
-    - applications/source/valet_parking/idl/valet_parking_topics.idl
-    - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.h
-    - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.cpp
-    - out/valet_parking_roi_stage_008/valet_parking_mvp/x86/build/build.log
-    - out/valet_parking_roi_stage_009_m57/valet_parking_mvp/m57/build/build.log
-    - out/valet_parking_roi_stage_009_m57/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - applications/source/valet_parking_tools/build_valet_parking.sh
+    - out/valet_parking_quick_build_009/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_quick_build_009/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_quick_build_009/valet_parking_mvp/x86/build/build.log
+    - out/valet_parking_quick_build_009/valet_parking_mvp/m57/build/build.log
 
 blockers:
   - id: B-001
@@ -60,11 +57,12 @@ runtime_status:
   m57_board: NOT_AVAILABLE
   x86_typed_dds_runtime_test: PASS
   m57_static_build: PASS
-  note: x86 已验证 valid 正常 ROI seed 轨迹，以及 empty/overflow/nan 三类 estop fallback；m57 已产出 AArch64 libvalet_parking.so、valet_parking_runner 与 typed mock pub/sub，板端 runtime 未验证。
+  quick_build_script: PASS_X86_AND_M57
+  note: x86 已验证 valid 正常 ROI seed 轨迹，以及 empty/overflow/nan 三类 estop fallback；WSL 快捷脚本已验证 x86 与 m57 均可产出 libvalet_parking.so，其中 m57 为 AArch64 ELF；板端 runtime 未验证。
 
 next_action:
-  id: NEXT-009
-  description: 阶段报告后，按用户确认继续：若有 m57 板端，执行板端 DDS runtime 验收；若暂无板端，则可继续在当前 adapter 后接入 PATH_PROVIDER，保持 DDS Topic 契约不变。
+  id: NEXT-010
+  description: 继续在当前 ValetParkingStageParkingAdapter 后接入 PATH_PROVIDER 核心路径生成能力，保持 SelectedSlot -> PlanningTrajectory DDS Topic 契约不变；当前阶段先接独立化 OpenSpacePathGenerator 粗路径输出，不引入完整 Stage/Frame 框架。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**。
     - 修改 applications/source/valet_parking/** 与 applications/source/valet_parking_tools/**。
@@ -147,3 +145,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/008_项目状态快照_m57工具链安装与静态构建通过.md
     phase: Fast-2
     status: PASS_X86_AND_M57_STATIC_BLOCKED_BOARD
+  - id: '009'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/009_项目状态快照_WSL快捷编译脚本与双平台验证.md
+    phase: Fast-2
+    status: PASS_QUICK_BUILD_X86_M57_BLOCKED_BOARD
