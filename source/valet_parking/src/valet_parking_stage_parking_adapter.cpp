@@ -4,6 +4,7 @@
 #include "planning/tasks/deciders/open_space_decider/open_space_roi_decider.h"
 #include "planning/tasks/optimizers/open_space_path_generation/open_space_path_generator.h"
 #include "planning/tasks/optimizers/open_space_path_partition/open_space_path_partition.h"
+#include "planning/tasks/optimizers/open_space_speed_optimizer/open_space_speed_optimizer.h"
 #include "proto_convert/parking_lot_convert.h"
 #include "proto_convert/vehicle_state_convert.h"
 #include "valet_parking_topics.h"
@@ -634,6 +635,99 @@ bool RunPathPartition(const valet_parking_config_t& config,
   return true;
 }
 
+TL::planning::SpeedOptimizerInput BuildSpeedOptimizerInput(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const TL::planning::RoiDeciderOutput& roi_output,
+    const TL::planning::PartitionOutput& partition_output,
+    const TL::planning::OpenSpaceSpeedOptimizerConfig& speed_config) {
+  TL::planning::SpeedOptimizerInput input;
+  input.discretized_path =
+      NormalizeDiscretizedPath(partition_output.chosen_partitioned_path.first);
+  input.partitioned_paths = partition_output.partitioned_paths;
+  input.gear = partition_output.chosen_partitioned_path.second;
+  input.is_gear_changed = partition_output.is_gear_changed;
+  input.is_stop_path = partition_output.is_stop_path;
+  input.start_point.path_point = BuildStartPathPoint(config);
+  input.start_point.v = 0.0;
+  input.start_point.a = 0.0;
+  input.start_point.relative_time = 0.0;
+  input.vehicle_state = BuildVehicleState(config, metadata.data_stamp_ms);
+  input.is_vehicle_stand_still = true;
+  input.env_structured_info.is_parking_inwards = roi_output.is_parking_inwards;
+  input.env_structured_info.parking_scenario_type = roi_output.scenario_type;
+  input.is_forward = input.gear == TL::soc::GearPosition::GEAR_DRIVE;
+  input.is_mirror_fold = partition_output.is_mirror_fold;
+  input.config = speed_config;
+  input.has_last_frame = false;
+  input.last_frame_timestamp = 0.0;
+  input.last_planning_start_relative_time = 0.0;
+  return input;
+}
+
+bool RunSpeedOptimizer(const valet_parking_config_t& config,
+                       const InputMetadata& metadata,
+                       const TL::planning::RoiDeciderOutput& roi_output,
+                       const TL::planning::PartitionOutput& partition_output,
+                       TL::planning::SpeedOptimizerOutput* speed_output,
+                       std::string* status_reason) {
+  if (speed_output == nullptr || status_reason == nullptr) {
+    return false;
+  }
+
+  try {
+    TL::planning::OpenSpaceSpeedOptimizerConfig speed_config =
+        TL::planning::OpenSpaceSpeedOptimizerConfig::GetDefault();
+    TL::planning::OpenSpaceSpeedOptimizer optimizer(speed_config);
+    optimizer.Reset();
+    const TL::planning::SpeedOptimizerInput input =
+        BuildSpeedOptimizerInput(config, metadata, roi_output,
+                                 partition_output, speed_config);
+    const bool ok = optimizer.Execute(input, speed_output);
+    if (!ok || !speed_output->success) {
+      *status_reason =
+          "SPEED_OPTIMIZER failed: " + speed_output->message;
+      return false;
+    }
+  } catch (const std::exception& ex) {
+    *status_reason = std::string("SPEED_OPTIMIZER failed: exception: ") +
+                     ex.what();
+    return false;
+  } catch (...) {
+    *status_reason = "SPEED_OPTIMIZER failed: unknown exception";
+    return false;
+  }
+
+  const std::size_t trajectory_points =
+      speed_output->trajectory_gear.first.NumOfPoints();
+  if (trajectory_points < 2U) {
+    std::ostringstream stream;
+    stream << "SPEED_OPTIMIZER failed: insufficient trajectory points"
+           << ", points=" << trajectory_points
+           << ", message=" << speed_output->message;
+    *status_reason = stream.str();
+    return false;
+  }
+
+  const auto& trajectory = speed_output->trajectory_gear.first;
+  const double total_time =
+      trajectory.TrajectoryPointAt(trajectory_points - 1).relative_time;
+  const double total_s =
+      trajectory.TrajectoryPointAt(trajectory_points - 1).path_point.s -
+      trajectory.TrajectoryPointAt(0).path_point.s;
+  std::ostringstream stream;
+  stream << "SPEED_OPTIMIZER ok"
+         << ", points=" << trajectory_points
+         << ", duration=" << std::fixed << std::setprecision(3)
+         << total_time
+         << ", distance=" << total_s
+         << ", gear=" << static_cast<int>(speed_output->trajectory_gear.second)
+         << ", stage=" << static_cast<int>(speed_output->interactive_stage)
+         << ", message=" << CompactDebugText(speed_output->message);
+  *status_reason = stream.str();
+  return true;
+}
+
 struct FlattenedPathProviderPoint {
   TL::common::PathPoint path_point;
   TL::soc::GearPosition gear{TL::soc::GearPosition::GEAR_INVALID};
@@ -968,6 +1062,99 @@ PlanningTrajectory BuildTrajectoryFromPathPartition(
   return output;
 }
 
+PlanningTrajectory BuildTrajectoryFromSpeedOptimizer(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const TL::planning::SpeedOptimizerOutput& speed_output,
+    const std::string& reason) {
+  const TL::planning::DiscretizedTrajectory& source_trajectory =
+      speed_output.trajectory_gear.first;
+  if (source_trajectory.NumOfPoints() < 2U) {
+    return BuildEstopTrajectory(config, metadata,
+                                reason + "; speed trajectory has too few points");
+  }
+
+  double total_path_length = 0.0;
+  std::vector<TrajectoryPoint> points;
+  points.reserve(source_trajectory.NumOfPoints());
+
+  TL::common::TrajectoryPoint previous_source =
+      source_trajectory.TrajectoryPointAt(0);
+  for (std::size_t i = 0U; i < source_trajectory.NumOfPoints(); ++i) {
+    const TL::common::TrajectoryPoint& source =
+        source_trajectory.TrajectoryPointAt(i);
+    if (i > 0U) {
+      const double dx = source.path_point.x - previous_source.path_point.x;
+      const double dy = source.path_point.y - previous_source.path_point.y;
+      total_path_length += std::sqrt(dx * dx + dy * dy);
+    }
+
+    PathPoint path_point;
+    path_point.x(source.path_point.x);
+    path_point.y(source.path_point.y);
+    path_point.z(source.path_point.z);
+    path_point.theta(NormalizeAngle(source.path_point.theta));
+    path_point.kappa(source.path_point.kappa);
+    path_point.s(total_path_length);
+    path_point.l(source.path_point.l);
+    path_point.dkappa(source.path_point.dkappa);
+    path_point.ddkappa(source.path_point.ddkappa);
+    path_point.lane_id("valet_parking_speed_optimizer");
+    path_point.x_derivative(std::cos(source.path_point.theta));
+    path_point.y_derivative(std::sin(source.path_point.theta));
+
+    GaussianInfo gaussian_info;
+    gaussian_info.sigma_x(0.3);
+    gaussian_info.sigma_y(0.25);
+    gaussian_info.correlation(0.0);
+    gaussian_info.area_probability(0.95);
+    gaussian_info.ellipse_a(0.5);
+    gaussian_info.ellipse_b(0.25);
+    gaussian_info.theta_a(source.path_point.theta);
+
+    TrajectoryPoint trajectory_point;
+    trajectory_point.path_point(std::move(path_point));
+    trajectory_point.v(source.v);
+    trajectory_point.a(source.a);
+    trajectory_point.relative_time(source.relative_time);
+    trajectory_point.da(source.da);
+    trajectory_point.steer(source.steer);
+    trajectory_point.gaussian_info(std::move(gaussian_info));
+    points.push_back(std::move(trajectory_point));
+    previous_source = source;
+  }
+
+  const uint64_t publish_stamp_ms = NowMilliseconds();
+  const uint64_t data_stamp_ms = metadata.data_stamp_ms == 0U
+      ? publish_stamp_ms
+      : metadata.data_stamp_ms;
+
+  EStop estop;
+  estop.is_estop(false);
+  estop.reason(reason);
+
+  const TL::common::TrajectoryPoint& first =
+      source_trajectory.TrajectoryPointAt(0);
+  const TL::common::TrajectoryPoint& last =
+      source_trajectory.TrajectoryPointAt(source_trajectory.NumOfPoints() - 1);
+
+  PlanningTrajectory output;
+  output.header(MakeHeader(metadata.seq, metadata.frame_id, publish_stamp_ms,
+                           data_stamp_ms));
+  output.total_path_length(total_path_length);
+  output.total_path_time(last.relative_time);
+  output.trajectory_point(std::move(points));
+  output.is_replan(false);
+  output.replan_type(0U);
+  output.replan_reason(reason);
+  output.longitudinal_diff(last.path_point.x - first.path_point.x);
+  output.lateral_diff(last.path_point.y - first.path_point.y);
+  output.gear(ConvertGear(speed_output.trajectory_gear.second));
+  output.estop(std::move(estop));
+  output.trajectory_type(PlanningTrajectoryType::TRAJECTORY_TYPE_NORMAL);
+  return output;
+}
+
 std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output) {
   std::ostringstream stream;
   stream << "ROI_DECIDER ok"
@@ -1056,7 +1243,21 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     std::string path_partition_reason;
     if (RunPathPartition(config_, metadata, roi_output, path_output,
                          &partition_output, &path_partition_reason)) {
+      TL::planning::SpeedOptimizerOutput speed_output;
+      std::string speed_optimizer_reason;
+      if (RunSpeedOptimizer(config_, metadata, roi_output, partition_output,
+                            &speed_output, &speed_optimizer_reason)) {
+        metadata.status_reason =
+            speed_optimizer_reason + "; " + path_partition_reason + "; " +
+            path_provider_reason + "; " + roi_reason;
+        *status_reason = metadata.status_reason;
+        *output_sample = BuildTrajectoryFromSpeedOptimizer(
+            config_, metadata, speed_output, metadata.status_reason);
+        return true;
+      }
+
       metadata.status_reason =
+          speed_optimizer_reason + "; fallback to PATH_PARTITION; " +
           path_partition_reason + "; " + path_provider_reason + "; " +
           roi_reason;
       *status_reason = metadata.status_reason;

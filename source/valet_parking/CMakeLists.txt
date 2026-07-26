@@ -46,6 +46,16 @@ set(STANDALONE_PATH_PARTITION_SOURCES
     ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_path_partition/open_space_path_partition.cc
 )
 
+set(STANDALONE_SPEED_OPTIMIZER_SOURCES
+    ${STANDALONE_PARKING_ROOT}/planning/common/speed/speed_data.cc
+    ${STANDALONE_PARKING_ROOT}/planning/common/trajectory/discretized_trajectory.cc
+    ${STANDALONE_PARKING_ROOT}/planning/common/trajectory1d/piecewise_acceleration_trajectory1d.cc
+    ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_speed_optimizer/path_handle.cc
+    ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_speed_optimizer/st_sample_cost.cc
+    ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_speed_optimizer/st_sample_curves.cc
+    ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_speed_optimizer/open_space_speed_optimizer.cc
+)
+
 # Source discovery
 set(SOURCES
     src/valet_parking_component.cpp
@@ -56,6 +66,7 @@ set(SOURCES
     ${STANDALONE_ROI_SOURCES}
     ${STANDALONE_PATH_PROVIDER_SOURCES}
     ${STANDALONE_PATH_PARTITION_SOURCES}
+    ${STANDALONE_SPEED_OPTIMIZER_SOURCES}
 )
 
 # Include directories
@@ -75,7 +86,7 @@ target_include_directories(${MODULE_NAME}
 target_link_libraries(${MODULE_NAME} PRIVATE ${MODULE_DEPENDS})
 target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
 
-set_source_files_properties(${STANDALONE_ROI_SOURCES} ${STANDALONE_PATH_PROVIDER_SOURCES} ${STANDALONE_PATH_PARTITION_SOURCES} PROPERTIES
+set_source_files_properties(${STANDALONE_ROI_SOURCES} ${STANDALONE_PATH_PROVIDER_SOURCES} ${STANDALONE_PATH_PARTITION_SOURCES} ${STANDALONE_SPEED_OPTIMIZER_SOURCES} PROPERTIES
     COMPILE_OPTIONS "-w;-include;limits"
 )
 

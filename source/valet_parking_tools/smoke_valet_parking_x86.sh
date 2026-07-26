@@ -129,7 +129,7 @@ echo "[valet_parking_smoke] run_root=${run_root}"
 echo "[valet_parking_smoke] logs=${log_dir}"
 echo "[valet_parking_smoke] subscriber_status=${subscriber_status}"
 echo "[valet_parking_smoke] runner status lines:"
-grep -E "PATH_PARTITION|PATH_PROVIDER|bridged sample" "${runner_log}" | tail -n 20 || true
+grep -E "SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample" "${runner_log}" | tail -n 20 || true
 echo "[valet_parking_smoke] subscriber:"
 cat "${subscriber_log}"
 echo "[valet_parking_smoke] publisher:"

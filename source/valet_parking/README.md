@@ -5,7 +5,7 @@
 - 目标产物：`libvalet_parking.so`
 - 输入：订阅 typed DDS Topic `/selected_slot`
 - 输出：发布 typed DDS Topic `/planning/trajectory`
-- 当前主链路：`SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> PlanningTrajectory`
+- 当前主链路：`SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory`
 - 异常行为：非法输入，如 NaN、empty、overflow，会发布显式 `estop` 输出
 
 ## 当前算法状态
@@ -15,13 +15,15 @@
 - `ROI_DECIDER`：从选中车位计算 ROI、目标位姿、目标区域。
 - `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径。
 - `PATH_PARTITION`：使用 standalone 中已独立化的 `OpenSpacePathPartition::Execute` 做任务级路径仲裁，输出当前应执行的 `chosen_partitioned_path`。
-- `PlanningTrajectory`：把 PATH_PARTITION 选中的路径段压平成 DDS 输出轨迹点；若 PATH_PARTITION 失败，则回退到 PATH_PROVIDER 全路径。
+- `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
+- `PlanningTrajectory`：把 SPEED_OPTIMIZER 输出的轨迹转换成 DDS 输出；若 SPEED_OPTIMIZER 失败，则回退到 PATH_PARTITION 的 nominal speed 轨迹。
 
 暂未接入内容：
 
 - 完整 `OpenSpacePathProvider` 大类。
 - NLP smoother。
-- `SPEED_OPTIMIZER`。
+- 跨帧 history/runtime context。
+- 真实定位/底盘输入 Topic。
 
 ## WSL 快捷编译
 
@@ -62,10 +64,10 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 
 ## 最近验证
 
-PATH_PARTITION 接入后，已验证：
+SPEED_OPTIMIZER 接入后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
-- x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 99 点 `PlanningTrajectory`，`is_estop=false`，runner 日志显示 `PATH_PARTITION ok, decision=4, chosen_points=99`。
+- x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`，runner 日志显示 `SPEED_OPTIMIZER ok, points=179, duration=17.800, distance=7.644`。
 
 m57 目前只完成交叉编译和依赖检查，尚未做真实板端运行验证。
