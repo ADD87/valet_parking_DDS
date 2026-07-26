@@ -3,6 +3,7 @@
 #include "planning/open_space/vehicle_param.h"
 #include "planning/tasks/deciders/open_space_decider/open_space_roi_decider.h"
 #include "planning/tasks/optimizers/open_space_path_generation/open_space_path_generator.h"
+#include "planning/tasks/optimizers/open_space_path_partition/open_space_path_partition.h"
 #include "proto_convert/parking_lot_convert.h"
 #include "proto_convert/vehicle_state_convert.h"
 #include "valet_parking_topics.h"
@@ -308,6 +309,8 @@ TL::common::PathPoint BuildStartPathPoint(const valet_parking_config_t& config) 
   start_point.y = config.fake_vehicle_y;
   start_point.z = 0.0;
   start_point.theta = config.fake_vehicle_theta;
+  start_point.kappa = 0.0;
+  start_point.s = 0.0;
   start_point.x_derivative = std::cos(start_point.theta);
   start_point.y_derivative = std::sin(start_point.theta);
   return start_point;
@@ -463,19 +466,187 @@ bool RunPathProvider(const valet_parking_config_t& config,
   return true;
 }
 
+TL::planning_internal::PathType MapPathProviderPathType(int path_type) {
+  using TL::planning_internal::PathType;
+  switch (path_type) {
+    case static_cast<int>(PathType::SEARCH_PATH):
+      return PathType::SEARCH_PATH;
+    case static_cast<int>(PathType::TRACE_PATH):
+      return PathType::TRACE_PATH;
+    case static_cast<int>(PathType::GEOMETRY):
+      return PathType::GEOMETRY;
+    case static_cast<int>(PathType::GEOMETRY_ADJUST):
+      return PathType::GEOMETRY_ADJUST;
+    case static_cast<int>(PathType::CRUISE_PATH):
+      return PathType::CRUISE_PATH;
+    case static_cast<int>(PathType::SCS_GEOMETRY):
+      return PathType::SCS_GEOMETRY;
+    case static_cast<int>(PathType::ILQR_PATH):
+      return PathType::ILQR_PATH;
+    case static_cast<int>(PathType::SEARCH_EXTENSION_PATH):
+      return PathType::SEARCH_EXTENSION_PATH;
+    case static_cast<int>(PathType::DEFAULT):
+    default:
+      return PathType::DEFAULT;
+  }
+}
+
+TL::planning::DiscretizedPath NormalizeDiscretizedPath(
+    const TL::planning::DiscretizedPath& source_path) {
+  std::vector<TL::common::PathPoint> normalized_points;
+  normalized_points.reserve(source_path.size());
+
+  double accumulated_s = 0.0;
+  TL::common::PathPoint previous_point;
+  for (std::size_t i = 0U; i < source_path.size(); ++i) {
+    TL::common::PathPoint point = source_path[i];
+    point.theta = NormalizeAngle(point.theta);
+    if (i > 0U) {
+      accumulated_s += std::hypot(point.x - previous_point.x,
+                                  point.y - previous_point.y);
+    }
+    point.s = accumulated_s;
+    point.x_derivative = std::cos(point.theta);
+    point.y_derivative = std::sin(point.theta);
+    normalized_points.push_back(point);
+    previous_point = point;
+  }
+
+  return TL::planning::DiscretizedPath(std::move(normalized_points));
+}
+
+std::vector<TL::planning::PathGearPair> NormalizePathProviderPathSet(
+    const std::vector<TL::planning::PathGearPair>& path_set) {
+  std::vector<TL::planning::PathGearPair> normalized_path_set;
+  normalized_path_set.reserve(path_set.size());
+  for (const TL::planning::PathGearPair& path_pair : path_set) {
+    normalized_path_set.emplace_back(NormalizeDiscretizedPath(path_pair.first),
+                                     path_pair.second);
+  }
+  return normalized_path_set;
+}
+
+TL::planning::PartitionInput BuildPathPartitionInput(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const TL::planning::RoiDeciderOutput& roi_output,
+    const TL::planning::OpenSpacePathOutput& path_output) {
+  TL::planning::PartitionInput input;
+  input.vehicle_state = BuildVehicleState(config, metadata.data_stamp_ms);
+  input.planning_start_point = BuildStartPathPoint(config);
+  input.pub_gear = TL::soc::GearPosition::GEAR_PARKING;
+  input.path_result.path_set =
+      NormalizePathProviderPathSet(path_output.partitioned_path);
+  input.path_result.path_idx = 0U;
+  input.path_result.point_idx = 0U;
+  input.path_result.path_shift = false;
+  input.path_result.path_type = MapPathProviderPathType(path_output.path_type);
+  input.path_result.replan_status = path_output.replan_status;
+  input.parking_scenario_type = roi_output.scenario_type;
+  input.is_parking_inwards = roi_output.is_parking_inwards;
+  input.end_pose =
+      roi_output.has_fine_tuned ? roi_output.fine_tuned_end_pose
+                                : roi_output.end_pose;
+  input.dest_region_with_angle = roi_output.dest_region;
+  input.obstacles_segments_vec = roi_output.obs_segments;
+  input.is_vehicle_stand_still = true;
+  input.replan_triggered_by_speed_plan = false;
+  input.guard_triggered = false;
+  input.input_replan_status = path_output.replan_status;
+  input.parking_action_type = 0;
+  return input;
+}
+
+std::string CompactDebugText(std::string text) {
+  for (char& ch : text) {
+    if (ch == '\r' || ch == '\n' || ch == '\t') {
+      ch = ' ';
+    }
+  }
+  return text;
+}
+
+bool RunPathPartition(const valet_parking_config_t& config,
+                      const InputMetadata& metadata,
+                      const TL::planning::RoiDeciderOutput& roi_output,
+                      const TL::planning::OpenSpacePathOutput& path_output,
+                      TL::planning::PartitionOutput* partition_output,
+                      std::string* status_reason) {
+  if (partition_output == nullptr || status_reason == nullptr) {
+    return false;
+  }
+
+  try {
+    TL::planning::OpenSpacePathPartition partition(
+        TL::planning::OpenSpacePathPartitionConfig::GetDefault(),
+        TL::planning::LoadEP30VehicleParam());
+    const TL::common::Status reset_status = partition.Reset();
+    if (!reset_status.ok()) {
+      *status_reason =
+          "PATH_PARTITION failed: reset: " + reset_status.error_message();
+      return false;
+    }
+
+    const TL::planning::PartitionInput input =
+        BuildPathPartitionInput(config, metadata, roi_output, path_output);
+    const TL::common::Status status =
+        partition.Execute(input, partition_output);
+    if (!status.ok()) {
+      *status_reason =
+          "PATH_PARTITION failed: " + status.error_message();
+      return false;
+    }
+  } catch (const std::exception& ex) {
+    *status_reason = std::string("PATH_PARTITION failed: exception: ") +
+                     ex.what();
+    return false;
+  } catch (...) {
+    *status_reason = "PATH_PARTITION failed: unknown exception";
+    return false;
+  }
+
+  const std::size_t chosen_points =
+      partition_output->chosen_partitioned_path.first.size();
+  if (chosen_points < 2U) {
+    std::ostringstream stream;
+    stream << "PATH_PARTITION failed: insufficient chosen path points"
+           << ", decision=" << static_cast<int>(partition_output->path_decision)
+           << ", chosen_points=" << chosen_points;
+    *status_reason = stream.str();
+    return false;
+  }
+
+  std::ostringstream stream;
+  stream << "PATH_PARTITION ok"
+         << ", decision=" << static_cast<int>(partition_output->path_decision)
+         << ", finish=" << static_cast<int>(partition_output->finish_status)
+         << ", chosen_idx=(" << partition_output->chosen_path_idx.first
+         << "," << partition_output->chosen_path_idx.second << ")"
+         << ", chosen_points=" << chosen_points
+         << ", gear=" << static_cast<int>(partition_output->chosen_partitioned_path.second)
+         << ", gear_changed=" << (partition_output->is_gear_changed ? "true" : "false")
+         << ", stop_path=" << (partition_output->is_stop_path ? "true" : "false");
+  const std::string debug = CompactDebugText(partition_output->path_decision_debug);
+  if (!debug.empty()) {
+    stream << ", debug=" << debug;
+  }
+  *status_reason = stream.str();
+  return true;
+}
+
 struct FlattenedPathProviderPoint {
   TL::common::PathPoint path_point;
   TL::soc::GearPosition gear{TL::soc::GearPosition::GEAR_INVALID};
 };
 
-std::vector<FlattenedPathProviderPoint> FlattenPathProviderOutput(
-    const TL::planning::OpenSpacePathOutput& path_output) {
-  std::vector<FlattenedPathProviderPoint> points;
-  points.reserve(CountPathProviderPoints(path_output));
-  for (const auto& path_pair : path_output.partitioned_path) {
-    for (const TL::common::PathPoint& path_point : path_pair.first) {
-      if (!points.empty()) {
-        const TL::common::PathPoint& previous = points.back().path_point;
+void AppendFlattenedPathPair(const TL::planning::PathGearPair& path_pair,
+                             std::vector<FlattenedPathProviderPoint>* points) {
+  if (points == nullptr) {
+    return;
+  }
+  for (const TL::common::PathPoint& path_point : path_pair.first) {
+      if (!points->empty()) {
+        const TL::common::PathPoint& previous = points->back().path_point;
         const double dx = path_point.x - previous.x;
         const double dy = path_point.y - previous.y;
         if (std::sqrt(dx * dx + dy * dy) < 1.0e-4 &&
@@ -487,9 +658,25 @@ std::vector<FlattenedPathProviderPoint> FlattenPathProviderOutput(
       FlattenedPathProviderPoint flattened;
       flattened.path_point = path_point;
       flattened.gear = path_pair.second;
-      points.push_back(flattened);
-    }
+      points->push_back(flattened);
   }
+}
+
+std::vector<FlattenedPathProviderPoint> FlattenPathProviderOutput(
+    const TL::planning::OpenSpacePathOutput& path_output) {
+  std::vector<FlattenedPathProviderPoint> points;
+  points.reserve(CountPathProviderPoints(path_output));
+  for (const auto& path_pair : path_output.partitioned_path) {
+    AppendFlattenedPathPair(path_pair, &points);
+  }
+  return points;
+}
+
+std::vector<FlattenedPathProviderPoint> FlattenPathPartitionOutput(
+    const TL::planning::PartitionOutput& partition_output) {
+  std::vector<FlattenedPathProviderPoint> points;
+  points.reserve(partition_output.chosen_partitioned_path.first.size());
+  AppendFlattenedPathPair(partition_output.chosen_partitioned_path, &points);
   return points;
 }
 
@@ -687,6 +874,100 @@ PlanningTrajectory BuildTrajectoryFromPathProvider(
   return output;
 }
 
+PlanningTrajectory BuildTrajectoryFromPathPartition(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const TL::planning::PartitionOutput& partition_output,
+    const std::string& reason) {
+  const std::vector<FlattenedPathProviderPoint> flattened_points =
+      FlattenPathPartitionOutput(partition_output);
+  if (flattened_points.size() < 2U) {
+    return BuildEstopTrajectory(config, metadata,
+                                reason + "; chosen path has too few points");
+  }
+
+  constexpr double kNominalSpeedMps = 1.0;
+  double total_path_length = 0.0;
+  std::vector<TrajectoryPoint> points;
+  points.reserve(flattened_points.size());
+
+  TL::common::PathPoint previous_source = flattened_points.front().path_point;
+  for (std::size_t i = 0U; i < flattened_points.size(); ++i) {
+    const TL::common::PathPoint& source = flattened_points[i].path_point;
+    if (i > 0U) {
+      const double dx = source.x - previous_source.x;
+      const double dy = source.y - previous_source.y;
+      total_path_length += std::sqrt(dx * dx + dy * dy);
+    }
+
+    PathPoint path_point;
+    path_point.x(source.x);
+    path_point.y(source.y);
+    path_point.z(source.z);
+    path_point.theta(NormalizeAngle(source.theta));
+    path_point.kappa(source.kappa);
+    path_point.s(total_path_length);
+    path_point.l(source.l);
+    path_point.dkappa(source.dkappa);
+    path_point.ddkappa(source.ddkappa);
+    path_point.lane_id("valet_parking_path_partition");
+    path_point.x_derivative(std::cos(source.theta));
+    path_point.y_derivative(std::sin(source.theta));
+
+    GaussianInfo gaussian_info;
+    gaussian_info.sigma_x(0.3);
+    gaussian_info.sigma_y(0.25);
+    gaussian_info.correlation(0.0);
+    gaussian_info.area_probability(0.95);
+    gaussian_info.ellipse_a(0.5);
+    gaussian_info.ellipse_b(0.25);
+    gaussian_info.theta_a(source.theta);
+
+    TrajectoryPoint trajectory_point;
+    trajectory_point.path_point(std::move(path_point));
+    trajectory_point.v(partition_output.is_stop_path ? 0.0 : kNominalSpeedMps);
+    trajectory_point.a(0.0);
+    trajectory_point.relative_time(partition_output.is_stop_path
+                                       ? 0.0
+                                       : total_path_length / kNominalSpeedMps);
+    trajectory_point.da(0.0);
+    trajectory_point.steer(0.0);
+    trajectory_point.gaussian_info(std::move(gaussian_info));
+    points.push_back(std::move(trajectory_point));
+    previous_source = source;
+  }
+
+  const uint64_t publish_stamp_ms = NowMilliseconds();
+  const uint64_t data_stamp_ms = metadata.data_stamp_ms == 0U
+      ? publish_stamp_ms
+      : metadata.data_stamp_ms;
+
+  EStop estop;
+  estop.is_estop(false);
+  estop.reason(reason);
+
+  const TL::common::PathPoint& first = flattened_points.front().path_point;
+  const TL::common::PathPoint& last = flattened_points.back().path_point;
+
+  PlanningTrajectory output;
+  output.header(MakeHeader(metadata.seq, metadata.frame_id, publish_stamp_ms,
+                           data_stamp_ms));
+  output.total_path_length(total_path_length);
+  output.total_path_time(partition_output.is_stop_path
+                             ? 0.0
+                             : total_path_length / kNominalSpeedMps);
+  output.trajectory_point(std::move(points));
+  output.is_replan(false);
+  output.replan_type(0U);
+  output.replan_reason(reason);
+  output.longitudinal_diff(last.x - first.x);
+  output.lateral_diff(last.y - first.y);
+  output.gear(ConvertGear(flattened_points.front().gear));
+  output.estop(std::move(estop));
+  output.trajectory_type(PlanningTrajectoryType::TRAJECTORY_TYPE_NORMAL);
+  return output;
+}
+
 std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output) {
   std::ostringstream stream;
   stream << "ROI_DECIDER ok"
@@ -771,7 +1052,22 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   std::string path_provider_reason;
   if (RunPathProvider(config_, metadata, selected_lot->parking_seq(),
                       roi_output, &path_output, &path_provider_reason)) {
-    metadata.status_reason = path_provider_reason + "; " + roi_reason;
+    TL::planning::PartitionOutput partition_output;
+    std::string path_partition_reason;
+    if (RunPathPartition(config_, metadata, roi_output, path_output,
+                         &partition_output, &path_partition_reason)) {
+      metadata.status_reason =
+          path_partition_reason + "; " + path_provider_reason + "; " +
+          roi_reason;
+      *status_reason = metadata.status_reason;
+      *output_sample = BuildTrajectoryFromPathPartition(
+          config_, metadata, partition_output, metadata.status_reason);
+      return true;
+    }
+
+    metadata.status_reason =
+        path_partition_reason + "; fallback to PATH_PROVIDER; " +
+        path_provider_reason + "; " + roi_reason;
     *status_reason = metadata.status_reason;
     *output_sample = BuildTrajectoryFromPathProvider(
         config_, metadata, path_output, metadata.status_reason);
