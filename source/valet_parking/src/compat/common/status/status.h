@@ -2,6 +2,7 @@
 
 #include "proto_convert/error_code_convert.h"
 
+#include <ostream>
 #include <string>
 #include <utility>
 
@@ -19,6 +20,12 @@ class Status {
   ErrorCode code() const { return code_; }
   const std::string& error_message() const { return message_; }
 
+  bool operator==(const Status& other) const {
+    return code_ == other.code_ && message_ == other.message_;
+  }
+
+  bool operator!=(const Status& other) const { return !(*this == other); }
+
   std::string ToString() const {
     return ok() ? std::string("OK") : message_;
   }
@@ -27,6 +34,11 @@ class Status {
   ErrorCode code_;
   std::string message_;
 };
+
+inline std::ostream& operator<<(std::ostream& stream, const Status& status) {
+  stream << status.ToString();
+  return stream;
+}
 
 }  // namespace common
 }  // namespace TL

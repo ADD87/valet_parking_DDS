@@ -32,6 +32,16 @@ set(STANDALONE_ROI_SOURCES
     ${STANDALONE_PARKING_ROOT}/planning/tasks/deciders/open_space_decider/open_space_fine_tuning.cc
 )
 
+set(STANDALONE_PATH_PROVIDER_SOURCES
+    ${STANDALONE_PARKING_ROOT}/common/math/path_matcher.cc
+    ${STANDALONE_PARKING_ROOT}/planning/common/path/discretized_path.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/node3d.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/path_generator.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/shape/reeds_shepp_path.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/hybrid_a_star.cc
+    ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_path_generation/open_space_path_generator.cc
+)
+
 # Source discovery
 set(SOURCES
     src/valet_parking_component.cpp
@@ -40,6 +50,7 @@ set(SOURCES
     generated/valet_parking_topics.cpp
     generated/valet_parking_topicsTopicDataType.cpp
     ${STANDALONE_ROI_SOURCES}
+    ${STANDALONE_PATH_PROVIDER_SOURCES}
 )
 
 # Include directories
@@ -59,7 +70,7 @@ target_include_directories(${MODULE_NAME}
 target_link_libraries(${MODULE_NAME} PRIVATE ${MODULE_DEPENDS})
 target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
 
-set_source_files_properties(${STANDALONE_ROI_SOURCES} PROPERTIES
+set_source_files_properties(${STANDALONE_ROI_SOURCES} ${STANDALONE_PATH_PROVIDER_SOURCES} PROPERTIES
     COMPILE_OPTIONS "-w;-include;limits"
 )
 

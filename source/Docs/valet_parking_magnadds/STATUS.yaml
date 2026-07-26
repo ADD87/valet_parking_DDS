@@ -4,74 +4,81 @@ created_date: 2026-07-26
 last_updated: 2026-07-26
 
 state_authority:
-  rule: 本文件与 status_snapshots、decision_records 是项目状态的单一事实来源；聊天记录仅作辅助。
+  rule: 本文件与 status_snapshots、decision_records 是项目状态的事实来源；聊天记录仅作辅助。
   docs_root: applications/source/Docs/valet_parking_magnadds
   plan_file: applications/source/Docs/valet_parking_magnadds/00_执行计划书_ValetParkingStageParking_MagnaDDS.md
   handoff_file: applications/source/Docs/valet_parking_magnadds/01_换机中断交接与防偏离方案.md
 
 local_git:
   root: applications
-  status: INITIALIZED
-  purpose: 跟踪当前MVP允许范围内的source、config与Docs变更，不纳入compile、thirdparty、out。
+  remote: git@github.com:ADD87/valet_parking_DDS.git
+  branch: main
+  status: INITIALIZED_AND_PUSHED
+  purpose: 跟踪当前 MVP 范围内的 source、config、Docs 变更；不纳入 compile、thirdparty、out。
 
 current_phase:
   id: Fast-2
   name: .so + typed DDS + ROI_DECIDER/PATH_PROVIDER 最小闭环
-  status: PASS_QUICK_BUILD_X86_M57_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PlanningTrajectory seed 输出；x86 已完成构建、安装和 valid/empty/overflow/nan 本机 DDS 运行验证；m57 交叉工具链已安装，m57 静态构建与 AArch64 ELF 验收通过；已新增 WSL 快捷编译脚本并验证 x86/m57 均可生成链接 MagnaDDS 的 libvalet_parking.so，板端运行仍未验证。
+  status: PASS_PATH_PROVIDER_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PlanningTrajectory。PATH_PROVIDER 当前使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路，暂不接完整 OpenSpacePathProvider 大类和 NLP smoother。x86 已完成 DDS 本机冒烟，m57 已完成 AArch64 静态构建，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '009'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/009_项目状态快照_WSL快捷编译脚本与双平台验证.md
+  id: '010'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/010_项目状态快照_PATH_PROVIDER粗路径接入.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-26
-  summary: 已新增 WSL 快捷编译脚本 applications/source/valet_parking_tools/build_valet_parking.sh，并通过该脚本完成 x86/m57 双平台 libvalet_parking.so 构建与 MagnaDDS 依赖检查。
+  summary: 已接入 PATH_PROVIDER 粗路径生成，x86/m57 均可生成链接 MagnaDDS 的 libvalet_parking.so；x86 DDS 冒烟收到 99 个轨迹点，runner 日志显示 PATH_PROVIDER ok。
   evidence:
-    - applications/source/valet_parking_tools/build_valet_parking.sh
-    - out/valet_parking_quick_build_009/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_quick_build_009/valet_parking_mvp/m57/lib/libvalet_parking.so
-    - out/valet_parking_quick_build_009/valet_parking_mvp/x86/build/build.log
-    - out/valet_parking_quick_build_009/valet_parking_mvp/m57/build/build.log
+    - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.cpp
+    - applications/source/valet_parking/CMakeLists.txt
+    - applications/source/valet_parking/src/compat/common/status/status.h
+    - applications/source/valet_parking/src/compat/proto/planning/sl_boundary.pb.h
+    - out/valet_parking_path_provider_010/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_path_provider_010/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_path_provider_010/valet_parking_mvp/x86/build/build.log
+    - out/valet_parking_path_provider_010/valet_parking_mvp/m57/build/build.log
 
 blockers:
   - id: B-001
     status: OPEN
-    description: 当前无 m57 板端，运行态通信验收暂无法闭环。
+    description: 当前没有 m57 板端，运行态通信、库路径、Domain、Topic 尚无法在真实设备闭环。
     owner: user/project
   - id: B-002
     status: RESOLVED
-    description: 已安装 ARM GNU 9.2 2019.12 工具链到 /usr/local/ARM-toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu，工程 m57_toolchain.cmake 可直接找到 aarch64-none-linux-gnu-gcc/g++。
+    description: ARM GNU 9.2 2019.12 工具链已安装到 /usr/local/ARM-toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu，m57_toolchain.cmake 可直接找到 aarch64-none-linux-gnu-gcc/g++。
     owner: env/workstation
   - id: B-003
     status: RESOLVED
-    description: thirdparty/m57/magnadds/lib 已补齐真实 aarch64 MagnaDDS 实库：libmagna-dds-core.so.1.0.0 与 libmagna-dds-impl.so；libmagna-dds-core.so/libmagna-dds-core.so.1 为符号链接。
+    description: thirdparty/m57/magnadds/lib 已补齐真实 aarch64 MagnaDDS 实库，m57 链接通过。
     owner: env/workstation
   - id: B-004
     status: RESOLVED
-    description: x86 MagnaDDS 已补齐匹配 typed API 的实库；补齐 libmagna-dds-core.so -> libmagna-dds-core.so.1 -> libmagna-dds-core.so.1.0.0 链接链后，valet_parking typed DDS 构建和运行验证通过。
+    description: x86 MagnaDDS 已补齐匹配 typed API 的实库，x86 typed DDS 构建和运行验证通过。
     owner: env/sdk
 
 runtime_status:
-  m57_board: NOT_AVAILABLE
   x86_typed_dds_runtime_test: PASS
+  x86_path_provider_runtime_test: PASS
   m57_static_build: PASS
+  m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57
-  note: x86 已验证 valid 正常 ROI seed 轨迹，以及 empty/overflow/nan 三类 estop fallback；WSL 快捷脚本已验证 x86 与 m57 均可产出 libvalet_parking.so，其中 m57 为 AArch64 ELF；板端 runtime 未验证。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER 后进入 PATH_PROVIDER，输出 99 点 PlanningTrajectory；m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-010
-  description: 继续在当前 ValetParkingStageParkingAdapter 后接入 PATH_PROVIDER 核心路径生成能力，保持 SelectedSlot -> PlanningTrajectory DDS Topic 契约不变；当前阶段先接独立化 OpenSpacePathGenerator 粗路径输出，不引入完整 Stage/Frame 框架。
+  id: NEXT-011
+  description: 继续沿用 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PlanningTrajectory 结构，进入 PATH_PARTITION 独立阶段：先梳理当前粗路径分段结果和原始 OpenSpacePathPartition 的依赖边界，再决定是否接入可独立编译的路径分割/重采样能力。
   allowed_actions:
-    - 修改 applications/source/Docs/valet_parking_magnadds/**。
-    - 修改 applications/source/valet_parking/** 与 applications/source/valet_parking_tools/**。
-    - 修改 applications/config/valet_parking_mvp_bom.yaml。
-    - 维护 applications/.gitignore 与 applications 本地Git状态。
+    - 修改 applications/source/Docs/valet_parking_magnadds/**
+    - 修改 applications/source/valet_parking/**
+    - 修改 applications/source/valet_parking_tools/**
+    - 修改 applications/config/valet_parking_mvp_bom.yaml
+    - 维护 applications/.gitignore 与 applications Git 状态
   forbidden_actions:
-    - 修改 compile/ 或 thirdparty/。
-    - 扩展到完整Stage状态机或全量算法迁移。
-    - 将无板端runtime标记为通过。
+    - 修改 compile/ 或 thirdparty/
+    - 扩展到完整 Stage/Frame/DependencyInjector 框架
+    - 将无板端 runtime 写成已通过
 
 allowed_scope:
   current_mvp_fasttrack:
@@ -149,3 +156,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/009_项目状态快照_WSL快捷编译脚本与双平台验证.md
     phase: Fast-2
     status: PASS_QUICK_BUILD_X86_M57_BLOCKED_BOARD
+  - id: '010'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/010_项目状态快照_PATH_PROVIDER粗路径接入.md
+    phase: Fast-2
+    status: PASS_PATH_PROVIDER_X86_M57_STATIC_BLOCKED_BOARD
