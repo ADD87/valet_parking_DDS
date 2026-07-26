@@ -451,6 +451,27 @@ uint64_t SelectSampleStampMs(const Header& header) {
   return NowMilliseconds();
 }
 
+bool IsFiniteLocalizationSample(const LocalizationEstimate& sample) {
+  return std::isfinite(sample.x()) && std::isfinite(sample.y()) &&
+         std::isfinite(sample.z()) && std::isfinite(sample.heading());
+}
+
+bool IsFiniteChassisSample(const ChassisState& sample) {
+  return std::isfinite(sample.speed_mps()) &&
+         std::isfinite(sample.acceleration_mps2());
+}
+
+bool IsValidObstacleSample(const Obstacle& sample) {
+  return std::isfinite(sample.center_x()) &&
+         std::isfinite(sample.center_y()) &&
+         std::isfinite(sample.heading()) &&
+         std::isfinite(sample.length()) &&
+         std::isfinite(sample.width()) &&
+         std::isfinite(sample.velocity_x()) &&
+         std::isfinite(sample.velocity_y()) && sample.length() > 0.0 &&
+         sample.width() > 0.0;
+}
+
 const ParkingLot* SelectParkingLot(const SelectedSlot& sample) {
   const auto& lots = sample.parking_lots();
   if (lots.empty()) {
@@ -983,9 +1004,13 @@ bool ValetParkingComponent::HandleLocalizationSample() {
   }
 
   ++handled_localization_samples_;
-  if (!sample.is_valid()) {
+  if (!sample.is_valid() || !IsFiniteLocalizationSample(sample)) {
     aux_vehicle_input_.has_localization = false;
     ApplyAuxVehicleInput();
+    std::cout << kModuleTag
+              << " aux localization invalid #"
+              << handled_localization_samples_
+              << " (cleared_vehicle_state)" << std::endl;
     return true;
   }
 
@@ -1027,12 +1052,15 @@ bool ValetParkingComponent::HandleChassisSample() {
   }
 
   ++handled_chassis_samples_;
-  if (!sample.is_valid()) {
+  if (!sample.is_valid() || !IsFiniteChassisSample(sample)) {
     aux_vehicle_input_.has_chassis = false;
     aux_vehicle_input_.state.linear_velocity = 0.0;
     aux_vehicle_input_.state.linear_acceleration = 0.0;
     aux_vehicle_input_.state.gear = VALET_PARKING_GEAR_PARKING;
     ApplyAuxVehicleInput();
+    std::cout << kModuleTag
+              << " aux chassis invalid #" << handled_chassis_samples_
+              << " (cleared_chassis_state)" << std::endl;
     return true;
   }
 
@@ -1078,12 +1106,23 @@ bool ValetParkingComponent::HandleObstacleSample() {
   ++handled_obstacle_samples_;
   if (!sample.is_valid()) {
     (void)stage_parking_adapter_.ClearObstacles();
+    std::cout << kModuleTag
+              << " aux obstacles invalid #" << handled_obstacle_samples_
+              << " (cleared_obstacles)" << std::endl;
     return true;
   }
 
   std::vector<valet_parking_obstacle_t> obstacles;
   obstacles.reserve(sample.obstacles().size());
   for (const Obstacle& source : sample.obstacles()) {
+    if (!IsValidObstacleSample(source)) {
+      (void)stage_parking_adapter_.ClearObstacles();
+      SetLastError("rejected invalid auxiliary obstacle sample");
+      std::cout << kModuleTag
+                << " aux obstacles rejected #" << handled_obstacle_samples_
+                << " (cleared_obstacles)" << std::endl;
+      return true;
+    }
     valet_parking_obstacle_t obstacle{};
     obstacle.id = source.id();
     obstacle.type = MapDdsObstacleType(source.type());
@@ -1102,7 +1141,12 @@ bool ValetParkingComponent::HandleObstacleSample() {
       obstacles.empty() ? nullptr : obstacles.data(),
       static_cast<uint32_t>(obstacles.size()));
   if (ret != VALET_PARKING_OK) {
+    (void)stage_parking_adapter_.ClearObstacles();
     SetLastError("failed to apply auxiliary obstacle array");
+    std::cout << kModuleTag
+              << " aux obstacles rejected #" << handled_obstacle_samples_
+              << " (cleared_obstacles)" << std::endl;
+    return true;
   }
   std::cout << kModuleTag
             << " aux obstacles #" << handled_obstacle_samples_

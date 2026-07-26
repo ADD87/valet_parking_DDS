@@ -14,11 +14,22 @@
 
 namespace {
 
+enum class AuxPublishMode {
+  kAllValid,
+  kInvalidLocalization,
+  kNanLocalization,
+  kChassisOnly,
+  kInvalidObstacles,
+  kBadObstacleGeometry,
+};
+
 struct PublisherOptions {
   uint32_t domain_id{0U};
   std::string localization_topic{"/localization/estimate"};
   std::string chassis_topic{"/chassis/state"};
   std::string obstacle_topic{"/perception/obstacles"};
+  AuxPublishMode mode{AuxPublishMode::kAllValid};
+  std::string mode_name{"all-valid"};
   uint32_t count{3U};
   uint32_t interval_ms{100U};
 };
@@ -49,6 +60,37 @@ bool ParseUint32(const std::string& text, uint32_t* out_value) {
 
   *out_value = static_cast<uint32_t>(parsed);
   return true;
+}
+
+bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
+  if (out_mode == nullptr) {
+    return false;
+  }
+  if (text == "all-valid") {
+    *out_mode = AuxPublishMode::kAllValid;
+    return true;
+  }
+  if (text == "invalid-localization") {
+    *out_mode = AuxPublishMode::kInvalidLocalization;
+    return true;
+  }
+  if (text == "nan-localization") {
+    *out_mode = AuxPublishMode::kNanLocalization;
+    return true;
+  }
+  if (text == "chassis-only") {
+    *out_mode = AuxPublishMode::kChassisOnly;
+    return true;
+  }
+  if (text == "invalid-obstacles") {
+    *out_mode = AuxPublishMode::kInvalidObstacles;
+    return true;
+  }
+  if (text == "bad-obstacle-geometry") {
+    *out_mode = AuxPublishMode::kBadObstacleGeometry;
+    return true;
+  }
+  return false;
 }
 
 std::string ReturnCodeToString(magna::dds::ReturnCode_t rc) {
@@ -95,7 +137,50 @@ Header BuildHeader(const std::string& frame_id, uint32_t index) {
   return header;
 }
 
-LocalizationEstimate BuildLocalization(uint32_t index) {
+bool IsLastSample(const PublisherOptions& options, uint32_t index) {
+  return index + 1U >= options.count;
+}
+
+bool ShouldPublishLocalization(const PublisherOptions& options) {
+  return options.mode != AuxPublishMode::kChassisOnly;
+}
+
+bool ShouldPublishChassis(const PublisherOptions& /*options*/) {
+  return true;
+}
+
+bool ShouldPublishObstacles(const PublisherOptions& options) {
+  return options.mode != AuxPublishMode::kChassisOnly;
+}
+
+std::string LocalizationStatusForLog(const PublisherOptions& options,
+                                     const LocalizationEstimate& sample,
+                                     uint32_t index) {
+  if (!ShouldPublishLocalization(options)) {
+    return "skipped";
+  }
+  if (IsLastSample(options, index) &&
+      options.mode == AuxPublishMode::kNanLocalization) {
+    return "nan";
+  }
+  return sample.is_valid() ? "valid" : "invalid";
+}
+
+std::string ObstacleStatusForLog(const PublisherOptions& options,
+                                 const ObstacleArray& sample,
+                                 uint32_t index) {
+  if (!ShouldPublishObstacles(options)) {
+    return "skipped";
+  }
+  if (IsLastSample(options, index) &&
+      options.mode == AuxPublishMode::kBadObstacleGeometry) {
+    return "bad-geometry";
+  }
+  return sample.is_valid() ? "valid" : "invalid";
+}
+
+LocalizationEstimate BuildLocalization(const PublisherOptions& options,
+                                        uint32_t index) {
   LocalizationEstimate sample;
   sample.header(BuildHeader("aux_input_mock_publisher/localization", index));
   sample.is_valid(true);
@@ -103,6 +188,14 @@ LocalizationEstimate BuildLocalization(uint32_t index) {
   sample.y(0.0);
   sample.z(0.0);
   sample.heading(0.0);
+  if (IsLastSample(options, index) &&
+      options.mode == AuxPublishMode::kInvalidLocalization) {
+    sample.is_valid(false);
+  }
+  if (IsLastSample(options, index) &&
+      options.mode == AuxPublishMode::kNanLocalization) {
+    sample.x(std::numeric_limits<double>::quiet_NaN());
+  }
   return sample;
 }
 
@@ -131,11 +224,23 @@ Obstacle BuildObstacle(uint32_t index) {
   return obstacle;
 }
 
-ObstacleArray BuildObstacleArray(uint32_t index) {
+ObstacleArray BuildObstacleArray(const PublisherOptions& options,
+                                 uint32_t index) {
   ObstacleArray sample;
   sample.header(BuildHeader("aux_input_mock_publisher/obstacles", index));
   sample.is_valid(true);
-  sample.obstacles(std::vector<Obstacle>{BuildObstacle(index)});
+  Obstacle obstacle = BuildObstacle(index);
+  if (IsLastSample(options, index) &&
+      options.mode == AuxPublishMode::kInvalidObstacles) {
+    sample.is_valid(false);
+    sample.obstacles(std::vector<Obstacle>{});
+    return sample;
+  }
+  if (IsLastSample(options, index) &&
+      options.mode == AuxPublishMode::kBadObstacleGeometry) {
+    obstacle.length(-1.0);
+  }
+  sample.obstacles(std::vector<Obstacle>{obstacle});
   return sample;
 }
 
@@ -146,6 +251,8 @@ void PrintUsage() {
             << "  --localization-topic=<name>   localization topic (default /localization/estimate)\n"
             << "  --chassis-topic=<name>        chassis topic (default /chassis/state)\n"
             << "  --obstacle-topic=<name>       obstacle topic (default /perception/obstacles)\n"
+            << "  --mode=<name>                 all-valid|invalid-localization|nan-localization|\n"
+            << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";
@@ -168,6 +275,7 @@ int main(int argc, char* argv[]) {
     const std::string localization_prefix = "--localization-topic=";
     const std::string chassis_prefix = "--chassis-topic=";
     const std::string obstacle_prefix = "--obstacle-topic=";
+    const std::string mode_prefix = "--mode=";
     const std::string count_prefix = "--count=";
     const std::string interval_prefix = "--interval-ms=";
 
@@ -193,6 +301,16 @@ int main(int argc, char* argv[]) {
 
     if (arg.rfind(obstacle_prefix, 0) == 0) {
       options.obstacle_topic = arg.substr(obstacle_prefix.size());
+      continue;
+    }
+
+    if (arg.rfind(mode_prefix, 0) == 0) {
+      options.mode_name = arg.substr(mode_prefix.size());
+      if (!ParseMode(options.mode_name, &options.mode)) {
+        std::cerr << "[aux_input_mock_publisher] invalid --mode: "
+                  << options.mode_name << std::endl;
+        return 2;
+      }
       continue;
     }
 
@@ -226,6 +344,7 @@ int main(int argc, char* argv[]) {
             << ", localization_topic=" << options.localization_topic
             << ", chassis_topic=" << options.chassis_topic
             << ", obstacle_topic=" << options.obstacle_topic
+            << ", mode=" << options.mode_name
             << ", count=" << options.count
             << ", interval_ms=" << options.interval_ms << std::endl;
 
@@ -331,41 +450,52 @@ int main(int argc, char* argv[]) {
   }
 
   for (uint32_t i = 0U; i < options.count; ++i) {
-    LocalizationEstimate localization = BuildLocalization(i);
+    LocalizationEstimate localization = BuildLocalization(options, i);
     ChassisState chassis = BuildChassis(i);
-    ObstacleArray obstacles = BuildObstacleArray(i);
+    ObstacleArray obstacles = BuildObstacleArray(options, i);
 
-    rc = localization_writer->write(&localization, magna::dds::HANDLE_NIL);
-    if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
-      std::cerr << "[aux_input_mock_publisher] write localization failed: "
-                << ReturnCodeToString(rc) << std::endl;
-      cleanup();
-      return 5;
+    if (ShouldPublishLocalization(options)) {
+      rc = localization_writer->write(&localization, magna::dds::HANDLE_NIL);
+      if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+        std::cerr << "[aux_input_mock_publisher] write localization failed: "
+                  << ReturnCodeToString(rc) << std::endl;
+        cleanup();
+        return 5;
+      }
     }
 
-    rc = chassis_writer->write(&chassis, magna::dds::HANDLE_NIL);
-    if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
-      std::cerr << "[aux_input_mock_publisher] write chassis failed: "
-                << ReturnCodeToString(rc) << std::endl;
-      cleanup();
-      return 5;
+    if (ShouldPublishChassis(options)) {
+      rc = chassis_writer->write(&chassis, magna::dds::HANDLE_NIL);
+      if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+        std::cerr << "[aux_input_mock_publisher] write chassis failed: "
+                  << ReturnCodeToString(rc) << std::endl;
+        cleanup();
+        return 5;
+      }
     }
 
-    rc = obstacle_writer->write(&obstacles, magna::dds::HANDLE_NIL);
-    if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
-      std::cerr << "[aux_input_mock_publisher] write obstacles failed: "
-                << ReturnCodeToString(rc) << std::endl;
-      cleanup();
-      return 5;
+    if (ShouldPublishObstacles(options)) {
+      rc = obstacle_writer->write(&obstacles, magna::dds::HANDLE_NIL);
+      if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+        std::cerr << "[aux_input_mock_publisher] write obstacles failed: "
+                  << ReturnCodeToString(rc) << std::endl;
+        cleanup();
+        return 5;
+      }
     }
 
     std::cout << "[aux_input_mock_publisher] published sample group "
               << (i + 1U) << "/" << options.count
-              << " localization=(" << localization.x() << ","
-              << localization.y() << "," << localization.heading() << ")"
-              << " chassis=(speed=" << chassis.speed_mps()
-              << ", gear=" << static_cast<int>(chassis.gear()) << ")"
-              << " obstacles=" << obstacles.obstacles().size() << std::endl;
+              << " localization="
+              << LocalizationStatusForLog(options, localization, i)
+              << " chassis="
+              << (ShouldPublishChassis(options) ? "valid" : "skipped")
+              << " obstacles="
+              << ObstacleStatusForLog(options, obstacles, i)
+              << " obstacle_count="
+              << (ShouldPublishObstacles(options) ? obstacles.obstacles().size()
+                                                  : 0U)
+              << std::endl;
 
     if (i + 1U < options.count && options.interval_ms > 0U) {
       std::this_thread::sleep_for(std::chrono::milliseconds(options.interval_ms));

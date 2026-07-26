@@ -14,8 +14,13 @@ Options:
   --count N           Mock SelectedSlot publish count. Default: 3.
   --interval-ms N     Mock publish interval. Default: 500.
   --with-aux-inputs   Publish localization/chassis/obstacle samples before SelectedSlot.
+  --aux-mode MODE     Aux publisher mode. Default: all-valid.
+                       all-valid|invalid-localization|nan-localization|
+                       chassis-only|invalid-obstacles|bad-obstacle-geometry
   --aux-count N       Aux sample group count. Default: 3.
   --aux-interval-ms N Aux sample group interval. Default: 200.
+  --disable-aux-input-topics
+                       Start runner without subscribing aux input topics.
   --help              Show this help.
 EOF
 }
@@ -31,8 +36,10 @@ timeout_ms=20000
 count=3
 interval_ms=500
 with_aux_inputs=0
+aux_mode="all-valid"
 aux_count=3
 aux_interval_ms=200
+disable_aux_input_topics=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -60,6 +67,10 @@ while [[ $# -gt 0 ]]; do
       with_aux_inputs=1
       shift
       ;;
+    --aux-mode)
+      aux_mode="${2:-}"
+      shift 2
+      ;;
     --aux-count)
       aux_count="${2:-}"
       shift 2
@@ -67,6 +78,10 @@ while [[ $# -gt 0 ]]; do
     --aux-interval-ms)
       aux_interval_ms="${2:-}"
       shift 2
+      ;;
+    --disable-aux-input-topics)
+      disable_aux_input_topics=1
+      shift
       ;;
     --help|-h)
       usage
@@ -98,7 +113,7 @@ fi
 
 export LD_LIBRARY_PATH="${run_root}/lib:${LD_LIBRARY_PATH:-}"
 
-log_dir="${run_root}/smoke_latest"
+log_dir="${run_root}/smoke_latest/domain_${domain_id}_$(date +%Y%m%d_%H%M%S)_$$"
 mkdir -p "${log_dir}"
 runner_log="${log_dir}/runner.log"
 subscriber_log="${log_dir}/subscriber.log"
@@ -127,12 +142,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"${runner}" --domain-id="${domain_id}" >"${runner_log}" 2>&1 &
+runner_args=("--domain-id=${domain_id}")
+if [[ "${disable_aux_input_topics}" == "1" ]]; then
+  runner_args+=("--disable-aux-input-topics")
+fi
+
+"${runner}" "${runner_args[@]}" >"${runner_log}" 2>&1 &
 runner_pid=$!
 sleep 2
 
 if [[ "${with_aux_inputs}" == "1" ]]; then
-  "${aux_publisher}" --domain-id="${domain_id}" --count="${aux_count}" \
+  "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
+    --count="${aux_count}" \
     --interval-ms="${aux_interval_ms}" >"${aux_publisher_log}" 2>&1
   sleep 1
 fi
@@ -172,25 +193,98 @@ cat "${publisher_log}"
 
 validation_status="${subscriber_status}"
 if [[ "${with_aux_inputs}" == "1" ]]; then
-  if ! grep -q "aux localization" "${runner_log}"; then
-    echo "[valet_parking_smoke] missing aux localization consumption in runner log" >&2
-    validation_status=8
-  fi
-  if ! grep -q "aux chassis" "${runner_log}"; then
-    echo "[valet_parking_smoke] missing aux chassis consumption in runner log" >&2
-    validation_status=8
-  fi
-  if ! grep -q "aux obstacles" "${runner_log}"; then
-    echo "[valet_parking_smoke] missing aux obstacles consumption in runner log" >&2
-    validation_status=8
-  fi
-  if ! grep -q "external_vehicle=true" "${runner_log}"; then
-    echo "[valet_parking_smoke] missing external_vehicle=true in runner log" >&2
-    validation_status=8
-  fi
-  if ! grep -Eq "external_obstacles=[1-9]" "${runner_log}"; then
-    echo "[valet_parking_smoke] missing nonzero external_obstacles in runner log" >&2
-    validation_status=8
+  require_log() {
+    local pattern="$1"
+    local message="$2"
+    if ! grep -Eq "${pattern}" "${runner_log}"; then
+      echo "[valet_parking_smoke] ${message}" >&2
+      validation_status=8
+    fi
+  }
+
+  reject_log() {
+    local pattern="$1"
+    local message="$2"
+    if grep -Eq "${pattern}" "${runner_log}"; then
+      echo "[valet_parking_smoke] ${message}" >&2
+      validation_status=8
+    fi
+  }
+
+  if [[ "${disable_aux_input_topics}" == "1" ]]; then
+    reject_log "aux localization|aux chassis|aux obstacles" \
+      "runner consumed aux samples while aux input topics are disabled"
+    require_log "external_vehicle=false" \
+      "missing external_vehicle=false with disabled aux input topics"
+    require_log "external_obstacles=0" \
+      "missing external_obstacles=0 with disabled aux input topics"
+  else
+    case "${aux_mode}" in
+      all-valid)
+        require_log "aux localization #[0-9]+" \
+          "missing aux localization consumption in runner log"
+        require_log "aux chassis #[0-9]+" \
+          "missing aux chassis consumption in runner log"
+        require_log "aux obstacles #[0-9]+ \\(count=[1-9]" \
+          "missing aux obstacle consumption in runner log"
+        require_log "external_vehicle=true" \
+          "missing external_vehicle=true in runner log"
+        require_log "external_obstacles=[1-9]" \
+          "missing nonzero external_obstacles in runner log"
+        ;;
+      invalid-localization|nan-localization)
+        require_log "aux localization invalid #[0-9]+" \
+          "missing invalid aux localization handling in runner log"
+        require_log "aux chassis #[0-9]+" \
+          "missing aux chassis consumption in runner log"
+        require_log "aux obstacles #[0-9]+ \\(count=[1-9]" \
+          "missing aux obstacle consumption in runner log"
+        require_log "external_vehicle=false" \
+          "missing external_vehicle=false after invalid localization"
+        require_log "external_obstacles=[1-9]" \
+          "missing retained external obstacles after invalid localization"
+        ;;
+      chassis-only)
+        require_log "aux chassis #[0-9]+" \
+          "missing aux chassis consumption in runner log"
+        reject_log "aux localization" \
+          "unexpected localization consumption in chassis-only mode"
+        reject_log "aux obstacles" \
+          "unexpected obstacle consumption in chassis-only mode"
+        require_log "external_vehicle=false" \
+          "missing external_vehicle=false in chassis-only mode"
+        require_log "external_obstacles=0" \
+          "missing external_obstacles=0 in chassis-only mode"
+        ;;
+      invalid-obstacles)
+        require_log "aux localization #[0-9]+" \
+          "missing aux localization consumption in invalid-obstacles mode"
+        require_log "aux chassis #[0-9]+" \
+          "missing aux chassis consumption in invalid-obstacles mode"
+        require_log "aux obstacles invalid #[0-9]+" \
+          "missing invalid aux obstacle handling in runner log"
+        require_log "external_vehicle=true" \
+          "missing external_vehicle=true in invalid-obstacles mode"
+        require_log "external_obstacles=0" \
+          "missing external_obstacles=0 after invalid obstacles"
+        ;;
+      bad-obstacle-geometry)
+        require_log "aux localization #[0-9]+" \
+          "missing aux localization consumption in bad-obstacle-geometry mode"
+        require_log "aux chassis #[0-9]+" \
+          "missing aux chassis consumption in bad-obstacle-geometry mode"
+        require_log "aux obstacles rejected #[0-9]+" \
+          "missing rejected aux obstacle handling in runner log"
+        require_log "external_vehicle=true" \
+          "missing external_vehicle=true in bad-obstacle-geometry mode"
+        require_log "external_obstacles=0" \
+          "missing external_obstacles=0 after bad obstacle geometry"
+        ;;
+      *)
+        echo "[valet_parking_smoke] unknown aux mode for validation: ${aux_mode}" >&2
+        validation_status=8
+        ;;
+    esac
   fi
 fi
 
