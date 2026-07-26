@@ -18,12 +18,90 @@
 #include <exception>
 #include <iomanip>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace valet_parking {
+
+struct ValetParkingStageParkingAdapter::RuntimeContext {
+  RuntimeContext()
+      : vehicle_param(TL::planning::LoadEP30VehicleParam()),
+        path_partition_config(
+            TL::planning::OpenSpacePathPartitionConfig::GetDefault()),
+        path_partition(path_partition_config, vehicle_param),
+        speed_config(
+            TL::planning::OpenSpaceSpeedOptimizerConfig::GetDefault()),
+        speed_optimizer(speed_config) {
+    ResetPlanningState();
+  }
+
+  bool ResetPlanningState() {
+    const TL::common::Status partition_status = path_partition.Reset();
+    path_partition_ready = partition_status.ok();
+    path_partition_reset_message = partition_status.error_message();
+    speed_optimizer.Reset();
+    has_last_speed_frame = false;
+    last_frame_timestamp = 0.0;
+    last_planning_start_relative_time = 0.0;
+    last_speed_plan_collision_info =
+        TL::planning_internal::AvpSpeedPlanCollisionInfo();
+    replan_triggered_by_speed_plan = false;
+    current_path_has_collision_risk = false;
+    last_published_gear = TL::soc::GearPosition::GEAR_PARKING;
+    return path_partition_ready;
+  }
+
+  void UpdateAfterPartitionFallback(
+      const TL::planning::PartitionOutput& partition_output) {
+    speed_optimizer.Reset();
+    has_last_speed_frame = false;
+    last_frame_timestamp = 0.0;
+    last_planning_start_relative_time = 0.0;
+    last_speed_plan_collision_info =
+        TL::planning_internal::AvpSpeedPlanCollisionInfo();
+    replan_triggered_by_speed_plan = false;
+    current_path_has_collision_risk = false;
+    last_published_gear = partition_output.chosen_partitioned_path.second;
+    ++processed_frames;
+  }
+
+  void UpdateAfterSpeedOptimizer(
+      uint64_t data_stamp_ms,
+      const TL::planning::SpeedOptimizerOutput& speed_output) {
+    has_last_speed_frame = true;
+    last_frame_timestamp = static_cast<double>(data_stamp_ms) / 1000.0;
+    last_planning_start_relative_time = 0.0;
+    last_speed_plan_collision_info = speed_output.speed_plan_collision_info;
+    replan_triggered_by_speed_plan =
+        speed_output.replan_triggered_by_speed_plan;
+    current_path_has_collision_risk =
+        speed_output.current_path_has_collision_risk;
+    last_published_gear = speed_output.trajectory_gear.second;
+    ++processed_frames;
+  }
+
+  TL::planning::VehicleParam vehicle_param;
+  TL::planning::OpenSpacePathPartitionConfig path_partition_config;
+  TL::planning::OpenSpacePathPartition path_partition;
+  TL::planning::OpenSpaceSpeedOptimizerConfig speed_config;
+  TL::planning::OpenSpaceSpeedOptimizer speed_optimizer;
+  TL::planning_internal::AvpSpeedPlanCollisionInfo
+      last_speed_plan_collision_info;
+  TL::soc::GearPosition last_published_gear{
+      TL::soc::GearPosition::GEAR_PARKING};
+  bool path_partition_ready{false};
+  std::string path_partition_reset_message;
+  bool has_last_speed_frame{false};
+  double last_frame_timestamp{0.0};
+  double last_planning_start_relative_time{0.0};
+  bool replan_triggered_by_speed_plan{false};
+  bool current_path_has_collision_risk{false};
+  uint64_t processed_frames{0U};
+};
+
 namespace {
 
 constexpr int kTrajectoryPointCount = 21;
@@ -531,11 +609,15 @@ TL::planning::PartitionInput BuildPathPartitionInput(
     const valet_parking_config_t& config,
     const InputMetadata& metadata,
     const TL::planning::RoiDeciderOutput& roi_output,
-    const TL::planning::OpenSpacePathOutput& path_output) {
+    const TL::planning::OpenSpacePathOutput& path_output,
+    TL::soc::GearPosition last_published_gear,
+    bool replan_triggered_by_speed_plan,
+    const TL::planning_internal::AvpSpeedPlanCollisionInfo&
+        speed_plan_collision_info) {
   TL::planning::PartitionInput input;
   input.vehicle_state = BuildVehicleState(config, metadata.data_stamp_ms);
   input.planning_start_point = BuildStartPathPoint(config);
-  input.pub_gear = TL::soc::GearPosition::GEAR_PARKING;
+  input.pub_gear = last_published_gear;
   input.path_result.path_set =
       NormalizePathProviderPathSet(path_output.partitioned_path);
   input.path_result.path_idx = 0U;
@@ -551,9 +633,10 @@ TL::planning::PartitionInput BuildPathPartitionInput(
   input.dest_region_with_angle = roi_output.dest_region;
   input.obstacles_segments_vec = roi_output.obs_segments;
   input.is_vehicle_stand_still = true;
-  input.replan_triggered_by_speed_plan = false;
+  input.replan_triggered_by_speed_plan = replan_triggered_by_speed_plan;
   input.guard_triggered = false;
   input.input_replan_status = path_output.replan_status;
+  input.speed_plan_collision_info = speed_plan_collision_info;
   input.parking_action_type = 0;
   return input;
 }
@@ -571,27 +654,26 @@ bool RunPathPartition(const valet_parking_config_t& config,
                       const InputMetadata& metadata,
                       const TL::planning::RoiDeciderOutput& roi_output,
                       const TL::planning::OpenSpacePathOutput& path_output,
+                      TL::soc::GearPosition last_published_gear,
+                      bool replan_triggered_by_speed_plan,
+                      const TL::planning_internal::AvpSpeedPlanCollisionInfo&
+                          speed_plan_collision_info,
+                      TL::planning::OpenSpacePathPartition* partition,
                       TL::planning::PartitionOutput* partition_output,
                       std::string* status_reason) {
-  if (partition_output == nullptr || status_reason == nullptr) {
+  if (partition == nullptr || partition_output == nullptr ||
+      status_reason == nullptr) {
     return false;
   }
 
   try {
-    TL::planning::OpenSpacePathPartition partition(
-        TL::planning::OpenSpacePathPartitionConfig::GetDefault(),
-        TL::planning::LoadEP30VehicleParam());
-    const TL::common::Status reset_status = partition.Reset();
-    if (!reset_status.ok()) {
-      *status_reason =
-          "PATH_PARTITION failed: reset: " + reset_status.error_message();
-      return false;
-    }
-
     const TL::planning::PartitionInput input =
-        BuildPathPartitionInput(config, metadata, roi_output, path_output);
+        BuildPathPartitionInput(config, metadata, roi_output, path_output,
+                                last_published_gear,
+                                replan_triggered_by_speed_plan,
+                                speed_plan_collision_info);
     const TL::common::Status status =
-        partition.Execute(input, partition_output);
+        partition->Execute(input, partition_output);
     if (!status.ok()) {
       *status_reason =
           "PATH_PARTITION failed: " + status.error_message();
@@ -640,7 +722,10 @@ TL::planning::SpeedOptimizerInput BuildSpeedOptimizerInput(
     const InputMetadata& metadata,
     const TL::planning::RoiDeciderOutput& roi_output,
     const TL::planning::PartitionOutput& partition_output,
-    const TL::planning::OpenSpaceSpeedOptimizerConfig& speed_config) {
+    const TL::planning::OpenSpaceSpeedOptimizerConfig& speed_config,
+    bool has_last_frame,
+    double last_frame_timestamp,
+    double last_planning_start_relative_time) {
   TL::planning::SpeedOptimizerInput input;
   input.discretized_path =
       NormalizeDiscretizedPath(partition_output.chosen_partitioned_path.first);
@@ -659,9 +744,10 @@ TL::planning::SpeedOptimizerInput BuildSpeedOptimizerInput(
   input.is_forward = input.gear == TL::soc::GearPosition::GEAR_DRIVE;
   input.is_mirror_fold = partition_output.is_mirror_fold;
   input.config = speed_config;
-  input.has_last_frame = false;
-  input.last_frame_timestamp = 0.0;
-  input.last_planning_start_relative_time = 0.0;
+  input.has_last_frame = has_last_frame;
+  input.last_frame_timestamp = last_frame_timestamp;
+  input.last_planning_start_relative_time =
+      last_planning_start_relative_time;
   return input;
 }
 
@@ -669,21 +755,26 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
                        const InputMetadata& metadata,
                        const TL::planning::RoiDeciderOutput& roi_output,
                        const TL::planning::PartitionOutput& partition_output,
+                       const TL::planning::OpenSpaceSpeedOptimizerConfig&
+                           speed_config,
+                       bool has_last_frame,
+                       double last_frame_timestamp,
+                       double last_planning_start_relative_time,
+                       TL::planning::OpenSpaceSpeedOptimizer* optimizer,
                        TL::planning::SpeedOptimizerOutput* speed_output,
                        std::string* status_reason) {
-  if (speed_output == nullptr || status_reason == nullptr) {
+  if (optimizer == nullptr || speed_output == nullptr ||
+      status_reason == nullptr) {
     return false;
   }
 
   try {
-    TL::planning::OpenSpaceSpeedOptimizerConfig speed_config =
-        TL::planning::OpenSpaceSpeedOptimizerConfig::GetDefault();
-    TL::planning::OpenSpaceSpeedOptimizer optimizer(speed_config);
-    optimizer.Reset();
     const TL::planning::SpeedOptimizerInput input =
         BuildSpeedOptimizerInput(config, metadata, roi_output,
-                                 partition_output, speed_config);
-    const bool ok = optimizer.Execute(input, speed_output);
+                                 partition_output, speed_config,
+                                 has_last_frame, last_frame_timestamp,
+                                 last_planning_start_relative_time);
+    const bool ok = optimizer->Execute(input, speed_output);
     if (!ok || !speed_output->success) {
       *status_reason =
           "SPEED_OPTIMIZER failed: " + speed_output->message;
@@ -723,6 +814,7 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
          << ", distance=" << total_s
          << ", gear=" << static_cast<int>(speed_output->trajectory_gear.second)
          << ", stage=" << static_cast<int>(speed_output->interactive_stage)
+         << ", last_frame=" << (has_last_frame ? "true" : "false")
          << ", message=" << CompactDebugText(speed_output->message);
   *status_reason = stream.str();
   return true;
@@ -1170,17 +1262,24 @@ std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output) {
 
 ValetParkingStageParkingAdapter::ValetParkingStageParkingAdapter(
     const valet_parking_config_t& config)
-    : config_(config) {}
+    : config_(config), runtime_(std::make_unique<RuntimeContext>()) {}
+
+ValetParkingStageParkingAdapter::~ValetParkingStageParkingAdapter() = default;
 
 bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
                                                PlanningTrajectory* output_sample,
-                                               std::string* status_reason) const {
+                                               std::string* status_reason) {
   if (output_sample == nullptr || status_reason == nullptr) {
     return false;
   }
 
+  if (runtime_ == nullptr) {
+    runtime_ = std::make_unique<RuntimeContext>();
+  }
+
   InputMetadata metadata = BuildMetadata(input_sample);
   if (!input_sample.is_valid()) {
+    runtime_->ResetPlanningState();
     metadata.status_reason = "selected_slot.is_valid is false";
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
@@ -1189,6 +1288,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   const auto& lots = input_sample.parking_lots();
   if (input_sample.count() == 0U || lots.empty()) {
+    runtime_->ResetPlanningState();
     metadata.status_reason = "selected_slot has no parking_lots";
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
@@ -1196,6 +1296,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   }
 
   if (static_cast<std::size_t>(input_sample.count()) > lots.size()) {
+    runtime_->ResetPlanningState();
     metadata.status_reason = "selected_slot count exceeds parking_lots size";
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
@@ -1204,6 +1305,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   const ParkingLot* selected_lot = SelectParkingLot(input_sample);
   if (selected_lot == nullptr) {
+    runtime_->ResetPlanningState();
     metadata.status_reason = "selected_slot selected lot is unavailable";
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
@@ -1212,6 +1314,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   TL::perception::ParkingLotOut parking_lot;
   if (!ConvertParkingLot(*selected_lot, &parking_lot, &metadata.status_reason)) {
+    runtime_->ResetPlanningState();
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
     return true;
@@ -1226,6 +1329,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   const int roi_ret = roi_decider.Process(parking_lot, vehicle_state, &roi_output);
   if (roi_ret != 0) {
+    runtime_->ResetPlanningState();
     metadata.status_reason = "ROI_DECIDER failed: ret=" + std::to_string(roi_ret) +
                              ", lot_status=" +
                              std::to_string(static_cast<int>(roi_output.lot_status));
@@ -1242,11 +1346,22 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     TL::planning::PartitionOutput partition_output;
     std::string path_partition_reason;
     if (RunPathPartition(config_, metadata, roi_output, path_output,
+                         runtime_->last_published_gear,
+                         runtime_->replan_triggered_by_speed_plan,
+                         runtime_->last_speed_plan_collision_info,
+                         &runtime_->path_partition,
                          &partition_output, &path_partition_reason)) {
       TL::planning::SpeedOptimizerOutput speed_output;
       std::string speed_optimizer_reason;
       if (RunSpeedOptimizer(config_, metadata, roi_output, partition_output,
+                            runtime_->speed_config,
+                            runtime_->has_last_speed_frame,
+                            runtime_->last_frame_timestamp,
+                            runtime_->last_planning_start_relative_time,
+                            &runtime_->speed_optimizer,
                             &speed_output, &speed_optimizer_reason)) {
+        runtime_->UpdateAfterSpeedOptimizer(metadata.data_stamp_ms,
+                                            speed_output);
         metadata.status_reason =
             speed_optimizer_reason + "; " + path_partition_reason + "; " +
             path_provider_reason + "; " + roi_reason;
@@ -1256,6 +1371,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         return true;
       }
 
+      runtime_->UpdateAfterPartitionFallback(partition_output);
       metadata.status_reason =
           speed_optimizer_reason + "; fallback to PATH_PARTITION; " +
           path_partition_reason + "; " + path_provider_reason + "; " +
@@ -1266,6 +1382,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       return true;
     }
 
+    runtime_->ResetPlanningState();
     metadata.status_reason =
         path_partition_reason + "; fallback to PATH_PROVIDER; " +
         path_provider_reason + "; " + roi_reason;
@@ -1275,6 +1392,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     return true;
   }
 
+  runtime_->ResetPlanningState();
   metadata.status_reason =
       path_provider_reason + "; fallback to ROI seed; " + roi_reason;
   *status_reason = metadata.status_reason;

@@ -38,7 +38,7 @@ class ValetParkingComponent final {
     bool HandleOneSample();
     bool BuildTrajectoryFromInput(const SelectedSlot& input_sample,
                                   PlanningTrajectory* output_sample,
-                                  std::string* status_reason) const;
+                                  std::string* status_reason);
     static std::string ReturnCodeToString(magna::dds::ReturnCode_t rc);
     void SetLastError(const std::string& message);
   void WorkerLoop();

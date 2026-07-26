@@ -781,7 +781,7 @@ void ValetParkingComponent::CleanupDds() noexcept {
 
 bool ValetParkingComponent::BuildTrajectoryFromInput(const SelectedSlot& input_sample,
                                                      PlanningTrajectory* output_sample,
-                                                     std::string* status_reason) const {
+                                                     std::string* status_reason) {
   if (output_sample == nullptr || status_reason == nullptr) {
     return false;
   }
