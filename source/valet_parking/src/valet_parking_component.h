@@ -11,6 +11,11 @@
 #include <string>
 #include <thread>
 
+class PlanningTrajectory;
+class PlanningTrajectoryTopicDataType;
+class SelectedSlot;
+class SelectedSlotTopicDataType;
+
 namespace valet_parking {
 
 class ValetParkingComponent final {
@@ -30,9 +35,9 @@ class ValetParkingComponent final {
     bool InitDds();
     void CleanupDds() noexcept;
     bool HandleOneSample();
-    bool BuildTrajectoryPayloadFromInput(const std::string& input_payload,
-                                         std::string* output_payload,
-                                         std::string* status_reason) const;
+    bool BuildTrajectoryFromInput(const SelectedSlot& input_sample,
+                                  PlanningTrajectory* output_sample,
+                                  std::string* status_reason) const;
     static std::string ReturnCodeToString(magna::dds::ReturnCode_t rc);
     void SetLastError(const std::string& message);
   void WorkerLoop();
@@ -45,10 +50,11 @@ class ValetParkingComponent final {
   std::mutex mutex_;
   std::condition_variable cv_;
   std::thread worker_;
-  std::string last_error_;
+    std::string last_error_;
     uint64_t handled_samples_{0U};
 
-    std::unique_ptr<magna::dds::TopicDataType_raw> raw_topic_type_;
+    std::unique_ptr<SelectedSlotTopicDataType> selected_slot_topic_type_;
+    std::unique_ptr<PlanningTrajectoryTopicDataType> planning_trajectory_topic_type_;
     magna::dds::DomainParticipantFactory* dds_factory_{nullptr};
     magna::dds::DomainParticipant* participant_{nullptr};
     magna::dds::Topic* input_topic_{nullptr};

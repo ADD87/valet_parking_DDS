@@ -17,25 +17,28 @@ local_git:
 current_phase:
   id: Fast-2
   name: .so 与真实DDS最小闭环
-  status: IN_PROGRESS
-  description: 已在valet_parking内接入真实MagnaDDS Reader/Writer最小闭环，并完成x86下valid/estop两类场景验证；正式IDL草案与生成代码探针已完成，C++接线等待用户确认后继续；m57静态构建仍受交叉工具链缺失阻塞。
+  status: BLOCKED
+  description: 已将valet_parking组件与mock工具从raw payload改为IDL generated SelectedSlot/PlanningTrajectory接线；x86构建进入链接阶段后被MagnaDDS SDK头文件/实库ABI namespace不匹配阻塞，valid/nan/estop运行验证未执行；m57静态构建仍受交叉工具链和m57 MagnaDDS实库缺失阻塞。
 
 last_completed_snapshot:
-  id: '005'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/005_项目状态快照_IDL草案与生成探针完成.md
+  id: '006'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/006_项目状态快照_IDL类型接线遇到SDK_ABI阻塞.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-26
-  summary: 已创建valet_parking_topics.idl，SDK idlparser生成正式Topic类型代码成功，生成代码通过x86 MagnaDDS头文件语法编译检查。
+  summary: 已完成IDL generated类型接线代码改造；x86编译进入链接阶段后被MagnaDDS SDK头文件/实库ABI namespace不匹配阻塞，SDK自带hello_world typed demo可复现同类链接失败。
   evidence:
     - applications/source/valet_parking/idl/valet_parking_topics.idl
     - applications/source/valet_parking/generated/valet_parking_topics.h
     - applications/source/valet_parking/generated/valet_parking_topics.cpp
     - applications/source/valet_parking/generated/valet_parking_topicsTopicDataType.h
     - applications/source/valet_parking/generated/valet_parking_topicsTopicDataType.cpp
-    - idlparser generation PASS
-    - g++ -fsyntax-only PASS for generated files
+    - applications/source/valet_parking/src/valet_parking_component.cpp
+    - applications/source/valet_parking_tools/selected_slot_mock_publisher/main.cpp
+    - applications/source/valet_parking_tools/planning_trajectory_mock_subscriber/main.cpp
+    - out/valet_parking_mvp_next006/valet_parking_mvp/x86/build/build.log
+    - SDK demo hello_world typed build probe FAIL with same undefined magna::dds symbols
 
 blockers:
   - id: B-001
@@ -50,15 +53,19 @@ blockers:
     status: OPEN
     description: thirdparty/m57/magnadds/lib 疑似缺少真实m57 MagnaDDS实库，仅发现0字节libmagna-dds-core.so与libmagna-dds-core.so.1，未见libmagna-dds-core.so.1.0.0和libmagna-dds-impl.so。
     owner: env/workstation
+  - id: B-004
+    status: OPEN
+    description: x86 MagnaDDS SDK typed API头文件声明 `magna::dds::*`，但当前 `libmagna-dds-impl.so` 导出旧ABI符号如 `dds::domain::*` 与 `gstone::rtps::DdsCdr::*`；导致IDL generated TopicDataType链接失败，SDK自带 `demo/hello_world` typed demo同样失败。
+    owner: env/sdk
 
 runtime_status:
   m57_board: NOT_AVAILABLE
-  dds_runtime_test: BLOCKED_NO_M57_BOARD
-  note: 当前无 m57 板端；m57静态编译也需先补齐交叉工具链。
+  dds_runtime_test: BLOCKED_SDK_ABI_MISMATCH
+  note: x86 typed DDS运行验证先被MagnaDDS SDK ABI不匹配阻塞；m57仍需先补齐交叉工具链和m57实库。
 
 next_action:
-  id: NEXT-006
-  description: 等待用户确认；确认后将generated SelectedSlot/PlanningTrajectory接入CMake和C++ Reader/Writer，替换当前raw payload的x86通信路径。
+  id: NEXT-007
+  description: 先解决MagnaDDS SDK x86 typed API头文件/实库ABI namespace不匹配；优先获取匹配 `magna::dds::*` 导出的SDK/thirdparty库，或由项目确认是否允许在 applications/source 内维护受控兼容shim。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**。
     - 修改 applications/source/valet_parking/** 与 applications/source/valet_parking_tools/**。
@@ -129,3 +136,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/005_项目状态快照_IDL草案与生成探针完成.md
     phase: Fast-2
     status: CREATED
+  - id: '006'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/006_项目状态快照_IDL类型接线遇到SDK_ABI阻塞.md
+    phase: Fast-2
+    status: BLOCKED

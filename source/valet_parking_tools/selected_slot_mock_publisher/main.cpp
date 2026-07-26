@@ -1,6 +1,10 @@
 #include "magnadds/MagnaDDS.h"
+#include "valet_parking_topics.h"
+#include "valet_parking_topicsTopicDataType.h"
 
 #include <chrono>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <errno.h>
@@ -11,8 +15,6 @@
 #include <thread>
 
 namespace {
-
-constexpr const char* kRawTypeName = "ValetParkingRawV1";
 
 struct PublisherOptions {
   uint32_t domain_id{0U};
@@ -86,53 +88,115 @@ std::string ReturnCodeToString(magna::dds::ReturnCode_t rc) {
   }
 }
 
-std::string BuildPayload(const PublisherOptions& options, uint32_t index) {
+Header BuildHeader(const PublisherOptions& options, uint32_t index) {
   const uint64_t stamp_ms = NowMilliseconds();
   const uint64_t seq = stamp_ms + static_cast<uint64_t>(index);
 
-  std::ostringstream out;
-  out << "schema=selected_slot_v1";
-  out << ";seq=" << seq;
-  out << ";frame_id=selected_slot_mock_publisher";
-  out << ";publish_stamp_ms=" << stamp_ms;
-  out << ";data_stamp_ms=" << stamp_ms;
-  out << ";mode=" << options.mode;
+  Header header;
+  header.seq(seq);
+  header.frame_id("selected_slot_mock_publisher");
+  header.publish_stamp_ms(stamp_ms);
+  header.data_stamp_ms(stamp_ms);
+  return header;
+}
 
-  if (options.mode == "valid") {
-    out << ";is_valid=1";
-    out << ";center_x=8.500";
-    out << ";center_y=2.000";
-    out << ";heading=0.200";
-    out << ";length=5.200";
-    out << ";width=2.400";
-    out << ";count=1";
-  } else if (options.mode == "empty") {
-    out << ";is_valid=0";
-    out << ";center_x=0.000";
-    out << ";center_y=0.000";
-    out << ";heading=0.000";
-    out << ";length=5.200";
-    out << ";width=2.400";
-    out << ";count=0";
-  } else if (options.mode == "overflow") {
-    out << ";is_valid=1";
-    out << ";center_x=8.500";
-    out << ";center_y=2.000";
-    out << ";heading=0.200";
-    out << ";length=5.200";
-    out << ";width=2.400";
-    out << ";count=999999";
-  } else {
-    out << ";is_valid=1";
-    out << ";center_x=nan";
-    out << ";center_y=2.000";
-    out << ";heading=0.200";
-    out << ";length=5.200";
-    out << ";width=2.400";
-    out << ";count=1";
+Point3D BuildPoint(double x, double y, double z) {
+  Point3D point;
+  point.x(x);
+  point.y(y);
+  point.z(z);
+  return point;
+}
+
+PsPoint BuildPsPoint(double x, double y, PsPointPosition position) {
+  PsPoint point;
+  point.point(BuildPoint(x, y, 0.0));
+  point.position(position);
+  point.quality(PsPointQuality::PS_QUALITY_HIGH);
+  return point;
+}
+
+std::vector<PsPoint> BuildSlotCorners(double center_x,
+                                      double center_y,
+                                      double heading,
+                                      double length,
+                                      double width) {
+  const double half_length = length * 0.5;
+  const double half_width = width * 0.5;
+  const double cos_heading = std::cos(heading);
+  const double sin_heading = std::sin(heading);
+
+  const double local_x[4] = {-half_length, half_length, -half_length, half_length};
+  const double local_y[4] = {half_width, half_width, -half_width, -half_width};
+  const PsPointPosition positions[4] = {
+      PsPointPosition::PS_POSITION_TOP_LEFT,
+      PsPointPosition::PS_POSITION_TOP_RIGHT,
+      PsPointPosition::PS_POSITION_BOTTOM_LEFT,
+      PsPointPosition::PS_POSITION_BOTTOM_RIGHT,
+  };
+
+  std::vector<PsPoint> corners;
+  corners.reserve(4U);
+  for (std::size_t i = 0U; i < 4U; ++i) {
+    const double x = center_x + local_x[i] * cos_heading - local_y[i] * sin_heading;
+    const double y = center_y + local_x[i] * sin_heading + local_y[i] * cos_heading;
+    corners.push_back(BuildPsPoint(x, y, positions[i]));
+  }
+  return corners;
+}
+
+ParkingLot BuildParkingLot(const PublisherOptions& options) {
+  const double center_x = (options.mode == "nan")
+      ? std::numeric_limits<double>::quiet_NaN()
+      : 8.5;
+  const double center_y = 2.0;
+  const double heading = 0.2;
+  const double length = 5.2;
+  const double width = 2.4;
+  const std::vector<PsPoint> corners = BuildSlotCorners(center_x, center_y, heading, length, width);
+
+  ParkingLot lot;
+  lot.parking_seq(1U);
+  lot.type(ParkingType::PARKING_TYPE_VERTICAL);
+  lot.status(ParkingStatus::PARKING_STATUS_FREE);
+  lot.sensor_type(ParkingSensorType::PARKING_SENSOR_CAMERA);
+  lot.is_private_ps(false);
+  lot.pts_vrf(corners);
+  lot.time_creation(static_cast<double>(NowMilliseconds()) / 1000.0);
+  lot.pts_enu(corners);
+  lot.hmi_angle(heading);
+  lot.hmi_depth(length);
+  lot.hmi_width(width);
+  lot.hmi_direction(0.0);
+  lot.hmi_type(0.0);
+  lot.hmi_status(0.0);
+  lot.park_size(ParkingSpaceSize::PARKING_SPACE_SIZE_NORMAL);
+  return lot;
+}
+
+SelectedSlot BuildSample(const PublisherOptions& options, uint32_t index) {
+  SelectedSlot sample;
+  sample.header(BuildHeader(options, index));
+  sample.loc_seq(index);
+  sample.opt_parking_seq(1U);
+  sample.path_point_size(0U);
+  sample.traced_path(std::vector<ParkingPathPoint>{});
+  sample.hpp_cruising_to_parking(false);
+  sample.enable_trigger(true);
+
+  if (options.mode == "empty") {
+    sample.count(0U);
+    sample.parking_lots(std::vector<ParkingLot>{});
+    sample.is_valid(false);
+    return sample;
   }
 
-  return out.str();
+  std::vector<ParkingLot> lots;
+  lots.push_back(BuildParkingLot(options));
+  sample.parking_lots(lots);
+  sample.count(options.mode == "overflow" ? 999999U : static_cast<uint32_t>(lots.size()));
+  sample.is_valid(true);
+  return sample;
 }
 
 void PrintUsage() {
@@ -243,8 +307,8 @@ int main(int argc, char* argv[]) {
     }
   };
 
-  magna::dds::TopicDataType_raw raw_type(kRawTypeName);
-  magna::dds::ReturnCode_t rc = participant->register_type(&raw_type);
+  SelectedSlotTopicDataType selected_slot_type;
+  magna::dds::ReturnCode_t rc = participant->register_type(&selected_slot_type);
   if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
     std::cerr << "[selected_slot_mock_publisher] register_type failed: "
               << ReturnCodeToString(rc) << std::endl;
@@ -253,7 +317,7 @@ int main(int argc, char* argv[]) {
   }
 
   magna::dds::Topic* topic = participant->create_topic(
-      options.topic_name, raw_type.get_name(), magna::dds::TOPIC_QOS_DEFAULT);
+      options.topic_name, selected_slot_type.get_name(), magna::dds::TOPIC_QOS_DEFAULT);
   if (topic == nullptr) {
     std::cerr << "[selected_slot_mock_publisher] create_topic failed" << std::endl;
     cleanup();
@@ -283,11 +347,10 @@ int main(int argc, char* argv[]) {
   }
 
   for (uint32_t i = 0U; i < options.count; ++i) {
-    const std::string payload = BuildPayload(options, i);
-    const magna::dds::OctetSeq raw_payload(payload.begin(), payload.end());
-    rc = writer->write_original(raw_payload);
+    SelectedSlot sample = BuildSample(options, i);
+    rc = writer->write(&sample, magna::dds::HANDLE_NIL);
     if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
-      std::cerr << "[selected_slot_mock_publisher] write_original failed at sample " << i
+      std::cerr << "[selected_slot_mock_publisher] write failed at sample " << i
                 << ": " << ReturnCodeToString(rc) << std::endl;
       cleanup();
       return 5;
@@ -295,7 +358,10 @@ int main(int argc, char* argv[]) {
 
     std::cout << "[selected_slot_mock_publisher] published sample " << (i + 1U)
               << "/" << options.count
-              << " bytes=" << raw_payload.size() << std::endl;
+              << " count=" << sample.count()
+              << " lots=" << sample.parking_lots().size()
+              << " is_valid=" << (sample.is_valid() ? "true" : "false")
+              << std::endl;
 
     if (i + 1U < options.count && options.interval_ms > 0U) {
       std::this_thread::sleep_for(std::chrono::milliseconds(options.interval_ms));

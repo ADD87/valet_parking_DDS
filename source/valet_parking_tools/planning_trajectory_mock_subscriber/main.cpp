@@ -1,7 +1,10 @@
 #include "magnadds/MagnaDDS.h"
+#include "valet_parking_topics.h"
+#include "valet_parking_topicsTopicDataType.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <errno.h>
@@ -12,8 +15,6 @@
 #include <vector>
 
 namespace {
-
-constexpr const char* kRawTypeName = "ValetParkingRawV1";
 
 struct SubscriberOptions {
   uint32_t domain_id{0U};
@@ -77,37 +78,64 @@ std::string ReturnCodeToString(magna::dds::ReturnCode_t rc) {
   }
 }
 
-bool ValidateTrajectoryPayload(const std::string& payload,
-                               std::string* validation_message) {
-  const std::vector<std::string> required_keys = {
-      "\"header\"",
-      "\"total_path_length\"",
-      "\"total_path_time\"",
-      "\"trajectory_point\"",
-      "\"is_replan\"",
-      "\"replan_type\"",
-      "\"replan_reason\"",
-      "\"longitudinal_diff\"",
-      "\"lateral_diff\"",
-      "\"gear\"",
-      "\"estop\"",
-      "\"trajectory_type\"",
-      "\"lane_id\"",
-      "\"area_probability\"",
-      "\"theta_a\"",
-  };
-
-  for (const auto& key : required_keys) {
-    if (payload.find(key) == std::string::npos) {
-      if (validation_message != nullptr) {
-        *validation_message = std::string("missing key: ") + key;
-      }
-      return false;
+bool ValidateTrajectorySample(const PlanningTrajectory& sample,
+                              std::string* validation_message) {
+  if (sample.header().frame_id().empty()) {
+    if (validation_message != nullptr) {
+      *validation_message = "header.frame_id is empty";
     }
+    return false;
+  }
+
+  if (!std::isfinite(sample.total_path_length()) ||
+      !std::isfinite(sample.total_path_time()) ||
+      !std::isfinite(sample.longitudinal_diff()) ||
+      !std::isfinite(sample.lateral_diff())) {
+    if (validation_message != nullptr) {
+      *validation_message = "trajectory scalar field is non-finite";
+    }
+    return false;
+  }
+
+  if (sample.trajectory_point().empty()) {
+    if (validation_message != nullptr) {
+      *validation_message = "trajectory_point is empty";
+    }
+    return false;
+  }
+
+  const TrajectoryPoint& first_point = sample.trajectory_point().front();
+  const PathPoint& first_path_point = first_point.path_point();
+  const GaussianInfo& gaussian_info = first_point.gaussian_info();
+  if (first_path_point.lane_id().empty()) {
+    if (validation_message != nullptr) {
+      *validation_message = "path_point.lane_id is empty";
+    }
+    return false;
+  }
+
+  if (!std::isfinite(first_path_point.x()) ||
+      !std::isfinite(first_path_point.y()) ||
+      !std::isfinite(first_path_point.theta()) ||
+      !std::isfinite(first_point.v()) ||
+      !std::isfinite(first_point.relative_time()) ||
+      !std::isfinite(gaussian_info.area_probability()) ||
+      !std::isfinite(gaussian_info.theta_a())) {
+    if (validation_message != nullptr) {
+      *validation_message = "trajectory point field is non-finite";
+    }
+    return false;
+  }
+
+  if (sample.estop().is_estop() && sample.estop().reason().empty()) {
+    if (validation_message != nullptr) {
+      *validation_message = "estop reason is empty";
+    }
+    return false;
   }
 
   if (validation_message != nullptr) {
-    *validation_message = "required trajectory keys present";
+    *validation_message = "required trajectory fields valid";
   }
   return true;
 }
@@ -200,8 +228,8 @@ int main(int argc, char* argv[]) {
     }
   };
 
-  magna::dds::TopicDataType_raw raw_type(kRawTypeName);
-  magna::dds::ReturnCode_t rc = participant->register_type(&raw_type);
+  PlanningTrajectoryTopicDataType planning_trajectory_type;
+  magna::dds::ReturnCode_t rc = participant->register_type(&planning_trajectory_type);
   if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
     std::cerr << "[planning_trajectory_mock_subscriber] register_type failed: "
               << ReturnCodeToString(rc) << std::endl;
@@ -210,7 +238,7 @@ int main(int argc, char* argv[]) {
   }
 
   magna::dds::Topic* topic = participant->create_topic(
-      options.topic_name, raw_type.get_name(), magna::dds::TOPIC_QOS_DEFAULT);
+      options.topic_name, planning_trajectory_type.get_name(), magna::dds::TOPIC_QOS_DEFAULT);
   if (topic == nullptr) {
     std::cerr << "[planning_trajectory_mock_subscriber] create_topic failed" << std::endl;
     cleanup();
@@ -244,9 +272,9 @@ int main(int argc, char* argv[]) {
       std::chrono::milliseconds(options.timeout_ms);
 
   while (std::chrono::steady_clock::now() < deadline) {
-    magna::dds::OctetSeq raw_payload;
+    PlanningTrajectory sample;
     magna::dds::SampleInfo sample_info;
-    rc = reader->take_next_sample_original(raw_payload, sample_info);
+    rc = reader->take_next_sample(&sample, sample_info);
 
     if (rc == magna::dds::ReturnCode_t::RETCODE_NO_DATA) {
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -254,7 +282,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
-      std::cerr << "[planning_trajectory_mock_subscriber] take_next_sample_original failed: "
+      std::cerr << "[planning_trajectory_mock_subscriber] take_next_sample failed: "
                 << ReturnCodeToString(rc) << std::endl;
       cleanup();
       return 6;
@@ -264,19 +292,20 @@ int main(int argc, char* argv[]) {
       continue;
     }
 
-    const std::string payload(raw_payload.begin(), raw_payload.end());
     std::string validation_message;
-    const bool valid_payload = ValidateTrajectoryPayload(payload, &validation_message);
-    if (!valid_payload) {
-      std::cerr << "[planning_trajectory_mock_subscriber] invalid payload: "
+    const bool valid_sample = ValidateTrajectorySample(sample, &validation_message);
+    if (!valid_sample) {
+      std::cerr << "[planning_trajectory_mock_subscriber] invalid sample: "
                 << validation_message << std::endl;
       cleanup();
       return 7;
     }
 
-    const bool is_estop = payload.find("\"is_estop\":true") != std::string::npos;
-    std::cout << "[planning_trajectory_mock_subscriber] received payload bytes="
-              << raw_payload.size() << ", is_estop=" << (is_estop ? "true" : "false")
+    const bool is_estop = sample.estop().is_estop();
+    std::cout << "[planning_trajectory_mock_subscriber] received sample points="
+              << sample.trajectory_point().size()
+              << ", length=" << sample.total_path_length()
+              << ", is_estop=" << (is_estop ? "true" : "false")
               << std::endl;
     std::cout << "[planning_trajectory_mock_subscriber] validation: "
               << validation_message << std::endl;
