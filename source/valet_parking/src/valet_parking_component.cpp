@@ -885,6 +885,34 @@ int ValetParkingComponent::Stop() {
   return VALET_PARKING_OK;
 }
 
+int ValetParkingComponent::UpdateVehicleState(
+    const valet_parking_vehicle_state_t& vehicle_state) {
+  const int ret = stage_parking_adapter_.UpdateVehicleState(vehicle_state);
+  if (ret != VALET_PARKING_OK) {
+    SetLastError("invalid vehicle state input");
+  }
+  return ret;
+}
+
+int ValetParkingComponent::ClearVehicleState() {
+  return stage_parking_adapter_.ClearVehicleState();
+}
+
+int ValetParkingComponent::UpdateObstacles(
+    const valet_parking_obstacle_t* obstacles,
+    uint32_t obstacle_count) {
+  const int ret =
+      stage_parking_adapter_.UpdateObstacles(obstacles, obstacle_count);
+  if (ret != VALET_PARKING_OK) {
+    SetLastError("invalid obstacle input");
+  }
+  return ret;
+}
+
+int ValetParkingComponent::ClearObstacles() {
+  return stage_parking_adapter_.ClearObstacles();
+}
+
 const std::string& ValetParkingComponent::LastError() const {
   return last_error_;
 }

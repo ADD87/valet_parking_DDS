@@ -29,6 +29,11 @@ class ValetParkingComponent final {
 
   int Start();
   int Stop();
+  int UpdateVehicleState(const valet_parking_vehicle_state_t& vehicle_state);
+  int ClearVehicleState();
+  int UpdateObstacles(const valet_parking_obstacle_t* obstacles,
+                      uint32_t obstacle_count);
+  int ClearObstacles();
 
   const std::string& LastError() const;
 

@@ -19,12 +19,99 @@
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace valet_parking {
+
+namespace {
+
+constexpr uint32_t kMaxExternalObstacleCount = 128U;
+
+struct RuntimeVehicleInput {
+  bool has_vehicle_state{false};
+  uint64_t stamp_ms{0U};
+  double x{0.0};
+  double y{0.0};
+  double z{0.0};
+  double heading{0.0};
+  double linear_velocity{0.0};
+  double linear_acceleration{0.0};
+  TL::soc::GearPosition gear{TL::soc::GearPosition::GEAR_PARKING};
+};
+
+struct RuntimeObstacleInput {
+  int id{0};
+  TL::planning::PerceptionObstacle_Type type{
+      TL::planning::PerceptionObstacle_Type_UNKNOWN_UNMOVABLE};
+  bool is_dynamic{false};
+  double center_x{0.0};
+  double center_y{0.0};
+  double heading{0.0};
+  double length{0.0};
+  double width{0.0};
+  double velocity_x{0.0};
+  double velocity_y{0.0};
+};
+
+TL::soc::GearPosition MapApiGearPosition(
+    valet_parking_gear_position_t gear) {
+  switch (gear) {
+    case VALET_PARKING_GEAR_NEUTRAL:
+      return TL::soc::GearPosition::GEAR_NEUTRAL;
+    case VALET_PARKING_GEAR_DRIVE:
+      return TL::soc::GearPosition::GEAR_DRIVE;
+    case VALET_PARKING_GEAR_REVERSE:
+      return TL::soc::GearPosition::GEAR_REVERSE;
+    case VALET_PARKING_GEAR_PARKING:
+      return TL::soc::GearPosition::GEAR_PARKING;
+    case VALET_PARKING_GEAR_LOW:
+      return TL::soc::GearPosition::GEAR_LOW;
+    case VALET_PARKING_GEAR_INVALID:
+      return TL::soc::GearPosition::GEAR_INVALID;
+    case VALET_PARKING_GEAR_NONE:
+      return TL::soc::GearPosition::GEAR_NONE;
+  }
+  return TL::soc::GearPosition::GEAR_INVALID;
+}
+
+TL::planning::PerceptionObstacle_Type MapApiObstacleType(
+    valet_parking_obstacle_type_t type) {
+  switch (type) {
+    case VALET_PARKING_OBSTACLE_UNKNOWN:
+      return TL::planning::PerceptionObstacle_Type_UNKNOWN;
+    case VALET_PARKING_OBSTACLE_UNKNOWN_MOVABLE:
+      return TL::planning::PerceptionObstacle_Type_UNKNOWN_MOVABLE;
+    case VALET_PARKING_OBSTACLE_UNKNOWN_UNMOVABLE:
+      return TL::planning::PerceptionObstacle_Type_UNKNOWN_UNMOVABLE;
+    case VALET_PARKING_OBSTACLE_PEDESTRIAN:
+      return TL::planning::PerceptionObstacle_Type_PEDESTRIAN;
+    case VALET_PARKING_OBSTACLE_BICYCLE:
+      return TL::planning::PerceptionObstacle_Type_BICYCLE;
+    case VALET_PARKING_OBSTACLE_VEHICLE:
+      return TL::planning::PerceptionObstacle_Type_VEHICLE;
+  }
+  return TL::planning::PerceptionObstacle_Type_UNKNOWN;
+}
+
+bool IsFiniteVehicleState(const valet_parking_vehicle_state_t& input) {
+  return std::isfinite(input.x) && std::isfinite(input.y) &&
+         std::isfinite(input.z) && std::isfinite(input.heading) &&
+         std::isfinite(input.linear_velocity) &&
+         std::isfinite(input.linear_acceleration);
+}
+
+bool IsFiniteObstacle(const valet_parking_obstacle_t& input) {
+  return std::isfinite(input.center_x) && std::isfinite(input.center_y) &&
+         std::isfinite(input.heading) && std::isfinite(input.length) &&
+         std::isfinite(input.width) && std::isfinite(input.velocity_x) &&
+         std::isfinite(input.velocity_y);
+}
+
+}  // namespace
 
 struct ValetParkingStageParkingAdapter::RuntimeContext {
   RuntimeContext()
@@ -52,6 +139,67 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
     current_path_has_collision_risk = false;
     last_published_gear = TL::soc::GearPosition::GEAR_PARKING;
     return path_partition_ready;
+  }
+
+  int UpdateVehicleState(const valet_parking_vehicle_state_t& input) {
+    if (input.is_valid == 0 || !IsFiniteVehicleState(input)) {
+      return VALET_PARKING_ERR_INVALID_ARG;
+    }
+
+    vehicle_input.has_vehicle_state = true;
+    vehicle_input.stamp_ms = input.stamp_ms;
+    vehicle_input.x = input.x;
+    vehicle_input.y = input.y;
+    vehicle_input.z = input.z;
+    vehicle_input.heading = input.heading;
+    vehicle_input.linear_velocity = input.linear_velocity;
+    vehicle_input.linear_acceleration = input.linear_acceleration;
+    vehicle_input.gear = MapApiGearPosition(input.gear);
+    return VALET_PARKING_OK;
+  }
+
+  void ClearVehicleState() {
+    vehicle_input = RuntimeVehicleInput();
+  }
+
+  int UpdateObstacles(const valet_parking_obstacle_t* input_obstacles,
+                      uint32_t obstacle_count) {
+    if (obstacle_count > 0U && input_obstacles == nullptr) {
+      return VALET_PARKING_ERR_INVALID_ARG;
+    }
+    if (obstacle_count > kMaxExternalObstacleCount) {
+      return VALET_PARKING_ERR_INVALID_ARG;
+    }
+
+    std::vector<RuntimeObstacleInput> next_obstacles;
+    next_obstacles.reserve(obstacle_count);
+    for (uint32_t i = 0U; i < obstacle_count; ++i) {
+      const valet_parking_obstacle_t& input = input_obstacles[i];
+      if (!IsFiniteObstacle(input) || input.length <= 0.0 ||
+          input.width <= 0.0) {
+        return VALET_PARKING_ERR_INVALID_ARG;
+      }
+
+      RuntimeObstacleInput obstacle;
+      obstacle.id = static_cast<int>(input.id);
+      obstacle.type = MapApiObstacleType(input.type);
+      obstacle.is_dynamic = input.is_dynamic != 0;
+      obstacle.center_x = input.center_x;
+      obstacle.center_y = input.center_y;
+      obstacle.heading = input.heading;
+      obstacle.length = input.length;
+      obstacle.width = input.width;
+      obstacle.velocity_x = input.velocity_x;
+      obstacle.velocity_y = input.velocity_y;
+      next_obstacles.push_back(obstacle);
+    }
+
+    obstacles = std::move(next_obstacles);
+    return VALET_PARKING_OK;
+  }
+
+  void ClearObstacles() {
+    obstacles.clear();
   }
 
   void UpdateAfterPartitionFallback(
@@ -90,6 +238,8 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
   TL::planning::OpenSpaceSpeedOptimizer speed_optimizer;
   TL::planning_internal::AvpSpeedPlanCollisionInfo
       last_speed_plan_collision_info;
+  RuntimeVehicleInput vehicle_input;
+  std::vector<RuntimeObstacleInput> obstacles;
   TL::soc::GearPosition last_published_gear{
       TL::soc::GearPosition::GEAR_PARKING};
   bool path_partition_ready{false};
@@ -365,34 +515,119 @@ bool ConvertParkingLot(const ParkingLot& input,
   return true;
 }
 
-TL::common::VehicleState BuildVehicleState(const valet_parking_config_t& config,
-                                           uint64_t stamp_ms) {
+TL::common::VehicleState BuildVehicleState(
+    const valet_parking_config_t& config,
+    uint64_t stamp_ms,
+    const RuntimeVehicleInput& vehicle_input) {
   TL::common::VehicleState vehicle_state;
-  vehicle_state.x = config.fake_vehicle_x;
-  vehicle_state.y = config.fake_vehicle_y;
-  vehicle_state.z = 0.0;
-  vehicle_state.yaw = config.fake_vehicle_theta;
-  vehicle_state.heading = config.fake_vehicle_theta;
-  vehicle_state.timestamp = static_cast<double>(stamp_ms) / 1000.0;
-  vehicle_state.gear = TL::common::GearPosition::GEAR_PARKING;
+  vehicle_state.x = vehicle_input.has_vehicle_state
+      ? vehicle_input.x
+      : config.fake_vehicle_x;
+  vehicle_state.y = vehicle_input.has_vehicle_state
+      ? vehicle_input.y
+      : config.fake_vehicle_y;
+  vehicle_state.z = vehicle_input.has_vehicle_state ? vehicle_input.z : 0.0;
+  vehicle_state.yaw = vehicle_input.has_vehicle_state
+      ? NormalizeAngle(vehicle_input.heading)
+      : config.fake_vehicle_theta;
+  vehicle_state.heading = vehicle_state.yaw;
+  const uint64_t effective_stamp_ms =
+      vehicle_input.has_vehicle_state && vehicle_input.stamp_ms != 0U
+          ? vehicle_input.stamp_ms
+          : stamp_ms;
+  vehicle_state.timestamp = static_cast<double>(effective_stamp_ms) / 1000.0;
+  vehicle_state.linear_velocity = vehicle_input.has_vehicle_state
+      ? vehicle_input.linear_velocity
+      : 0.0;
+  vehicle_state.linear_acceleration = vehicle_input.has_vehicle_state
+      ? vehicle_input.linear_acceleration
+      : 0.0;
+  vehicle_state.gear = vehicle_input.has_vehicle_state
+      ? vehicle_input.gear
+      : TL::common::GearPosition::GEAR_PARKING;
   vehicle_state.pose.position.x = vehicle_state.x;
   vehicle_state.pose.position.y = vehicle_state.y;
   vehicle_state.pose.position.z = vehicle_state.z;
   vehicle_state.pose.heading = vehicle_state.heading;
+  vehicle_state.pose.linear_velocity.x = vehicle_state.linear_velocity;
+  vehicle_state.pose.linear_acceleration.x = vehicle_state.linear_acceleration;
   return vehicle_state;
 }
 
-TL::common::PathPoint BuildStartPathPoint(const valet_parking_config_t& config) {
+TL::common::PathPoint BuildStartPathPoint(
+    const valet_parking_config_t& config,
+    const RuntimeVehicleInput& vehicle_input) {
   TL::common::PathPoint start_point;
-  start_point.x = config.fake_vehicle_x;
-  start_point.y = config.fake_vehicle_y;
-  start_point.z = 0.0;
-  start_point.theta = config.fake_vehicle_theta;
+  start_point.x = vehicle_input.has_vehicle_state
+      ? vehicle_input.x
+      : config.fake_vehicle_x;
+  start_point.y = vehicle_input.has_vehicle_state
+      ? vehicle_input.y
+      : config.fake_vehicle_y;
+  start_point.z = vehicle_input.has_vehicle_state ? vehicle_input.z : 0.0;
+  start_point.theta = vehicle_input.has_vehicle_state
+      ? NormalizeAngle(vehicle_input.heading)
+      : config.fake_vehicle_theta;
   start_point.kappa = 0.0;
   start_point.s = 0.0;
   start_point.x_derivative = std::cos(start_point.theta);
   start_point.y_derivative = std::sin(start_point.theta);
   return start_point;
+}
+
+std::vector<TL::planning::SimpleStaticObstacle> BuildStaticObstacles(
+    const std::vector<RuntimeObstacleInput>& obstacles) {
+  std::vector<TL::planning::SimpleStaticObstacle> output;
+  output.reserve(obstacles.size());
+  for (const RuntimeObstacleInput& obstacle : obstacles) {
+    if (obstacle.is_dynamic) {
+      continue;
+    }
+    output.emplace_back(obstacle.id, obstacle.type, obstacle.center_x,
+                        obstacle.center_y, obstacle.heading,
+                        obstacle.length, obstacle.width);
+  }
+  return output;
+}
+
+std::vector<TL::planning::SimpleMovingObstacle> BuildMovingObstacles(
+    const std::vector<RuntimeObstacleInput>& obstacles) {
+  std::vector<TL::planning::SimpleMovingObstacle> output;
+  output.reserve(obstacles.size());
+  for (const RuntimeObstacleInput& obstacle : obstacles) {
+    if (!obstacle.is_dynamic) {
+      continue;
+    }
+    output.emplace_back(obstacle.id, obstacle.type, obstacle.center_x,
+                        obstacle.center_y, obstacle.heading,
+                        obstacle.length, obstacle.width,
+                        obstacle.velocity_x, obstacle.velocity_y);
+  }
+  return output;
+}
+
+std::vector<std::pair<TL::common::math::LineSegment2d, double>>
+BuildObstacleSegments(
+    const TL::planning::RoiDeciderOutput& roi_output,
+    const std::vector<RuntimeObstacleInput>& obstacles) {
+  std::vector<std::pair<TL::common::math::LineSegment2d, double>> segments =
+      roi_output.obs_segments;
+  for (const RuntimeObstacleInput& obstacle : obstacles) {
+    TL::common::math::Box2d box(
+        TL::common::math::Vec2d(obstacle.center_x, obstacle.center_y),
+        obstacle.heading, obstacle.length, obstacle.width);
+    std::vector<TL::common::math::Vec2d> corners;
+    box.GetAllCorners(&corners);
+    if (corners.size() != 4U) {
+      continue;
+    }
+    for (std::size_t i = 0U; i < corners.size(); ++i) {
+      const TL::common::math::Vec2d& start = corners[i];
+      const TL::common::math::Vec2d& end = corners[(i + 1U) % corners.size()];
+      segments.emplace_back(TL::common::math::LineSegment2d(start, end), 0.0);
+    }
+  }
+  return segments;
 }
 
 ::GearPosition ConvertGear(TL::soc::GearPosition gear) {
@@ -461,19 +696,21 @@ TL::planning::OpenSpacePathInput BuildPathProviderInput(
     const valet_parking_config_t& config,
     const InputMetadata& metadata,
     uint32_t parking_seq,
-    const TL::planning::RoiDeciderOutput& roi_output) {
+    const TL::planning::RoiDeciderOutput& roi_output,
+    const RuntimeVehicleInput& vehicle_input,
+    const std::vector<RuntimeObstacleInput>& obstacles) {
   TL::planning::OpenSpacePathInput input;
   input.path_id = static_cast<int>(parking_seq);
   input.replan_status = 0U;
   input.rotate_angle = roi_output.origin_heading;
   input.translate_origin = roi_output.origin_point;
-  input.start_point = BuildStartPathPoint(config);
+  input.start_point = BuildStartPathPoint(config, vehicle_input);
   input.end_pose =
       roi_output.has_fine_tuned ? roi_output.fine_tuned_end_pose
                                 : roi_output.end_pose;
   input.xy_bounds = roi_output.xy_bounds;
   input.xy_bounds_is_local = true;
-  input.obstacles_segments_vec = roi_output.obs_segments;
+  input.obstacles_segments_vec = BuildObstacleSegments(roi_output, obstacles);
   input.dest_region_with_angle = roi_output.dest_region;
   input.path_strategy.init_moving_direction = -1;
   input.path_strategy.disable_search = false;
@@ -500,6 +737,8 @@ bool RunPathProvider(const valet_parking_config_t& config,
                      const InputMetadata& metadata,
                      uint32_t parking_seq,
                      const TL::planning::RoiDeciderOutput& roi_output,
+                     const RuntimeVehicleInput& vehicle_input,
+                     const std::vector<RuntimeObstacleInput>& obstacles,
                      TL::planning::OpenSpacePathOutput* path_output,
                      std::string* status_reason) {
   if (path_output == nullptr || status_reason == nullptr) {
@@ -508,7 +747,8 @@ bool RunPathProvider(const valet_parking_config_t& config,
 
   try {
     const TL::planning::OpenSpacePathInput input =
-        BuildPathProviderInput(config, metadata, parking_seq, roi_output);
+        BuildPathProviderInput(config, metadata, parking_seq, roi_output,
+                               vehicle_input, obstacles);
     std::atomic<bool> early_stop_flag(false);
     TL::planning::OpenSpacePathGenerator generator(
         BuildPathProviderConfig(), TL::planning::LoadEP30VehicleParam());
@@ -540,7 +780,10 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << ", partitions=" << path_output->partitioned_path.size()
          << ", points=" << point_count
          << ", path_type=" << path_output->path_type
-         << ", smoothed=false";
+         << ", smoothed=false"
+         << ", external_vehicle="
+         << (vehicle_input.has_vehicle_state ? "true" : "false")
+         << ", external_obstacles=" << obstacles.size();
   *status_reason = stream.str();
   return true;
 }
@@ -610,13 +853,16 @@ TL::planning::PartitionInput BuildPathPartitionInput(
     const InputMetadata& metadata,
     const TL::planning::RoiDeciderOutput& roi_output,
     const TL::planning::OpenSpacePathOutput& path_output,
+    const RuntimeVehicleInput& vehicle_input,
+    const std::vector<RuntimeObstacleInput>& obstacles,
     TL::soc::GearPosition last_published_gear,
     bool replan_triggered_by_speed_plan,
     const TL::planning_internal::AvpSpeedPlanCollisionInfo&
         speed_plan_collision_info) {
   TL::planning::PartitionInput input;
-  input.vehicle_state = BuildVehicleState(config, metadata.data_stamp_ms);
-  input.planning_start_point = BuildStartPathPoint(config);
+  input.vehicle_state =
+      BuildVehicleState(config, metadata.data_stamp_ms, vehicle_input);
+  input.planning_start_point = BuildStartPathPoint(config, vehicle_input);
   input.pub_gear = last_published_gear;
   input.path_result.path_set =
       NormalizePathProviderPathSet(path_output.partitioned_path);
@@ -631,7 +877,7 @@ TL::planning::PartitionInput BuildPathPartitionInput(
       roi_output.has_fine_tuned ? roi_output.fine_tuned_end_pose
                                 : roi_output.end_pose;
   input.dest_region_with_angle = roi_output.dest_region;
-  input.obstacles_segments_vec = roi_output.obs_segments;
+  input.obstacles_segments_vec = BuildObstacleSegments(roi_output, obstacles);
   input.is_vehicle_stand_still = true;
   input.replan_triggered_by_speed_plan = replan_triggered_by_speed_plan;
   input.guard_triggered = false;
@@ -654,6 +900,8 @@ bool RunPathPartition(const valet_parking_config_t& config,
                       const InputMetadata& metadata,
                       const TL::planning::RoiDeciderOutput& roi_output,
                       const TL::planning::OpenSpacePathOutput& path_output,
+                      const RuntimeVehicleInput& vehicle_input,
+                      const std::vector<RuntimeObstacleInput>& obstacles,
                       TL::soc::GearPosition last_published_gear,
                       bool replan_triggered_by_speed_plan,
                       const TL::planning_internal::AvpSpeedPlanCollisionInfo&
@@ -669,6 +917,7 @@ bool RunPathPartition(const valet_parking_config_t& config,
   try {
     const TL::planning::PartitionInput input =
         BuildPathPartitionInput(config, metadata, roi_output, path_output,
+                                vehicle_input, obstacles,
                                 last_published_gear,
                                 replan_triggered_by_speed_plan,
                                 speed_plan_collision_info);
@@ -708,7 +957,10 @@ bool RunPathPartition(const valet_parking_config_t& config,
          << ", chosen_points=" << chosen_points
          << ", gear=" << static_cast<int>(partition_output->chosen_partitioned_path.second)
          << ", gear_changed=" << (partition_output->is_gear_changed ? "true" : "false")
-         << ", stop_path=" << (partition_output->is_stop_path ? "true" : "false");
+         << ", stop_path=" << (partition_output->is_stop_path ? "true" : "false")
+         << ", external_vehicle="
+         << (vehicle_input.has_vehicle_state ? "true" : "false")
+         << ", external_obstacles=" << obstacles.size();
   const std::string debug = CompactDebugText(partition_output->path_decision_debug);
   if (!debug.empty()) {
     stream << ", debug=" << debug;
@@ -722,6 +974,8 @@ TL::planning::SpeedOptimizerInput BuildSpeedOptimizerInput(
     const InputMetadata& metadata,
     const TL::planning::RoiDeciderOutput& roi_output,
     const TL::planning::PartitionOutput& partition_output,
+    const RuntimeVehicleInput& vehicle_input,
+    const std::vector<RuntimeObstacleInput>& obstacles,
     const TL::planning::OpenSpaceSpeedOptimizerConfig& speed_config,
     bool has_last_frame,
     double last_frame_timestamp,
@@ -733,16 +987,23 @@ TL::planning::SpeedOptimizerInput BuildSpeedOptimizerInput(
   input.gear = partition_output.chosen_partitioned_path.second;
   input.is_gear_changed = partition_output.is_gear_changed;
   input.is_stop_path = partition_output.is_stop_path;
-  input.start_point.path_point = BuildStartPathPoint(config);
-  input.start_point.v = 0.0;
-  input.start_point.a = 0.0;
+  input.start_point.path_point = BuildStartPathPoint(config, vehicle_input);
+  input.start_point.v =
+      vehicle_input.has_vehicle_state ? vehicle_input.linear_velocity : 0.0;
+  input.start_point.a = vehicle_input.has_vehicle_state
+      ? vehicle_input.linear_acceleration
+      : 0.0;
   input.start_point.relative_time = 0.0;
-  input.vehicle_state = BuildVehicleState(config, metadata.data_stamp_ms);
-  input.is_vehicle_stand_still = true;
+  input.vehicle_state =
+      BuildVehicleState(config, metadata.data_stamp_ms, vehicle_input);
+  input.is_vehicle_stand_still =
+      std::fabs(input.vehicle_state.linear_velocity) < 1.0e-3;
   input.env_structured_info.is_parking_inwards = roi_output.is_parking_inwards;
   input.env_structured_info.parking_scenario_type = roi_output.scenario_type;
   input.is_forward = input.gear == TL::soc::GearPosition::GEAR_DRIVE;
   input.is_mirror_fold = partition_output.is_mirror_fold;
+  input.static_obstacles = BuildStaticObstacles(obstacles);
+  input.moving_obstacles = BuildMovingObstacles(obstacles);
   input.config = speed_config;
   input.has_last_frame = has_last_frame;
   input.last_frame_timestamp = last_frame_timestamp;
@@ -755,6 +1016,8 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
                        const InputMetadata& metadata,
                        const TL::planning::RoiDeciderOutput& roi_output,
                        const TL::planning::PartitionOutput& partition_output,
+                       const RuntimeVehicleInput& vehicle_input,
+                       const std::vector<RuntimeObstacleInput>& obstacles,
                        const TL::planning::OpenSpaceSpeedOptimizerConfig&
                            speed_config,
                        bool has_last_frame,
@@ -771,7 +1034,8 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
   try {
     const TL::planning::SpeedOptimizerInput input =
         BuildSpeedOptimizerInput(config, metadata, roi_output,
-                                 partition_output, speed_config,
+                                 partition_output, vehicle_input, obstacles,
+                                 speed_config,
                                  has_last_frame, last_frame_timestamp,
                                  last_planning_start_relative_time);
     const bool ok = optimizer->Execute(input, speed_output);
@@ -815,6 +1079,9 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
          << ", gear=" << static_cast<int>(speed_output->trajectory_gear.second)
          << ", stage=" << static_cast<int>(speed_output->interactive_stage)
          << ", last_frame=" << (has_last_frame ? "true" : "false")
+         << ", external_vehicle="
+         << (vehicle_input.has_vehicle_state ? "true" : "false")
+         << ", external_obstacles=" << obstacles.size()
          << ", message=" << CompactDebugText(speed_output->message);
   *status_reason = stream.str();
   return true;
@@ -1266,6 +1533,43 @@ ValetParkingStageParkingAdapter::ValetParkingStageParkingAdapter(
 
 ValetParkingStageParkingAdapter::~ValetParkingStageParkingAdapter() = default;
 
+int ValetParkingStageParkingAdapter::UpdateVehicleState(
+    const valet_parking_vehicle_state_t& vehicle_state) {
+  std::lock_guard<std::mutex> lock(runtime_mutex_);
+  if (runtime_ == nullptr) {
+    runtime_ = std::make_unique<RuntimeContext>();
+  }
+  return runtime_->UpdateVehicleState(vehicle_state);
+}
+
+int ValetParkingStageParkingAdapter::ClearVehicleState() {
+  std::lock_guard<std::mutex> lock(runtime_mutex_);
+  if (runtime_ == nullptr) {
+    runtime_ = std::make_unique<RuntimeContext>();
+  }
+  runtime_->ClearVehicleState();
+  return VALET_PARKING_OK;
+}
+
+int ValetParkingStageParkingAdapter::UpdateObstacles(
+    const valet_parking_obstacle_t* obstacles,
+    uint32_t obstacle_count) {
+  std::lock_guard<std::mutex> lock(runtime_mutex_);
+  if (runtime_ == nullptr) {
+    runtime_ = std::make_unique<RuntimeContext>();
+  }
+  return runtime_->UpdateObstacles(obstacles, obstacle_count);
+}
+
+int ValetParkingStageParkingAdapter::ClearObstacles() {
+  std::lock_guard<std::mutex> lock(runtime_mutex_);
+  if (runtime_ == nullptr) {
+    runtime_ = std::make_unique<RuntimeContext>();
+  }
+  runtime_->ClearObstacles();
+  return VALET_PARKING_OK;
+}
+
 bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
                                                PlanningTrajectory* output_sample,
                                                std::string* status_reason) {
@@ -1273,6 +1577,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     return false;
   }
 
+  std::lock_guard<std::mutex> lock(runtime_mutex_);
   if (runtime_ == nullptr) {
     runtime_ = std::make_unique<RuntimeContext>();
   }
@@ -1321,7 +1626,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   }
 
   const TL::common::VehicleState vehicle_state =
-      BuildVehicleState(config_, metadata.data_stamp_ms);
+      BuildVehicleState(config_, metadata.data_stamp_ms,
+                        runtime_->vehicle_input);
   TL::planning::OpenSpaceRoiDecider roi_decider(
       TL::planning::LoadEP30VehicleParam(),
       TL::planning::RoiDeciderConfig::GetDefault());
@@ -1342,10 +1648,13 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   TL::planning::OpenSpacePathOutput path_output;
   std::string path_provider_reason;
   if (RunPathProvider(config_, metadata, selected_lot->parking_seq(),
-                      roi_output, &path_output, &path_provider_reason)) {
+                      roi_output, runtime_->vehicle_input,
+                      runtime_->obstacles, &path_output,
+                      &path_provider_reason)) {
     TL::planning::PartitionOutput partition_output;
     std::string path_partition_reason;
     if (RunPathPartition(config_, metadata, roi_output, path_output,
+                         runtime_->vehicle_input, runtime_->obstacles,
                          runtime_->last_published_gear,
                          runtime_->replan_triggered_by_speed_plan,
                          runtime_->last_speed_plan_collision_info,
@@ -1354,6 +1663,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       TL::planning::SpeedOptimizerOutput speed_output;
       std::string speed_optimizer_reason;
       if (RunSpeedOptimizer(config_, metadata, roi_output, partition_output,
+                            runtime_->vehicle_input, runtime_->obstacles,
                             runtime_->speed_config,
                             runtime_->has_last_speed_frame,
                             runtime_->last_frame_timestamp,

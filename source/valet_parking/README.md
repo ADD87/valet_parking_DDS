@@ -17,6 +17,7 @@
 - `PATH_PARTITION`：使用 standalone 中已独立化的 `OpenSpacePathPartition::Execute` 做任务级路径仲裁，输出当前应执行的 `chosen_partitioned_path`。
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
+- 外部输入边界：C API 已提供 `vehicle_state` 与 `obstacles` 的 update/clear 入口；未调用时继续使用 fake vehicle 和空障碍物。
 - `PlanningTrajectory`：把 SPEED_OPTIMIZER 输出的轨迹转换成 DDS 输出；若 SPEED_OPTIMIZER 失败，则回退到 PATH_PARTITION 的 nominal speed 轨迹。
 
 暂未接入内容：
@@ -24,8 +25,26 @@
 - 完整 `OpenSpacePathProvider` 大类。
 - NLP smoother。
 - 完整原车 `Frame/DependencyInjector` history。
-- 真实定位/底盘输入 Topic。
-- 真实静态/动态障碍物输入 Topic。
+- 真实定位/底盘 DDS reader。
+- 真实静态/动态障碍物 DDS reader。
+
+## 外部输入 C API
+
+当前 `.so` 已导出以下可选输入接口：
+
+```c
+int valet_parking_update_vehicle_state(
+    valet_parking_handle_t* handle,
+    const valet_parking_vehicle_state_t* vehicle_state);
+int valet_parking_clear_vehicle_state(valet_parking_handle_t* handle);
+int valet_parking_update_obstacles(
+    valet_parking_handle_t* handle,
+    const valet_parking_obstacle_t* obstacles,
+    uint32_t obstacle_count);
+int valet_parking_clear_obstacles(valet_parking_handle_t* handle);
+```
+
+这些接口是给后续真实 DDS reader 或工程集成层调用的。现有 runner 不调用它们，因此默认行为仍然是 fake vehicle + 空障碍物。
 
 ## WSL 快捷编译
 
@@ -66,10 +85,11 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 
 ## 最近验证
 
-RuntimeContext 运行态硬化后，已验证：
+External input boundary 接入后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
-- x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`。
+- x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`，默认输入状态显示 `external_vehicle=false, external_obstacles=0`。
+- x86/m57：`nm -D libvalet_parking.so` 可看到 `valet_parking_update_vehicle_state`、`valet_parking_clear_vehicle_state`、`valet_parking_update_obstacles`、`valet_parking_clear_obstacles`。
 
 m57 目前只完成交叉编译和依赖检查，尚未做真实板端运行验证。

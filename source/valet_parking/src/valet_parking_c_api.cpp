@@ -45,7 +45,7 @@ bool IsValidConfig(const valet_parking_config_t& cfg) {
 extern "C" {
 
 const char* valet_parking_get_api_version(void) {
-  return "0.1.0-mvp";
+  return "0.2.0-mvp";
 }
 
 int valet_parking_create(const valet_parking_config_t* config,
@@ -89,6 +89,39 @@ int valet_parking_stop(valet_parking_handle_t* handle) {
     return VALET_PARKING_ERR_INVALID_ARG;
   }
   return handle->component->Stop();
+}
+
+int valet_parking_update_vehicle_state(
+    valet_parking_handle_t* handle,
+    const valet_parking_vehicle_state_t* vehicle_state) {
+  if (handle == nullptr || !handle->component || vehicle_state == nullptr) {
+    return VALET_PARKING_ERR_INVALID_ARG;
+  }
+  return handle->component->UpdateVehicleState(*vehicle_state);
+}
+
+int valet_parking_clear_vehicle_state(valet_parking_handle_t* handle) {
+  if (handle == nullptr || !handle->component) {
+    return VALET_PARKING_ERR_INVALID_ARG;
+  }
+  return handle->component->ClearVehicleState();
+}
+
+int valet_parking_update_obstacles(
+    valet_parking_handle_t* handle,
+    const valet_parking_obstacle_t* obstacles,
+    uint32_t obstacle_count) {
+  if (handle == nullptr || !handle->component) {
+    return VALET_PARKING_ERR_INVALID_ARG;
+  }
+  return handle->component->UpdateObstacles(obstacles, obstacle_count);
+}
+
+int valet_parking_clear_obstacles(valet_parking_handle_t* handle) {
+  if (handle == nullptr || !handle->component) {
+    return VALET_PARKING_ERR_INVALID_ARG;
+  }
+  return handle->component->ClearObstacles();
 }
 
 const char* valet_parking_get_last_error(valet_parking_handle_t* handle) {
