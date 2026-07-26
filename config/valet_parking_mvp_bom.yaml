@@ -1,0 +1,7 @@
+software_product_bom:
+  name: valet_parking_mvp
+  modules:
+    - valet_parking
+    - valet_parking_runner
+    - selected_slot_mock_publisher
+    - planning_trajectory_mock_subscriber

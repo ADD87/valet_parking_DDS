@@ -1,0 +1,13 @@
+# Local build and editor artifacts
+build/
+out/
+.obj/
+proc_build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.log
+*.tmp
+*.user
+.vscode/
+

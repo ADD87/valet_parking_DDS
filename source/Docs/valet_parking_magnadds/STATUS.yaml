@@ -1,0 +1,118 @@
+project: ValetParkingStageParking_MagnaDDS_MVP
+workspace: E:\APA\DDS\feature_integration\feature_integration_workspace
+created_date: 2026-07-26
+last_updated: 2026-07-26
+
+state_authority:
+  rule: 本文件与 status_snapshots、decision_records 是项目状态的单一事实来源；聊天记录仅作辅助。
+  docs_root: applications/source/Docs/valet_parking_magnadds
+  plan_file: applications/source/Docs/valet_parking_magnadds/00_执行计划书_ValetParkingStageParking_MagnaDDS.md
+  handoff_file: applications/source/Docs/valet_parking_magnadds/01_换机中断交接与防偏离方案.md
+
+local_git:
+  root: applications
+  status: INITIALIZED
+  purpose: 跟踪当前MVP允许范围内的source、config与Docs变更，不纳入compile、thirdparty、out。
+
+current_phase:
+  id: Fast-2
+  name: .so 与真实DDS最小闭环
+  status: IN_PROGRESS
+  description: 已在valet_parking内接入真实MagnaDDS Reader/Writer最小闭环，并完成x86下valid/estop两类场景验证；换机后WSL与SDK idlparser已恢复，但m57静态构建仍受交叉工具链缺失阻塞。
+
+last_completed_snapshot:
+  id: '004'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/004_项目状态快照_换机后环境恢复与本地Git建立.md
+  status: CREATED
+
+last_successful_action:
+  date: 2026-07-26
+  summary: 换机后确认Ubuntu WSL2、gcc/g++/cmake与SDK idlparser可用；Docs已迁移到applications/source/Docs；applications本地Git已初始化。
+  evidence:
+    - applications/.git
+    - applications/.gitignore
+    - applications/source/Docs/valet_parking_magnadds/STATUS.yaml
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/004_项目状态快照_换机后环境恢复与本地Git建立.md
+    - MagnaDDS-SDK-v0.0.4/tool/idlparser HelloWorld.idl generation PASS
+
+blockers:
+  - id: B-001
+    status: OPEN
+    description: 当前无 m57 板端，运行态通信验收暂无法闭环。
+    owner: user/project
+  - id: B-002
+    status: OPEN
+    description: 当前Ubuntu WSL中标准m57工具链目录不存在（/usr/local/ARM-toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu），且未在/usr/local、/opt、/home/zhang、/mnt/c/Users/zhang、/mnt/e/APA/DDS定向搜索到aarch64-none-linux-gnu-gcc。
+    owner: env/workstation
+
+runtime_status:
+  m57_board: NOT_AVAILABLE
+  dds_runtime_test: BLOCKED_NO_M57_BOARD
+  note: 当前无 m57 板端；m57静态编译也需先补齐交叉工具链。
+
+next_action:
+  id: NEXT-005
+  description: 创建applications/source/valet_parking/idl/valet_parking_topics.idl并用SDK idlparser完成本工程Topic类型生成探针；m57 BOM构建等待交叉工具链补齐。
+  allowed_actions:
+    - 修改 applications/source/Docs/valet_parking_magnadds/**。
+    - 修改 applications/source/valet_parking/** 与 applications/source/valet_parking_tools/**。
+    - 修改 applications/config/valet_parking_mvp_bom.yaml。
+    - 维护 applications/.gitignore 与 applications 本地Git状态。
+  forbidden_actions:
+    - 修改 compile/ 或 thirdparty/。
+    - 扩展到完整Stage状态机或全量算法迁移。
+    - 将无板端runtime标记为通过。
+
+allowed_scope:
+  current_mvp_fasttrack:
+    - applications/source/Docs/valet_parking_magnadds/**
+    - applications/source/valet_parking/**
+    - applications/source/valet_parking_tools/**
+    - applications/config/valet_parking_mvp_bom.yaml
+    - applications/.gitignore
+
+forbidden_actions_global:
+  - 不做计划外功能扩展。
+  - 不删除或覆盖现有 math、sort、temp code、历史 out 证据。
+  - 不私自修改 compile/ 或 thirdparty/ 绕过构建问题。
+  - 不混用 ROS2、SOA-DDS、CycloneDDS。
+  - 不把 SDK demo 或 x86 历史产物当作 m57 产品验收。
+  - 不把无板端运行写成已通过。
+  - 不为了编译通过删减 Topic 字段或改变字段语义。
+
+decision_records:
+  - id: DR-000
+    file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-000_初始范围锁定.md
+    status: ACTIVE
+  - id: DR-001
+    file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-001_Proto处理与proto_convert复用策略.md
+    status: ACTIVE
+  - id: DR-002
+    file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-002_MVP优先级重排_先跑通再硬化.md
+    status: ACTIVE
+
+status_snapshots:
+  - id: '000'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/000_项目状态快照_计划文档创建.md
+    phase: Phase 0
+    status: CREATED
+  - id: '000A'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/000A_项目状态快照_Proto处理策略澄清.md
+    phase: Phase 0
+    status: CREATED
+  - id: '001'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/001_项目状态快照_MVP优先级重排并进入快跑.md
+    phase: Fast-1
+    status: CREATED
+  - id: '002'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/002_项目状态快照_Fast2骨架完成与x86构建验证.md
+    phase: Fast-2
+    status: CREATED
+  - id: '003'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/003_项目状态快照_Fast2真实DDS最小闭环与x86运行验证.md
+    phase: Fast-2
+    status: CREATED
+  - id: '004'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/004_项目状态快照_换机后环境恢复与本地Git建立.md
+    phase: Fast-2
+    status: CREATED
