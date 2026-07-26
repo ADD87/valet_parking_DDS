@@ -18,22 +18,24 @@ current_phase:
   id: Fast-2
   name: .so 与真实DDS最小闭环
   status: IN_PROGRESS
-  description: 已在valet_parking内接入真实MagnaDDS Reader/Writer最小闭环，并完成x86下valid/estop两类场景验证；换机后WSL与SDK idlparser已恢复，但m57静态构建仍受交叉工具链缺失阻塞。
+  description: 已在valet_parking内接入真实MagnaDDS Reader/Writer最小闭环，并完成x86下valid/estop两类场景验证；正式IDL草案与生成代码探针已完成，C++接线等待用户确认后继续；m57静态构建仍受交叉工具链缺失阻塞。
 
 last_completed_snapshot:
-  id: '004'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/004_项目状态快照_换机后环境恢复与本地Git建立.md
+  id: '005'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/005_项目状态快照_IDL草案与生成探针完成.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-26
-  summary: 换机后确认Ubuntu WSL2、gcc/g++/cmake与SDK idlparser可用；Docs已迁移到applications/source/Docs；applications本地Git已初始化。
+  summary: 已创建valet_parking_topics.idl，SDK idlparser生成正式Topic类型代码成功，生成代码通过x86 MagnaDDS头文件语法编译检查。
   evidence:
-    - applications/.git
-    - applications/.gitignore
-    - applications/source/Docs/valet_parking_magnadds/STATUS.yaml
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/004_项目状态快照_换机后环境恢复与本地Git建立.md
-    - MagnaDDS-SDK-v0.0.4/tool/idlparser HelloWorld.idl generation PASS
+    - applications/source/valet_parking/idl/valet_parking_topics.idl
+    - applications/source/valet_parking/generated/valet_parking_topics.h
+    - applications/source/valet_parking/generated/valet_parking_topics.cpp
+    - applications/source/valet_parking/generated/valet_parking_topicsTopicDataType.h
+    - applications/source/valet_parking/generated/valet_parking_topicsTopicDataType.cpp
+    - idlparser generation PASS
+    - g++ -fsyntax-only PASS for generated files
 
 blockers:
   - id: B-001
@@ -44,6 +46,10 @@ blockers:
     status: OPEN
     description: 当前Ubuntu WSL中标准m57工具链目录不存在（/usr/local/ARM-toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu），且未在/usr/local、/opt、/home/zhang、/mnt/c/Users/zhang、/mnt/e/APA/DDS定向搜索到aarch64-none-linux-gnu-gcc。
     owner: env/workstation
+  - id: B-003
+    status: OPEN
+    description: thirdparty/m57/magnadds/lib 疑似缺少真实m57 MagnaDDS实库，仅发现0字节libmagna-dds-core.so与libmagna-dds-core.so.1，未见libmagna-dds-core.so.1.0.0和libmagna-dds-impl.so。
+    owner: env/workstation
 
 runtime_status:
   m57_board: NOT_AVAILABLE
@@ -51,8 +57,8 @@ runtime_status:
   note: 当前无 m57 板端；m57静态编译也需先补齐交叉工具链。
 
 next_action:
-  id: NEXT-005
-  description: 创建applications/source/valet_parking/idl/valet_parking_topics.idl并用SDK idlparser完成本工程Topic类型生成探针；m57 BOM构建等待交叉工具链补齐。
+  id: NEXT-006
+  description: 等待用户确认；确认后将generated SelectedSlot/PlanningTrajectory接入CMake和C++ Reader/Writer，替换当前raw payload的x86通信路径。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**。
     - 修改 applications/source/valet_parking/** 与 applications/source/valet_parking_tools/**。
@@ -114,5 +120,9 @@ status_snapshots:
     status: CREATED
   - id: '004'
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/004_项目状态快照_换机后环境恢复与本地Git建立.md
+    phase: Fast-2
+    status: CREATED
+  - id: '005'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/005_项目状态快照_IDL草案与生成探针完成.md
     phase: Fast-2
     status: CREATED
