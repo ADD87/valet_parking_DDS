@@ -4,6 +4,7 @@
 - 工作区：`E:\APA\DDS\feature_integration\feature_integration_workspace`
 - 原始代码参考：`E:\APA\DDS\TempAPA_Code`
 - standalone 参考：`E:\APA\DDS\parking_algorithm_standalone`
+- 中间件剥离/修订参考：`E:\APA\DDS\Repair_ValetParkingStageParking_260430-main\planning`
 - MagnaDDS SDK 参考：`E:\APA\DDS\MagnaDDS-SDK-v0.0.4`
 - 当前日期：2026-07-26
 - 当前状态：执行阶段（MVP 快跑优先）
@@ -126,6 +127,25 @@ flowchart LR
 
 每一层必须单独验收，不能因为下一层要做而破坏已稳定的 MagnaDDS 契约。
 
+### 2.3 新增参考源口径：Repair_ValetParkingStageParking_260430-main
+
+`E:\APA\DDS\Repair_ValetParkingStageParking_260430-main\planning` 作为 NEXT-018 及后续算法接入的正式参考源之一。
+
+它的用途：
+
+- 对照原始 `ValetParkingStageParking::Process()`、`Stage::ExecuteTaskOnOpenSpace()` 和 task 执行顺序。
+- 对照完整 `OpenSpacePathProvider` 大类的状态机、history path、replan、PreCheck、path strategy 等逻辑。
+- 对照已经做过独立编译改造的 ROI、PATH_PARTITION、SPEED_OPTIMIZER、OpenSpacePathGenerator 等文件。
+- 辅助判断哪些依赖应该继续用轻量 adapter 承接，哪些依赖暂缓，哪些依赖不应带入当前 DDS MVP。
+
+使用边界：
+
+- 该目录是参考与对照源，不是当前 DDS 适配工程的主代码根。
+- 当前主工程仍以 `applications/source` 为准。
+- 不直接整目录复制，不覆盖当前已验证的 DDS Topic、C API、runner/component/adapter 分层。
+- 不因为该目录包含 `middleware/`、`Frame`、`DependencyInjector` 就提前扩大到完整量产框架。
+- 任何迁移都必须继续保持 `SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory` 的可验证闭环。
+
 ---
 
 ## 3. 目录规划
@@ -199,6 +219,7 @@ feature_integration_workspace/
 | 用户需求和领导任务 | 当前需求描述 |
 | 原始代码路径 | `TempAPA_Code` |
 | standalone 路径 | `parking_algorithm_standalone` |
+| 中间件剥离/修订参考 | `Repair_ValetParkingStageParking_260430-main\planning` |
 | 当前集成工程路径 | `feature_integration_workspace` |
 | MagnaDDS SDK 路径 | `MagnaDDS-SDK-v0.0.4` |
 | 已讨论的技术决策 | 当前会话总结与本地文档 |

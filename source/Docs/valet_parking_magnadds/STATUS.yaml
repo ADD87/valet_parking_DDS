@@ -9,6 +9,12 @@ state_authority:
   plan_file: applications/source/Docs/valet_parking_magnadds/00_执行计划书_ValetParkingStageParking_MagnaDDS.md
   handoff_file: applications/source/Docs/valet_parking_magnadds/01_换机中断交接与防偏离方案.md
 
+reference_sources:
+  original_code: E:\APA\DDS\TempAPA_Code
+  standalone_code: E:\APA\DDS\parking_algorithm_standalone
+  stripped_middleware_reference: E:\APA\DDS\Repair_ValetParkingStageParking_260430-main\planning
+  stripped_middleware_reference_usage: 作为 NEXT-018 接入完整 OpenSpacePathProvider 大类的参考与对照源；重点参考 stage_valet_parking_parking、Stage::ExecuteTaskOnOpenSpace、Frame/OpenSpaceInfo/PlanningContext 契约、open_space_path_provider 及已独立编译改造的 task 文件。该目录不是当前 DDS 适配工程主代码根，不能整目录复制或覆盖 applications/source 已验证链路。
+
 local_git:
   root: applications
   remote: git@github.com:ADD87/valet_parking_DDS.git
@@ -93,7 +99,7 @@ runtime_status:
 
 next_action:
   id: NEXT-018
-  description: 评估并分阶段接入完整 OpenSpacePathProvider 大类，同时保持现有 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory 对外结构不偏移。下一步先梳理 standalone OpenSpacePathProvider 的依赖、可复用状态、输入输出边界和与当前 OpenSpacePathGenerator/PathPartition/SPEED_OPTIMIZER 的重叠关系；不直接搬完整 Stage/Frame/DependencyInjector，也不把临时 IDL 写成最终车端协议。
+  description: 评估并分阶段接入完整 OpenSpacePathProvider 大类，同时保持现有 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory 对外结构不偏移。下一步先对照 standalone 与 E:\APA\DDS\Repair_ValetParkingStageParking_260430-main\planning 中的 open_space_path_provider、stage_valet_parking_parking、Stage::ExecuteTaskOnOpenSpace、Frame/OpenSpaceInfo/PlanningContext 契约，梳理依赖、可复用状态、输入输出边界和与当前 OpenSpacePathGenerator/PathPartition/SPEED_OPTIMIZER 的重叠关系；不直接搬完整 Stage/Frame/DependencyInjector，也不把临时 IDL 写成最终车端协议。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
