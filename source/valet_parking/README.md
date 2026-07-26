@@ -118,14 +118,33 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 
 该脚本会自动启动 `valet_parking_runner`、`planning_trajectory_mock_subscriber` 和 `selected_slot_mock_publisher`，并在结束时清理后台进程。
 
+如需验证辅助 DDS 输入真正进入 reader，可以加 `--with-aux-inputs`：
+
+```bash
+cd /mnt/e/APA/DDS/feature_integration/feature_integration_workspace
+bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
+  --run-root /mnt/e/APA/DDS/feature_integration/feature_integration_workspace/out/valet_parking_quick_build/valet_parking_mvp/x86 \
+  --with-aux-inputs
+```
+
+该模式会先运行 `aux_input_mock_publisher`，发布 `LocalizationEstimate`、`ChassisState` 和 `ObstacleArray`，再发布 `SelectedSlot`。脚本会校验 runner 日志中出现：
+
+- `aux localization`
+- `aux chassis`
+- `aux obstacles`
+- `external_vehicle=true`
+- `external_obstacles>0`
+
 ## 最近验证
 
-DDS 多输入接入后，已验证：
+DDS 多输入实收样本验证后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
 - x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`，默认无辅助发布者时输入状态显示 `external_vehicle=false, external_obstacles=0`。
+- x86 DDS 辅助输入冒烟：`aux_input_mock_publisher` 发布三类辅助样本后，runner 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态显示 `external_vehicle=true, external_obstacles=1`。
 - runner 启动日志已显示默认订阅 `/localization/estimate`、`/chassis/state`、`/perception/obstacles`。
 - x86/m57：`nm -D libvalet_parking.so` 可看到 `valet_parking_update_vehicle_state`、`valet_parking_clear_vehicle_state`、`valet_parking_update_obstacles`、`valet_parking_clear_obstacles`。
+- x86/m57：`aux_input_mock_publisher` 已纳入 `valet_parking_mvp_bom.yaml`，可随快捷脚本一起构建。
 
 m57 目前只完成交叉编译和依赖检查，尚未做真实板端运行验证。

@@ -29,6 +29,13 @@ DDS 负责让发包裹的人和收包裹的人自动找到对方。
 一句话记住：  
 **Domain 要一样，Topic 要一样，Type 要兼容，QoS 要能匹配，数据才能通。**
 
+当前项目状态补充：
+
+- 主输入仍是 `/selected_slot`。
+- 主输出仍是 `/planning/trajectory`。
+- 辅助输入已经增加三个临时 Topic：`/localization/estimate`、`/chassis/state`、`/perception/obstacles`。
+- 这些辅助 Topic 目前是 MVP 临时协议，还不是最终车端协议。
+
 ---
 
 ## 2. 我们这次做出来的系统像什么
@@ -74,18 +81,25 @@ DDS 负责让发包裹的人和收包裹的人自动找到对方。
 +--------------------------------------+
 ```
 
-这次不是完整泊车算法。  
-这次只接了 `ValetParkingStageParking` 的第一段：**ROI_DECIDER**。
+这还不是完整量产版泊车算法。
+但当前已经不只是第一段 ROI_DECIDER，而是接到了：
+
+```text
+ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER
+```
 
 你可以把它理解为：
 
 1. 上游说：“我看到了一个车位。”
-2. DDS 把这个车位送进我们的泊车组件。
-3. 组件把车位交给 Adapter。
-4. Adapter 把 DDS 车位翻译成 standalone 算法能看懂的车位。
-5. ROI_DECIDER 计算“泊车区域”和“目标姿态”。
-6. 我们先用这个目标姿态生成一条简单 seed 轨迹。
-7. 再通过 DDS 发出去。
+2. 辅助上游可以说：“这是车辆位置、底盘状态、障碍物。”
+3. DDS 把这些消息送进我们的泊车组件。
+4. 组件把数据交给 Adapter。
+5. Adapter 把 DDS 数据翻译成 standalone 算法能看懂的结构。
+6. ROI_DECIDER 圈出泊车区域和目标姿态。
+7. PATH_PROVIDER 找粗路径。
+8. PATH_PARTITION 选择当前应该执行的路径段。
+9. SPEED_OPTIMIZER 给路径配速度和时间。
+10. 最后通过 DDS 发出 `PlanningTrajectory`。
 
 ---
 
@@ -385,6 +399,7 @@ planning/common/path
 
 ```text
 applications/source/valet_parking_tools/selected_slot_mock_publisher/main.cpp
+applications/source/valet_parking_tools/aux_input_mock_publisher/main.cpp
 applications/source/valet_parking_tools/planning_trajectory_mock_subscriber/main.cpp
 ```
 
@@ -396,13 +411,19 @@ applications/source/valet_parking_tools/planning_trajectory_mock_subscriber/main
 我假装发一个选中的车位 SelectedSlot
 ```
 
+`aux_input_mock_publisher` 像另一个“假上游”：
+
+```text
+我假装发车辆定位、底盘状态、障碍物
+```
+
 `planning_trajectory_mock_subscriber` 像一个“假下游”：
 
 ```text
 我等着收 PlanningTrajectory，并检查字段是不是基本正常
 ```
 
-没有这两个工具，就很难证明 DDS 通路真的跑通。
+没有这些工具，就很难证明 DDS 通路真的跑通。
 
 ---
 
@@ -425,15 +446,35 @@ applications/source/valet_parking_tools/planning_trajectory_mock_subscriber/main
 验证结果是：
 
 ```text
-received sample points=21, length=7.5228, is_estop=false
+received sample points=179, length=7.64356, is_estop=false
 ROI_DECIDER ok, scenario=1, lot_status=0, target=(7.314,1.760,0.200)
 ```
 
 这说明：
 
 - DDS 输入通了；
-- ROI_DECIDER 被调用了；
+- ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 都被调用了；
 - DDS 输出也通了。
+
+当运行带辅助输入的测试时：
+
+```bash
+bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
+  --run-root <x86运行目录> \
+  --with-aux-inputs
+```
+
+runner 日志里应该能看到：
+
+```text
+aux localization
+aux chassis
+aux obstacles
+external_vehicle=true
+external_obstacles=1
+```
+
+这说明辅助 Topic 不只是创建出来了，而是真的被 component 读到了。
 
 ---
 
@@ -509,19 +550,22 @@ estop.reason = 失败原因
 
 ## 10. 下一阶段你应该怎么理解
 
-现在我们只接了：
-
-```text
-ROI_DECIDER
-```
-
-后面如果继续算法链路，大概会变成：
+现在我们已经接了：
 
 ```text
 ROI_DECIDER
   -> PATH_PROVIDER
   -> PATH_PARTITION
   -> SPEED_OPTIMIZER
+```
+
+后面继续推进时，重点会从“能跑通”转向“更像真实车端”：
+
+```text
+临时辅助 Topic
+  -> 异常输入验证
+  -> 真实车端 Topic 契约对齐
+  -> 板端运行验证
 ```
 
 你可以把它理解成：
