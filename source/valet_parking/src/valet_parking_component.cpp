@@ -609,6 +609,7 @@ PlanningTrajectory BuildPlanningTrajectory(const valet_parking_config_t& config,
 
 ValetParkingComponent::ValetParkingComponent(const valet_parking_config_t& config)
     : config_(config),
+      stage_parking_adapter_(config_),
       input_topic_name_(config.input_topic_name != nullptr ? config.input_topic_name
                                                             : kSelectedSlotTopicDefault),
       output_topic_name_(config.output_topic_name != nullptr ? config.output_topic_name
@@ -785,10 +786,7 @@ bool ValetParkingComponent::BuildTrajectoryFromInput(const SelectedSlot& input_s
     return false;
   }
 
-  const SelectedSlotInput input = DecodeSelectedSlotInput(input_sample);
-  *status_reason = input.status_reason;
-  *output_sample = BuildPlanningTrajectory(config_, input);
-  return true;
+  return stage_parking_adapter_.Process(input_sample, output_sample, status_reason);
 }
 
 bool ValetParkingComponent::HandleOneSample() {

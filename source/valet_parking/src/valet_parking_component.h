@@ -1,6 +1,7 @@
 #pragma once
 
 #include "valet_parking_c_api.h"
+#include "valet_parking_stage_parking_adapter.h"
 #include "magnadds/MagnaDDS.h"
 
 #include <atomic>
@@ -44,6 +45,7 @@ class ValetParkingComponent final {
 
  private:
   valet_parking_config_t config_{};
+  ValetParkingStageParkingAdapter stage_parking_adapter_;
     std::string input_topic_name_;
     std::string output_topic_name_;
   std::atomic<bool> running_{false};
