@@ -96,6 +96,9 @@ decision_records:
   - id: DR-002
     file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-002_MVP优先级重排_先跑通再硬化.md
     status: ACTIVE
+  - id: DR-003
+    file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-003_IDL线协议与生成代码管理策略.md
+    status: ACTIVE
 
 status_snapshots:
   - id: '000'
