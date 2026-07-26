@@ -117,6 +117,22 @@ enum class GearPosition : uint32_t
 };
 
 /**
+* @enum class ObstacleType
+* @brief A enum class as the datatype for data exchange.
+* @note
+*/
+
+enum class ObstacleType : uint32_t
+{
+	OBSTACLE_TYPE_UNKNOWN,
+	OBSTACLE_TYPE_UNKNOWN_MOVABLE,
+	OBSTACLE_TYPE_UNKNOWN_UNMOVABLE,
+	OBSTACLE_TYPE_PEDESTRIAN,
+	OBSTACLE_TYPE_BICYCLE,
+	OBSTACLE_TYPE_VEHICLE
+};
+
+/**
 * @enum class PlanningTrajectoryType
 * @brief A enum class as the datatype for data exchange.
 * @note
@@ -397,6 +413,314 @@ private:
 	double m_yaw;
 	double m_accumulate_s;
 	uint32_t m_gear;
+
+};
+
+
+/**
+* @class LocalizationEstimate
+* @brief A class as the datatype for data exchange.
+* @note
+*/
+
+class LocalizationEstimate
+{
+public:
+	static constexpr bool IS_KEY_DEFINED = false;
+	static constexpr uint32_t DATA_SIZE = sizeof(Header) + sizeof(bool) + sizeof(double) + sizeof(double) + sizeof(double) + sizeof(double);
+	static constexpr bool IS_DATA_PADDING = true || (Header::DATA_SIZE != sizeof(Header)) || (Header::IS_DATA_PADDING);
+	static constexpr bool IS_ID_DEFINED = false;
+
+	LocalizationEstimate();
+	~LocalizationEstimate() = default;
+	LocalizationEstimate(LocalizationEstimate const &x) = default;
+	LocalizationEstimate(LocalizationEstimate &&x) = default;
+	LocalizationEstimate& operator=(LocalizationEstimate const &x) = default;
+	LocalizationEstimate& operator=(LocalizationEstimate &&x) = default;
+
+	magna::dds::DdsCdr& serialize(magna::dds::DdsCdr &cdr) const;
+	static uint32_t serialize(void *const data, char *const payload_buf, uint32_t const payload_len);
+
+	magna::dds::DdsCdr& deserialize(magna::dds::DdsCdr &cdr);
+	static bool deserialize(char *const payload_buf, uint32_t const payload_len, void *const data);
+
+	static bool is_key_defined();
+	void serialize_key(magna::dds::DdsCdr &cdr) const;
+	void serialize_key(char **buf,unsigned int *len);
+	bool is_key_serialize_by_cdr();
+	static bool is_plain_types();
+	uint32_t max_align_size(uint32_t const _cur_al) const;
+	void set_key_val(LocalizationEstimate const* const _data) noexcept;
+
+
+
+	void header(Header const &_header);
+	void header(Header &&_header);
+	Header const& header() const;
+	Header& header();
+
+	void is_valid(bool const _is_valid);
+	bool is_valid() const;
+	bool& is_valid();
+
+	void x(double const _x);
+	double x() const;
+	double& x();
+
+	void y(double const _y);
+	double y() const;
+	double& y();
+
+	void z(double const _z);
+	double z() const;
+	double& z();
+
+	void heading(double const _heading);
+	double heading() const;
+	double& heading();
+
+
+
+
+
+private:
+	Header m_header;
+	bool m_is_valid;
+	double m_x;
+	double m_y;
+	double m_z;
+	double m_heading;
+
+};
+
+
+/**
+* @class ChassisState
+* @brief A class as the datatype for data exchange.
+* @note
+*/
+
+class ChassisState
+{
+public:
+	static constexpr bool IS_KEY_DEFINED = false;
+	static constexpr uint32_t DATA_SIZE = sizeof(Header) + sizeof(bool) + sizeof(double) + sizeof(double) + sizeof(GearPosition);
+	static constexpr bool IS_DATA_PADDING = true || (Header::DATA_SIZE != sizeof(Header)) || (Header::IS_DATA_PADDING);
+	static constexpr bool IS_ID_DEFINED = false;
+
+	ChassisState();
+	~ChassisState() = default;
+	ChassisState(ChassisState const &x) = default;
+	ChassisState(ChassisState &&x) = default;
+	ChassisState& operator=(ChassisState const &x) = default;
+	ChassisState& operator=(ChassisState &&x) = default;
+
+	magna::dds::DdsCdr& serialize(magna::dds::DdsCdr &cdr) const;
+	static uint32_t serialize(void *const data, char *const payload_buf, uint32_t const payload_len);
+
+	magna::dds::DdsCdr& deserialize(magna::dds::DdsCdr &cdr);
+	static bool deserialize(char *const payload_buf, uint32_t const payload_len, void *const data);
+
+	static bool is_key_defined();
+	void serialize_key(magna::dds::DdsCdr &cdr) const;
+	void serialize_key(char **buf,unsigned int *len);
+	bool is_key_serialize_by_cdr();
+	static bool is_plain_types();
+	uint32_t max_align_size(uint32_t const _cur_al) const;
+	void set_key_val(ChassisState const* const _data) noexcept;
+
+
+
+	void header(Header const &_header);
+	void header(Header &&_header);
+	Header const& header() const;
+	Header& header();
+
+	void is_valid(bool const _is_valid);
+	bool is_valid() const;
+	bool& is_valid();
+
+	void speed_mps(double const _speed_mps);
+	double speed_mps() const;
+	double& speed_mps();
+
+	void acceleration_mps2(double const _acceleration_mps2);
+	double acceleration_mps2() const;
+	double& acceleration_mps2();
+
+	void gear(GearPosition const _gear);
+	GearPosition gear() const;
+	GearPosition& gear();
+
+
+
+
+
+private:
+	Header m_header;
+	bool m_is_valid;
+	double m_speed_mps;
+	double m_acceleration_mps2;
+	GearPosition m_gear;
+
+};
+
+
+/**
+* @class Obstacle
+* @brief A class as the datatype for data exchange.
+* @note
+*/
+
+class Obstacle
+{
+public:
+	static constexpr bool IS_KEY_DEFINED = false;
+	static constexpr uint32_t DATA_SIZE = sizeof(uint32_t) + sizeof(ObstacleType) + sizeof(bool) + sizeof(double) + sizeof(double) + sizeof(double) + sizeof(double) + sizeof(double) + sizeof(double) + sizeof(double);
+	static constexpr bool IS_DATA_PADDING = true;
+	static constexpr bool IS_ID_DEFINED = false;
+
+	Obstacle();
+	~Obstacle() = default;
+	Obstacle(Obstacle const &x) = default;
+	Obstacle(Obstacle &&x) = default;
+	Obstacle& operator=(Obstacle const &x) = default;
+	Obstacle& operator=(Obstacle &&x) = default;
+
+	magna::dds::DdsCdr& serialize(magna::dds::DdsCdr &cdr) const;
+	static uint32_t serialize(void *const data, char *const payload_buf, uint32_t const payload_len);
+
+	magna::dds::DdsCdr& deserialize(magna::dds::DdsCdr &cdr);
+	static bool deserialize(char *const payload_buf, uint32_t const payload_len, void *const data);
+
+	static bool is_key_defined();
+	void serialize_key(magna::dds::DdsCdr &cdr) const;
+	void serialize_key(char **buf,unsigned int *len);
+	bool is_key_serialize_by_cdr();
+	static bool is_plain_types();
+	uint32_t max_align_size(uint32_t const _cur_al) const;
+	void set_key_val(Obstacle const* const _data) noexcept;
+
+
+
+	void id(uint32_t const _id);
+	uint32_t id() const;
+	uint32_t& id();
+
+	void type(ObstacleType const _type);
+	ObstacleType type() const;
+	ObstacleType& type();
+
+	void is_dynamic(bool const _is_dynamic);
+	bool is_dynamic() const;
+	bool& is_dynamic();
+
+	void center_x(double const _center_x);
+	double center_x() const;
+	double& center_x();
+
+	void center_y(double const _center_y);
+	double center_y() const;
+	double& center_y();
+
+	void heading(double const _heading);
+	double heading() const;
+	double& heading();
+
+	void length(double const _length);
+	double length() const;
+	double& length();
+
+	void width(double const _width);
+	double width() const;
+	double& width();
+
+	void velocity_x(double const _velocity_x);
+	double velocity_x() const;
+	double& velocity_x();
+
+	void velocity_y(double const _velocity_y);
+	double velocity_y() const;
+	double& velocity_y();
+
+
+
+
+
+private:
+	uint32_t m_id;
+	ObstacleType m_type;
+	bool m_is_dynamic;
+	double m_center_x;
+	double m_center_y;
+	double m_heading;
+	double m_length;
+	double m_width;
+	double m_velocity_x;
+	double m_velocity_y;
+
+};
+
+
+/**
+* @class ObstacleArray
+* @brief A class as the datatype for data exchange.
+* @note
+*/
+
+class ObstacleArray
+{
+public:
+	static constexpr bool IS_KEY_DEFINED = false;
+	static constexpr uint32_t DATA_SIZE = 0U;
+	static constexpr bool IS_DATA_PADDING = true;
+	static constexpr bool IS_ID_DEFINED = false;
+
+	ObstacleArray();
+	~ObstacleArray() = default;
+	ObstacleArray(ObstacleArray const &x) = default;
+	ObstacleArray(ObstacleArray &&x) = default;
+	ObstacleArray& operator=(ObstacleArray const &x) = default;
+	ObstacleArray& operator=(ObstacleArray &&x) = default;
+
+	magna::dds::DdsCdr& serialize(magna::dds::DdsCdr &cdr) const;
+	static uint32_t serialize(void *const data, char *const payload_buf, uint32_t const payload_len);
+
+	magna::dds::DdsCdr& deserialize(magna::dds::DdsCdr &cdr);
+	static bool deserialize(char *const payload_buf, uint32_t const payload_len, void *const data);
+
+	static bool is_key_defined();
+	void serialize_key(magna::dds::DdsCdr &cdr) const;
+	void serialize_key(char **buf,unsigned int *len);
+	bool is_key_serialize_by_cdr();
+	static bool is_plain_types();
+	uint32_t max_align_size(uint32_t const _cur_al) const;
+	void set_key_val(ObstacleArray const* const _data) noexcept;
+
+
+
+	void header(Header const &_header);
+	void header(Header &&_header);
+	Header const& header() const;
+	Header& header();
+
+	void is_valid(bool const _is_valid);
+	bool is_valid() const;
+	bool& is_valid();
+
+	void obstacles(std::vector<Obstacle> const &_obstacles);
+	void obstacles(std::vector<Obstacle> &&_obstacles);
+	std::vector<Obstacle> const& obstacles() const;
+	std::vector<Obstacle>& obstacles();
+
+
+
+
+
+private:
+	Header m_header;
+	bool m_is_valid;
+	std::vector<Obstacle> m_obstacles;
 
 };
 

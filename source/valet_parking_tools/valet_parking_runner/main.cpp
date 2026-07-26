@@ -46,6 +46,10 @@ void PrintUsage() {
             << "  --domain-id=<uint32>          DDS domain id (default 0)\n"
             << "  --in-topic=<name>             input topic name (default /selected_slot)\n"
             << "  --out-topic=<name>            output topic name (default /planning/trajectory)\n"
+            << "  --localization-topic=<name>   localization input topic (default /localization/estimate)\n"
+            << "  --chassis-topic=<name>        chassis input topic (default /chassis/state)\n"
+            << "  --obstacle-topic=<name>       obstacle input topic (default /perception/obstacles)\n"
+            << "  --disable-aux-input-topics    do not subscribe localization/chassis/obstacle topics\n"
             << "  --help                        show this message\n";
 }
 
@@ -54,6 +58,10 @@ void PrintUsage() {
 int main(int argc, char* argv[]) {
   std::string in_topic = "/selected_slot";
   std::string out_topic = "/planning/trajectory";
+  std::string localization_topic = "/localization/estimate";
+  std::string chassis_topic = "/chassis/state";
+  std::string obstacle_topic = "/perception/obstacles";
+  bool enable_aux_input_topics = true;
   uint32_t domain_id = 0U;
 
   for (int i = 1; i < argc; ++i) {
@@ -66,6 +74,9 @@ int main(int argc, char* argv[]) {
     const std::string domain_prefix = "--domain-id=";
     const std::string in_prefix = "--in-topic=";
     const std::string out_prefix = "--out-topic=";
+    const std::string localization_prefix = "--localization-topic=";
+    const std::string chassis_prefix = "--chassis-topic=";
+    const std::string obstacle_prefix = "--obstacle-topic=";
 
     if (arg.rfind(domain_prefix, 0) == 0) {
       const std::string value = arg.substr(domain_prefix.size());
@@ -86,6 +97,26 @@ int main(int argc, char* argv[]) {
       continue;
     }
 
+    if (arg.rfind(localization_prefix, 0) == 0) {
+      localization_topic = arg.substr(localization_prefix.size());
+      continue;
+    }
+
+    if (arg.rfind(chassis_prefix, 0) == 0) {
+      chassis_topic = arg.substr(chassis_prefix.size());
+      continue;
+    }
+
+    if (arg.rfind(obstacle_prefix, 0) == 0) {
+      obstacle_topic = arg.substr(obstacle_prefix.size());
+      continue;
+    }
+
+    if (arg == "--disable-aux-input-topics") {
+      enable_aux_input_topics = false;
+      continue;
+    }
+
     std::cerr << "[valet_parking_runner] unknown argument: " << arg << std::endl;
     PrintUsage();
     return 2;
@@ -95,6 +126,10 @@ int main(int argc, char* argv[]) {
   config.domain_id = domain_id;
   config.input_topic_name = in_topic.c_str();
   config.output_topic_name = out_topic.c_str();
+  config.localization_topic_name = localization_topic.c_str();
+  config.chassis_topic_name = chassis_topic.c_str();
+  config.obstacle_topic_name = obstacle_topic.c_str();
+  config.enable_aux_input_topics = enable_aux_input_topics ? 1U : 0U;
   config.qos_depth = 10U;
   config.max_parking_lots = 20U;
   config.max_parking_lot_points = 8U;

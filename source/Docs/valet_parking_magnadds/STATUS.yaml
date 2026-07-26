@@ -1,7 +1,7 @@
 project: ValetParkingStageParking_MagnaDDS_MVP
 workspace: E:\APA\DDS\feature_integration\feature_integration_workspace
 created_date: 2026-07-26
-last_updated: 2026-07-26
+last_updated: 2026-07-27
 
 state_authority:
   rule: 本文件与 status_snapshots、decision_records 是项目状态的事实来源；聊天记录仅作辅助。
@@ -18,32 +18,33 @@ local_git:
 
 current_phase:
   id: Fast-2
-  name: .so + typed DDS + ROI_DECIDER/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER 外部输入边界
-  status: PASS_EXTERNAL_INPUT_BOUNDARY_X86_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；PATH_PARTITION 当前使用 standalone 中已独立化的 OpenSpacePathPartition::Execute 做任务级路径仲裁并输出 chosen_partitioned_path；SPEED_OPTIMIZER 当前使用 standalone 中已独立化的 OpenSpaceSpeedOptimizer::Execute 生成速度和时间采样。adapter 已新增最小 runtime context，复用 PATH_PARTITION/SPEED_OPTIMIZER 对象，并新增可选 C API 外部输入边界：vehicle_state 和 obstacles 可进入 runtime context，进而替换 fake vehicle 并注入路径/速度层。当前仍未接真实 DDS 多 Topic reader，未接完整 OpenSpacePathProvider 大类、NLP smoother 和真实车端 Topic 契约。x86 已完成 DDS 本机冒烟，m57 已完成 AArch64 静态构建，板端 runtime 尚未验证。
+  name: .so + typed DDS + ROI_DECIDER/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER DDS多输入接入
+  status: PASS_DDS_MULTI_INPUT_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；PATH_PARTITION 当前使用 standalone 中已独立化的 OpenSpacePathPartition::Execute 做任务级路径仲裁并输出 chosen_partitioned_path；SPEED_OPTIMIZER 当前使用 standalone 中已独立化的 OpenSpaceSpeedOptimizer::Execute 生成速度和时间采样。adapter 已新增最小 runtime context，复用 PATH_PARTITION/SPEED_OPTIMIZER 对象，并新增可选 C API 外部输入边界。当前已在临时 IDL 契约中新增 LocalizationEstimate、ChassisState、ObstacleArray，并由 ValetParkingComponent 默认订阅 /localization/estimate、/chassis/state、/perception/obstacles，将样本转入 014 的外部输入边界；无辅助发布者时仍回退 fake vehicle 和空障碍物。车辆外部状态以 localization 作为生效门槛，chassis 只补充速度、加速度、档位，避免底盘先到时用默认原点覆盖车辆位姿。当前仍未对齐真实车端 Topic 契约，未接完整 OpenSpacePathProvider 大类、NLP smoother 和真实车端板端闭环。x86 已完成 DDS 本机冒烟，m57 已完成 AArch64 静态构建，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '014'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/014_项目状态快照_EXTERNAL_INPUT_BOUNDARY外部输入边界.md
+  id: '015'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/015_项目状态快照_DDS_MULTI_INPUT辅助输入Topic接入.md
   status: CREATED
 
 last_successful_action:
-  date: 2026-07-26
-  summary: 已新增外部车辆状态和障碍物 C API 输入边界；无外部输入时仍回退 fake vehicle，x86 DDS 冒烟收到 179 个轨迹点，日志显示 external_vehicle=false/external_obstacles=0；x86/m57 均可生成链接 MagnaDDS 的 libvalet_parking.so，并导出 update/clear vehicle_state/obstacles 符号。
+  date: 2026-07-27
+  summary: 已完成 DDS 多输入阶段的临时 typed Topic reader 接入：IDL 新增 LocalizationEstimate、ChassisState、ObstacleArray；ValetParkingComponent 默认订阅 localization/chassis/obstacle 三个辅助输入 Topic，并将有效样本转入 014 的外部输入边界。x86 DDS 冒烟在无辅助发布者时仍收到 179 个轨迹点，日志显示 external_vehicle=false/external_obstacles=0，启动日志包含三个辅助 Topic 名称；x86/m57 均可生成链接 MagnaDDS 的 libvalet_parking.so，并导出 update/clear vehicle_state/obstacles 符号。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
   evidence:
+    - applications/source/valet_parking/idl/valet_parking_topics.idl
+    - applications/source/valet_parking/generated/valet_parking_topics.h
+    - applications/source/valet_parking/generated/valet_parking_topics.cpp
+    - applications/source/valet_parking/generated/valet_parking_topicsTopicDataType.h
+    - applications/source/valet_parking/generated/valet_parking_topicsTopicDataType.cpp
     - applications/source/valet_parking/include/valet_parking_c_api.h
     - applications/source/valet_parking/src/valet_parking_c_api.cpp
-    - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.cpp
-    - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.h
     - applications/source/valet_parking/src/valet_parking_component.cpp
     - applications/source/valet_parking/src/valet_parking_component.h
-    - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
-    - out/valet_parking_external_inputs_014/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_external_inputs_014/valet_parking_mvp/m57/lib/libvalet_parking.so
-    - out/valet_parking_external_inputs_014/valet_parking_mvp/x86/build/build.log
-    - out/valet_parking_external_inputs_014/valet_parking_mvp/m57/build/build.log
-    - out/valet_parking_external_inputs_014/valet_parking_mvp/x86/smoke_latest/runner.log
-    - out/valet_parking_external_inputs_014/valet_parking_mvp/x86/smoke_latest/subscriber.log
+    - applications/source/valet_parking_tools/valet_parking_runner/main.cpp
+    - out/valet_parking_multi_input_015/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_multi_input_015/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_multi_input_015/valet_parking_mvp/x86/smoke_latest/runner.log
+    - out/valet_parking_multi_input_015/valet_parking_mvp/x86/smoke_latest/subscriber.log
 
 blockers:
   - id: B-001
@@ -70,14 +71,15 @@ runtime_status:
   x86_speed_optimizer_runtime_test: PASS
   x86_runtime_context_test: PASS
   x86_external_input_boundary_test: PASS
+  x86_dds_multi_input_default_no_aux_publisher_test: PASS
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 179 点 PlanningTrajectory；第二帧 runner 状态包含 last_frame=true，默认状态显示 external_vehicle=false/external_obstacles=0。nm -D 已确认 x86/m57 均导出外部输入 update/clear C API。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 179 点 PlanningTrajectory；第二帧 runner 状态包含 last_frame=true，默认无辅助发布者时状态显示 external_vehicle=false/external_obstacles=0，runner 启动日志包含 localization/chassis/obstacle 三个辅助 Topic 名称。nm -D 已确认 x86/m57 均导出外部输入 update/clear C API。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-015
-  description: 继续沿用 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory 结构，进入 DDS 多输入阶段：在确认或暂定 Topic 契约后，将 localization/chassis/obstacle reader 接到 014 的外部输入边界；保持当前 mock/fake 输入可回归。
+  id: NEXT-016
+  description: 继续沿用 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory 结构，补充 DDS 多输入实收样本验证：新增或扩展 x86 mock publisher/smoke，让 localization/chassis/obstacle 样本真正进入 reader，并确认日志显示 external_vehicle=true、external_obstacles>0。仍需等待真实车端 Topic 名称、字段、单位、坐标系确认，不能把当前临时 IDL 契约写成最终协议。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -185,3 +187,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/014_项目状态快照_EXTERNAL_INPUT_BOUNDARY外部输入边界.md
     phase: Fast-2
     status: PASS_EXTERNAL_INPUT_BOUNDARY_X86_M57_STATIC_BLOCKED_BOARD
+  - id: '015'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/015_项目状态快照_DDS_MULTI_INPUT辅助输入Topic接入.md
+    phase: Fast-2
+    status: PASS_DDS_MULTI_INPUT_X86_M57_STATIC_BLOCKED_BOARD

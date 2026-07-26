@@ -238,6 +238,238 @@ bool ParkingPathPointTopicDataType::is_key_defined()
 {
 	return ParkingPathPoint::is_key_defined();
 }
+LocalizationEstimateTopicDataType::LocalizationEstimateTopicDataType() : TopicDataType()
+{
+	set_name("LocalizationEstimate");
+}
+LocalizationEstimateTopicDataType::~LocalizationEstimateTopicDataType()
+{
+
+}
+bool LocalizationEstimateTopicDataType::serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	LocalizationEstimate* pData = static_cast<LocalizationEstimate*>(data);
+	pData->serialize(cdr);
+	return true;
+}
+bool LocalizationEstimateTopicDataType::deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, void *data)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	LocalizationEstimate* pData = static_cast<LocalizationEstimate*>(data);
+	pData->deserialize(cdr);
+	return true;
+}
+uint32_t LocalizationEstimateTopicDataType::get_serialized_size_bound()
+{
+	return static_cast<uint32_t>(LocalizationEstimate::DATA_SIZE + 8U);
+}
+void* LocalizationEstimateTopicDataType::create_data()
+{
+	return new LocalizationEstimate;
+}
+void LocalizationEstimateTopicDataType::delete_data(void *data)
+{
+	if (data == nullptr)
+	{
+		return;
+	}
+	LocalizationEstimate* pData = static_cast<LocalizationEstimate*>(data);
+	delete pData;
+}
+bool LocalizationEstimateTopicDataType::get_key(std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, InstanceHandle_t* /*ihandle*/) noexcept
+{
+	if (!LocalizationEstimate::is_key_defined())
+	{
+		return false;
+	}
+	/* magnadds adapter mode: key extraction from serialized payload is not generated yet. */
+	return false;
+}
+bool LocalizationEstimateTopicDataType::is_key_defined()
+{
+	return LocalizationEstimate::is_key_defined();
+}
+ChassisStateTopicDataType::ChassisStateTopicDataType() : TopicDataType()
+{
+	set_name("ChassisState");
+}
+ChassisStateTopicDataType::~ChassisStateTopicDataType()
+{
+
+}
+bool ChassisStateTopicDataType::serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	ChassisState* pData = static_cast<ChassisState*>(data);
+	pData->serialize(cdr);
+	return true;
+}
+bool ChassisStateTopicDataType::deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, void *data)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	ChassisState* pData = static_cast<ChassisState*>(data);
+	pData->deserialize(cdr);
+	return true;
+}
+uint32_t ChassisStateTopicDataType::get_serialized_size_bound()
+{
+	return static_cast<uint32_t>(ChassisState::DATA_SIZE + 8U);
+}
+void* ChassisStateTopicDataType::create_data()
+{
+	return new ChassisState;
+}
+void ChassisStateTopicDataType::delete_data(void *data)
+{
+	if (data == nullptr)
+	{
+		return;
+	}
+	ChassisState* pData = static_cast<ChassisState*>(data);
+	delete pData;
+}
+bool ChassisStateTopicDataType::get_key(std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, InstanceHandle_t* /*ihandle*/) noexcept
+{
+	if (!ChassisState::is_key_defined())
+	{
+		return false;
+	}
+	/* magnadds adapter mode: key extraction from serialized payload is not generated yet. */
+	return false;
+}
+bool ChassisStateTopicDataType::is_key_defined()
+{
+	return ChassisState::is_key_defined();
+}
+ObstacleTopicDataType::ObstacleTopicDataType() : TopicDataType()
+{
+	set_name("Obstacle");
+}
+ObstacleTopicDataType::~ObstacleTopicDataType()
+{
+
+}
+bool ObstacleTopicDataType::serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	Obstacle* pData = static_cast<Obstacle*>(data);
+	pData->serialize(cdr);
+	return true;
+}
+bool ObstacleTopicDataType::deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, void *data)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	Obstacle* pData = static_cast<Obstacle*>(data);
+	pData->deserialize(cdr);
+	return true;
+}
+uint32_t ObstacleTopicDataType::get_serialized_size_bound()
+{
+	return static_cast<uint32_t>(Obstacle::DATA_SIZE + 8U);
+}
+void* ObstacleTopicDataType::create_data()
+{
+	return new Obstacle;
+}
+void ObstacleTopicDataType::delete_data(void *data)
+{
+	if (data == nullptr)
+	{
+		return;
+	}
+	Obstacle* pData = static_cast<Obstacle*>(data);
+	delete pData;
+}
+bool ObstacleTopicDataType::get_key(std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, InstanceHandle_t* /*ihandle*/) noexcept
+{
+	if (!Obstacle::is_key_defined())
+	{
+		return false;
+	}
+	/* magnadds adapter mode: key extraction from serialized payload is not generated yet. */
+	return false;
+}
+bool ObstacleTopicDataType::is_key_defined()
+{
+	return Obstacle::is_key_defined();
+}
+ObstacleArrayTopicDataType::ObstacleArrayTopicDataType() : TopicDataType()
+{
+	set_name("ObstacleArray");
+}
+ObstacleArrayTopicDataType::~ObstacleArrayTopicDataType()
+{
+
+}
+bool ObstacleArrayTopicDataType::serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	ObstacleArray* pData = static_cast<ObstacleArray*>(data);
+	pData->serialize(cdr);
+	return true;
+}
+bool ObstacleArrayTopicDataType::deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, void *data)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	ObstacleArray* pData = static_cast<ObstacleArray*>(data);
+	pData->deserialize(cdr);
+	return true;
+}
+uint32_t ObstacleArrayTopicDataType::get_serialized_size_bound()
+{
+	return static_cast<uint32_t>(ObstacleArray::DATA_SIZE + 8U);
+}
+void* ObstacleArrayTopicDataType::create_data()
+{
+	return new ObstacleArray;
+}
+void ObstacleArrayTopicDataType::delete_data(void *data)
+{
+	if (data == nullptr)
+	{
+		return;
+	}
+	ObstacleArray* pData = static_cast<ObstacleArray*>(data);
+	delete pData;
+}
+bool ObstacleArrayTopicDataType::get_key(std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, InstanceHandle_t* /*ihandle*/) noexcept
+{
+	if (!ObstacleArray::is_key_defined())
+	{
+		return false;
+	}
+	/* magnadds adapter mode: key extraction from serialized payload is not generated yet. */
+	return false;
+}
+bool ObstacleArrayTopicDataType::is_key_defined()
+{
+	return ObstacleArray::is_key_defined();
+}
 ParkingLotTopicDataType::ParkingLotTopicDataType() : TopicDataType()
 {
 	set_name("ParkingLot");

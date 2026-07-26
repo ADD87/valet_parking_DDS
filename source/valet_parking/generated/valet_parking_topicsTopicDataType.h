@@ -107,6 +107,98 @@ public:
 };
 
 /**
+* @class LocalizationEstimateTopicDataType
+* @brief A class used as the topic during data exchange.
+* @note
+*/
+
+class LocalizationEstimateTopicDataType : public magna::dds::TopicDataType
+{
+public:
+	using InstanceHandle_t = magna::dds::InstanceHandle_t;
+
+	LocalizationEstimateTopicDataType();
+	virtual ~LocalizationEstimateTopicDataType();
+
+	bool serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> data_value) override;
+	bool deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> data_value, void* data) override;
+	uint32_t get_serialized_size_bound() override;
+	void* create_data() override;
+	void delete_data(void *data) override;
+	bool get_key(std::shared_ptr<magna::dds::SerializedPayload_t> data_value, InstanceHandle_t* ihandle) noexcept override;
+	bool is_key_defined() override;
+};
+
+/**
+* @class ChassisStateTopicDataType
+* @brief A class used as the topic during data exchange.
+* @note
+*/
+
+class ChassisStateTopicDataType : public magna::dds::TopicDataType
+{
+public:
+	using InstanceHandle_t = magna::dds::InstanceHandle_t;
+
+	ChassisStateTopicDataType();
+	virtual ~ChassisStateTopicDataType();
+
+	bool serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> data_value) override;
+	bool deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> data_value, void* data) override;
+	uint32_t get_serialized_size_bound() override;
+	void* create_data() override;
+	void delete_data(void *data) override;
+	bool get_key(std::shared_ptr<magna::dds::SerializedPayload_t> data_value, InstanceHandle_t* ihandle) noexcept override;
+	bool is_key_defined() override;
+};
+
+/**
+* @class ObstacleTopicDataType
+* @brief A class used as the topic during data exchange.
+* @note
+*/
+
+class ObstacleTopicDataType : public magna::dds::TopicDataType
+{
+public:
+	using InstanceHandle_t = magna::dds::InstanceHandle_t;
+
+	ObstacleTopicDataType();
+	virtual ~ObstacleTopicDataType();
+
+	bool serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> data_value) override;
+	bool deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> data_value, void* data) override;
+	uint32_t get_serialized_size_bound() override;
+	void* create_data() override;
+	void delete_data(void *data) override;
+	bool get_key(std::shared_ptr<magna::dds::SerializedPayload_t> data_value, InstanceHandle_t* ihandle) noexcept override;
+	bool is_key_defined() override;
+};
+
+/**
+* @class ObstacleArrayTopicDataType
+* @brief A class used as the topic during data exchange.
+* @note
+*/
+
+class ObstacleArrayTopicDataType : public magna::dds::TopicDataType
+{
+public:
+	using InstanceHandle_t = magna::dds::InstanceHandle_t;
+
+	ObstacleArrayTopicDataType();
+	virtual ~ObstacleArrayTopicDataType();
+
+	bool serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> data_value) override;
+	bool deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> data_value, void* data) override;
+	uint32_t get_serialized_size_bound() override;
+	void* create_data() override;
+	void delete_data(void *data) override;
+	bool get_key(std::shared_ptr<magna::dds::SerializedPayload_t> data_value, InstanceHandle_t* ihandle) noexcept override;
+	bool is_key_defined() override;
+};
+
+/**
 * @class ParkingLotTopicDataType
 * @brief A class used as the topic during data exchange.
 * @note

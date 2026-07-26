@@ -25,7 +25,11 @@ namespace {
 constexpr const char* kModuleTag = "[valet_parking]";
 constexpr const char* kSelectedSlotTopicDefault = "/selected_slot";
 constexpr const char* kPlanningTrajectoryTopicDefault = "/planning/trajectory";
+constexpr const char* kLocalizationTopicDefault = "/localization/estimate";
+constexpr const char* kChassisTopicDefault = "/chassis/state";
+constexpr const char* kObstacleTopicDefault = "/perception/obstacles";
 constexpr int kTrajectoryPointCount = 21;
+constexpr int kMaxAuxDrainRoundsPerCycle = 64;
 
 struct SelectedSlotInput {
   uint64_t seq{0U};
@@ -399,6 +403,54 @@ std::string BuildTrajectoryJson(const valet_parking_config_t& config,
   return out.str();
 }
 
+valet_parking_gear_position_t MapDdsGear(::GearPosition gear) {
+  switch (gear) {
+    case ::GearPosition::GEAR_NEUTRAL:
+      return VALET_PARKING_GEAR_NEUTRAL;
+    case ::GearPosition::GEAR_DRIVE:
+      return VALET_PARKING_GEAR_DRIVE;
+    case ::GearPosition::GEAR_REVERSE:
+      return VALET_PARKING_GEAR_REVERSE;
+    case ::GearPosition::GEAR_PARKING:
+      return VALET_PARKING_GEAR_PARKING;
+    case ::GearPosition::GEAR_LOW:
+      return VALET_PARKING_GEAR_LOW;
+    case ::GearPosition::GEAR_INVALID:
+      return VALET_PARKING_GEAR_INVALID;
+    case ::GearPosition::GEAR_NONE:
+      return VALET_PARKING_GEAR_NONE;
+  }
+  return VALET_PARKING_GEAR_INVALID;
+}
+
+valet_parking_obstacle_type_t MapDdsObstacleType(::ObstacleType type) {
+  switch (type) {
+    case ::ObstacleType::OBSTACLE_TYPE_UNKNOWN:
+      return VALET_PARKING_OBSTACLE_UNKNOWN;
+    case ::ObstacleType::OBSTACLE_TYPE_UNKNOWN_MOVABLE:
+      return VALET_PARKING_OBSTACLE_UNKNOWN_MOVABLE;
+    case ::ObstacleType::OBSTACLE_TYPE_UNKNOWN_UNMOVABLE:
+      return VALET_PARKING_OBSTACLE_UNKNOWN_UNMOVABLE;
+    case ::ObstacleType::OBSTACLE_TYPE_PEDESTRIAN:
+      return VALET_PARKING_OBSTACLE_PEDESTRIAN;
+    case ::ObstacleType::OBSTACLE_TYPE_BICYCLE:
+      return VALET_PARKING_OBSTACLE_BICYCLE;
+    case ::ObstacleType::OBSTACLE_TYPE_VEHICLE:
+      return VALET_PARKING_OBSTACLE_VEHICLE;
+  }
+  return VALET_PARKING_OBSTACLE_UNKNOWN;
+}
+
+uint64_t SelectSampleStampMs(const Header& header) {
+  if (header.data_stamp_ms() != 0U) {
+    return header.data_stamp_ms();
+  }
+  if (header.publish_stamp_ms() != 0U) {
+    return header.publish_stamp_ms();
+  }
+  return NowMilliseconds();
+}
+
 const ParkingLot* SelectParkingLot(const SelectedSlot& sample) {
   const auto& lots = sample.parking_lots();
   if (lots.empty()) {
@@ -613,13 +665,34 @@ ValetParkingComponent::ValetParkingComponent(const valet_parking_config_t& confi
       input_topic_name_(config.input_topic_name != nullptr ? config.input_topic_name
                                                             : kSelectedSlotTopicDefault),
       output_topic_name_(config.output_topic_name != nullptr ? config.output_topic_name
-                                                              : kPlanningTrajectoryTopicDefault) {
+                                                              : kPlanningTrajectoryTopicDefault),
+      localization_topic_name_(config.localization_topic_name != nullptr
+                                   ? config.localization_topic_name
+                                   : kLocalizationTopicDefault),
+      chassis_topic_name_(config.chassis_topic_name != nullptr
+                              ? config.chassis_topic_name
+                              : kChassisTopicDefault),
+      obstacle_topic_name_(config.obstacle_topic_name != nullptr
+                               ? config.obstacle_topic_name
+                               : kObstacleTopicDefault),
+      aux_input_topics_enabled_(config.enable_aux_input_topics != 0U) {
   if (input_topic_name_.empty()) {
     input_topic_name_ = kSelectedSlotTopicDefault;
   }
   if (output_topic_name_.empty()) {
     output_topic_name_ = kPlanningTrajectoryTopicDefault;
   }
+  if (localization_topic_name_.empty()) {
+    localization_topic_name_ = kLocalizationTopicDefault;
+  }
+  if (chassis_topic_name_.empty()) {
+    chassis_topic_name_ = kChassisTopicDefault;
+  }
+  if (obstacle_topic_name_.empty()) {
+    obstacle_topic_name_ = kObstacleTopicDefault;
+  }
+  aux_vehicle_input_.state.is_valid = 1;
+  aux_vehicle_input_.state.gear = VALET_PARKING_GEAR_PARKING;
 }
 
 ValetParkingComponent::~ValetParkingComponent() {
@@ -695,6 +768,32 @@ bool ValetParkingComponent::InitDds() {
     return false;
   }
 
+  if (aux_input_topics_enabled_) {
+    localization_topic_type_ = std::make_unique<LocalizationEstimateTopicDataType>();
+    rc = participant_->register_type(localization_topic_type_.get());
+    if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+      SetLastError(std::string("register localization type failed: ") + ReturnCodeToString(rc));
+      CleanupDds();
+      return false;
+    }
+
+    chassis_topic_type_ = std::make_unique<ChassisStateTopicDataType>();
+    rc = participant_->register_type(chassis_topic_type_.get());
+    if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+      SetLastError(std::string("register chassis type failed: ") + ReturnCodeToString(rc));
+      CleanupDds();
+      return false;
+    }
+
+    obstacle_topic_type_ = std::make_unique<ObstacleArrayTopicDataType>();
+    rc = participant_->register_type(obstacle_topic_type_.get());
+    if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+      SetLastError(std::string("register obstacle array type failed: ") + ReturnCodeToString(rc));
+      CleanupDds();
+      return false;
+    }
+  }
+
   input_topic_ = participant_->create_topic(input_topic_name_, selected_slot_topic_type_->get_name(),
                                             magna::dds::TOPIC_QOS_DEFAULT);
   if (input_topic_ == nullptr) {
@@ -709,6 +808,36 @@ bool ValetParkingComponent::InitDds() {
     SetLastError("failed to create output topic: " + output_topic_name_);
     CleanupDds();
     return false;
+  }
+
+  if (aux_input_topics_enabled_) {
+    localization_topic_ = participant_->create_topic(
+        localization_topic_name_, localization_topic_type_->get_name(),
+        magna::dds::TOPIC_QOS_DEFAULT);
+    if (localization_topic_ == nullptr) {
+      SetLastError("failed to create localization topic: " +
+                   localization_topic_name_);
+      CleanupDds();
+      return false;
+    }
+
+    chassis_topic_ = participant_->create_topic(
+        chassis_topic_name_, chassis_topic_type_->get_name(),
+        magna::dds::TOPIC_QOS_DEFAULT);
+    if (chassis_topic_ == nullptr) {
+      SetLastError("failed to create chassis topic: " + chassis_topic_name_);
+      CleanupDds();
+      return false;
+    }
+
+    obstacle_topic_ = participant_->create_topic(
+        obstacle_topic_name_, obstacle_topic_type_->get_name(),
+        magna::dds::TOPIC_QOS_DEFAULT);
+    if (obstacle_topic_ == nullptr) {
+      SetLastError("failed to create obstacle topic: " + obstacle_topic_name_);
+      CleanupDds();
+      return false;
+    }
   }
 
   subscriber_ = participant_->create_subscriber(magna::dds::SUBSCRIBER_QOS_DEFAULT);
@@ -741,6 +870,32 @@ bool ValetParkingComponent::InitDds() {
     return false;
   }
 
+  if (aux_input_topics_enabled_) {
+    localization_reader_ = subscriber_->create_datareader(
+        localization_topic_, reader_qos, nullptr, magna::dds::STATUS_MASK_NONE);
+    if (localization_reader_ == nullptr) {
+      SetLastError("failed to create datareader for localization topic");
+      CleanupDds();
+      return false;
+    }
+
+    chassis_reader_ = subscriber_->create_datareader(
+        chassis_topic_, reader_qos, nullptr, magna::dds::STATUS_MASK_NONE);
+    if (chassis_reader_ == nullptr) {
+      SetLastError("failed to create datareader for chassis topic");
+      CleanupDds();
+      return false;
+    }
+
+    obstacle_reader_ = subscriber_->create_datareader(
+        obstacle_topic_, reader_qos, nullptr, magna::dds::STATUS_MASK_NONE);
+    if (obstacle_reader_ == nullptr) {
+      SetLastError("failed to create datareader for obstacle topic");
+      CleanupDds();
+      return false;
+    }
+  }
+
   magna::dds::DataWriterQos writer_qos = magna::dds::DATAWRITER_QOS_DEFAULT;
   writer_qos.history.kind = magna::dds::HistoryQosPolicyKind::KEEP_LAST_HISTORY_QOS;
   writer_qos.history.depth = depth;
@@ -760,9 +915,15 @@ bool ValetParkingComponent::InitDds() {
 
 void ValetParkingComponent::CleanupDds() noexcept {
   output_writer_ = nullptr;
+  obstacle_reader_ = nullptr;
+  chassis_reader_ = nullptr;
+  localization_reader_ = nullptr;
   input_reader_ = nullptr;
   publisher_ = nullptr;
   subscriber_ = nullptr;
+  obstacle_topic_ = nullptr;
+  chassis_topic_ = nullptr;
+  localization_topic_ = nullptr;
   output_topic_ = nullptr;
   input_topic_ = nullptr;
 
@@ -775,8 +936,199 @@ void ValetParkingComponent::CleanupDds() noexcept {
 
   participant_ = nullptr;
   dds_factory_ = nullptr;
+  obstacle_topic_type_.reset();
+  chassis_topic_type_.reset();
+  localization_topic_type_.reset();
   planning_trajectory_topic_type_.reset();
   selected_slot_topic_type_.reset();
+}
+
+void ValetParkingComponent::ApplyAuxVehicleInput() {
+  // Chassis data only supplements speed/accel/gear; localization gates pose.
+  if (!aux_vehicle_input_.has_localization) {
+    (void)stage_parking_adapter_.ClearVehicleState();
+    return;
+  }
+
+  aux_vehicle_input_.state.is_valid = 1;
+  if (aux_vehicle_input_.state.stamp_ms == 0U) {
+    aux_vehicle_input_.state.stamp_ms = NowMilliseconds();
+  }
+  const int ret =
+      stage_parking_adapter_.UpdateVehicleState(aux_vehicle_input_.state);
+  if (ret != VALET_PARKING_OK) {
+    SetLastError("failed to apply auxiliary vehicle state");
+  }
+}
+
+bool ValetParkingComponent::HandleLocalizationSample() {
+  if (localization_reader_ == nullptr) {
+    return false;
+  }
+
+  LocalizationEstimate sample;
+  magna::dds::SampleInfo sample_info;
+  const magna::dds::ReturnCode_t read_rc =
+      localization_reader_->take_next_sample(&sample, sample_info);
+  if (read_rc == magna::dds::ReturnCode_t::RETCODE_NO_DATA) {
+    return false;
+  }
+  if (read_rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+    SetLastError(std::string("take localization sample failed: ") +
+                 ReturnCodeToString(read_rc));
+    return false;
+  }
+  if (!sample_info.valid_data) {
+    return true;
+  }
+
+  ++handled_localization_samples_;
+  if (!sample.is_valid()) {
+    aux_vehicle_input_.has_localization = false;
+    ApplyAuxVehicleInput();
+    return true;
+  }
+
+  aux_vehicle_input_.has_localization = true;
+  aux_vehicle_input_.state.stamp_ms = SelectSampleStampMs(sample.header());
+  aux_vehicle_input_.state.x = sample.x();
+  aux_vehicle_input_.state.y = sample.y();
+  aux_vehicle_input_.state.z = sample.z();
+  aux_vehicle_input_.state.heading = sample.heading();
+  ApplyAuxVehicleInput();
+  std::cout << kModuleTag
+            << " aux localization #" << handled_localization_samples_
+            << " (x=" << sample.x()
+            << ", y=" << sample.y()
+            << ", heading=" << sample.heading() << ")"
+            << std::endl;
+  return true;
+}
+
+bool ValetParkingComponent::HandleChassisSample() {
+  if (chassis_reader_ == nullptr) {
+    return false;
+  }
+
+  ChassisState sample;
+  magna::dds::SampleInfo sample_info;
+  const magna::dds::ReturnCode_t read_rc =
+      chassis_reader_->take_next_sample(&sample, sample_info);
+  if (read_rc == magna::dds::ReturnCode_t::RETCODE_NO_DATA) {
+    return false;
+  }
+  if (read_rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+    SetLastError(std::string("take chassis sample failed: ") +
+                 ReturnCodeToString(read_rc));
+    return false;
+  }
+  if (!sample_info.valid_data) {
+    return true;
+  }
+
+  ++handled_chassis_samples_;
+  if (!sample.is_valid()) {
+    aux_vehicle_input_.has_chassis = false;
+    aux_vehicle_input_.state.linear_velocity = 0.0;
+    aux_vehicle_input_.state.linear_acceleration = 0.0;
+    aux_vehicle_input_.state.gear = VALET_PARKING_GEAR_PARKING;
+    ApplyAuxVehicleInput();
+    return true;
+  }
+
+  aux_vehicle_input_.has_chassis = true;
+  if (!aux_vehicle_input_.has_localization) {
+    aux_vehicle_input_.state.stamp_ms = SelectSampleStampMs(sample.header());
+  }
+  aux_vehicle_input_.state.linear_velocity = sample.speed_mps();
+  aux_vehicle_input_.state.linear_acceleration =
+      sample.acceleration_mps2();
+  aux_vehicle_input_.state.gear = MapDdsGear(sample.gear());
+  ApplyAuxVehicleInput();
+  std::cout << kModuleTag
+            << " aux chassis #" << handled_chassis_samples_
+            << " (speed_mps=" << sample.speed_mps()
+            << ", acceleration_mps2=" << sample.acceleration_mps2()
+            << ", gear=" << static_cast<int>(sample.gear()) << ")"
+            << std::endl;
+  return true;
+}
+
+bool ValetParkingComponent::HandleObstacleSample() {
+  if (obstacle_reader_ == nullptr) {
+    return false;
+  }
+
+  ObstacleArray sample;
+  magna::dds::SampleInfo sample_info;
+  const magna::dds::ReturnCode_t read_rc =
+      obstacle_reader_->take_next_sample(&sample, sample_info);
+  if (read_rc == magna::dds::ReturnCode_t::RETCODE_NO_DATA) {
+    return false;
+  }
+  if (read_rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+    SetLastError(std::string("take obstacle sample failed: ") +
+                 ReturnCodeToString(read_rc));
+    return false;
+  }
+  if (!sample_info.valid_data) {
+    return true;
+  }
+
+  ++handled_obstacle_samples_;
+  if (!sample.is_valid()) {
+    (void)stage_parking_adapter_.ClearObstacles();
+    return true;
+  }
+
+  std::vector<valet_parking_obstacle_t> obstacles;
+  obstacles.reserve(sample.obstacles().size());
+  for (const Obstacle& source : sample.obstacles()) {
+    valet_parking_obstacle_t obstacle{};
+    obstacle.id = source.id();
+    obstacle.type = MapDdsObstacleType(source.type());
+    obstacle.is_dynamic = source.is_dynamic() ? 1 : 0;
+    obstacle.center_x = source.center_x();
+    obstacle.center_y = source.center_y();
+    obstacle.heading = source.heading();
+    obstacle.length = source.length();
+    obstacle.width = source.width();
+    obstacle.velocity_x = source.velocity_x();
+    obstacle.velocity_y = source.velocity_y();
+    obstacles.push_back(obstacle);
+  }
+
+  const int ret = stage_parking_adapter_.UpdateObstacles(
+      obstacles.empty() ? nullptr : obstacles.data(),
+      static_cast<uint32_t>(obstacles.size()));
+  if (ret != VALET_PARKING_OK) {
+    SetLastError("failed to apply auxiliary obstacle array");
+  }
+  std::cout << kModuleTag
+            << " aux obstacles #" << handled_obstacle_samples_
+            << " (count=" << obstacles.size() << ")"
+            << std::endl;
+  return true;
+}
+
+bool ValetParkingComponent::DrainAuxInputSamples() {
+  if (!aux_input_topics_enabled_) {
+    return false;
+  }
+
+  bool handled_any = false;
+  for (int i = 0; i < kMaxAuxDrainRoundsPerCycle && running_.load(); ++i) {
+    bool handled_one = false;
+    handled_one = HandleLocalizationSample() || handled_one;
+    handled_one = HandleChassisSample() || handled_one;
+    handled_one = HandleObstacleSample() || handled_one;
+    handled_any = handled_one || handled_any;
+    if (!handled_one) {
+      break;
+    }
+  }
+
+  return handled_any;
 }
 
 bool ValetParkingComponent::BuildTrajectoryFromInput(const SelectedSlot& input_sample,
@@ -864,8 +1216,15 @@ int ValetParkingComponent::Start() {
 
   std::cout << kModuleTag << " started (domain=" << config_.domain_id
             << ", in_topic=" << input_topic_name_
-            << ", out_topic=" << output_topic_name_
-            << ")" << std::endl;
+            << ", out_topic=" << output_topic_name_;
+  if (aux_input_topics_enabled_) {
+    std::cout << ", localization_topic=" << localization_topic_name_
+              << ", chassis_topic=" << chassis_topic_name_
+              << ", obstacle_topic=" << obstacle_topic_name_;
+  } else {
+    std::cout << ", aux_input_topics=disabled";
+  }
+  std::cout << ")" << std::endl;
   return VALET_PARKING_OK;
 }
 
@@ -921,7 +1280,8 @@ void ValetParkingComponent::WorkerLoop() {
   while (running_.load()) {
     bool handled = false;
     try {
-      handled = HandleOneSample();
+      handled = DrainAuxInputSamples();
+      handled = HandleOneSample() || handled;
     } catch (const std::exception& e) {
       SetLastError(std::string("worker exception: ") + e.what());
     } catch (...) {

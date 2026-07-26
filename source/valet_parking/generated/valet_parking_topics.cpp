@@ -525,6 +525,660 @@ uint32_t& ParkingPathPoint::gear()
 	return m_gear;
 }
 
+LocalizationEstimate::LocalizationEstimate()
+{
+	m_is_valid = 0;
+	m_x = 0;
+	m_y = 0;
+	m_z = 0;
+	m_heading = 0;
+
+}
+
+magna::dds::DdsCdr& LocalizationEstimate::serialize(magna::dds::DdsCdr &cdr) const
+{
+	cdr.serialize(m_header);
+	cdr.serialize(m_is_valid);
+	cdr.serialize(m_x);
+	cdr.serialize(m_y);
+	cdr.serialize(m_z);
+	cdr.serialize(m_heading);
+
+	return cdr;
+}
+uint32_t LocalizationEstimate::serialize(void *const /*data*/, char *const /*payload_buf*/, uint32_t const /*payload_len*/)
+{
+	return 0U;
+}
+
+magna::dds::DdsCdr& LocalizationEstimate::deserialize(magna::dds::DdsCdr &cdr)
+{
+	cdr.deserialize(m_header);
+	cdr.deserialize(m_is_valid);
+	cdr.deserialize(m_x);
+	cdr.deserialize(m_y);
+	cdr.deserialize(m_z);
+	cdr.deserialize(m_heading);
+
+	return cdr;
+}
+bool LocalizationEstimate::deserialize(char *const /*payload_buf*/, uint32_t const /*payload_len*/, void *const /*data*/)
+{
+	return false;
+}
+
+bool LocalizationEstimate::is_key_defined()
+{
+	return false;
+
+}
+void LocalizationEstimate::serialize_key(magna::dds::DdsCdr &cdr) const
+{
+
+}
+void LocalizationEstimate::serialize_key(char **buf,unsigned int *len)
+{
+	if (buf != nullptr)
+	{
+		*buf = nullptr;
+	}
+	if (len != nullptr)
+	{
+		*len = 0U;
+	}
+
+}
+bool LocalizationEstimate::is_key_serialize_by_cdr()
+{
+	return false;
+
+}
+bool LocalizationEstimate::is_plain_types()
+{
+	bool b0 = Header::is_plain_types();
+
+	return b0;
+}
+uint32_t LocalizationEstimate::max_align_size(uint32_t const _cur_al) const
+{
+	return _cur_al + DATA_SIZE;
+
+}
+void LocalizationEstimate::set_key_val(LocalizationEstimate const* const _data) noexcept
+{
+
+}
+void LocalizationEstimate::header(Header const &_header)
+{
+	m_header = _header;
+}
+void LocalizationEstimate::header(Header &&_header)
+{
+	m_header = std::move(_header);
+}
+Header const& LocalizationEstimate::header() const
+{
+	return m_header;
+}
+Header& LocalizationEstimate::header()
+{
+	return m_header;
+}
+
+void LocalizationEstimate::is_valid(bool const _is_valid)
+{
+	m_is_valid = _is_valid;
+}
+bool LocalizationEstimate::is_valid() const
+{
+	return m_is_valid;
+}
+bool& LocalizationEstimate::is_valid()
+{
+	return m_is_valid;
+}
+
+void LocalizationEstimate::x(double const _x)
+{
+	m_x = _x;
+}
+double LocalizationEstimate::x() const
+{
+	return m_x;
+}
+double& LocalizationEstimate::x()
+{
+	return m_x;
+}
+
+void LocalizationEstimate::y(double const _y)
+{
+	m_y = _y;
+}
+double LocalizationEstimate::y() const
+{
+	return m_y;
+}
+double& LocalizationEstimate::y()
+{
+	return m_y;
+}
+
+void LocalizationEstimate::z(double const _z)
+{
+	m_z = _z;
+}
+double LocalizationEstimate::z() const
+{
+	return m_z;
+}
+double& LocalizationEstimate::z()
+{
+	return m_z;
+}
+
+void LocalizationEstimate::heading(double const _heading)
+{
+	m_heading = _heading;
+}
+double LocalizationEstimate::heading() const
+{
+	return m_heading;
+}
+double& LocalizationEstimate::heading()
+{
+	return m_heading;
+}
+
+ChassisState::ChassisState()
+{
+	m_is_valid = 0;
+	m_speed_mps = 0;
+	m_acceleration_mps2 = 0;
+
+}
+
+magna::dds::DdsCdr& ChassisState::serialize(magna::dds::DdsCdr &cdr) const
+{
+	cdr.serialize(m_header);
+	cdr.serialize(m_is_valid);
+	cdr.serialize(m_speed_mps);
+	cdr.serialize(m_acceleration_mps2);
+	cdr.serialize(m_gear);
+
+	return cdr;
+}
+uint32_t ChassisState::serialize(void *const /*data*/, char *const /*payload_buf*/, uint32_t const /*payload_len*/)
+{
+	return 0U;
+}
+
+magna::dds::DdsCdr& ChassisState::deserialize(magna::dds::DdsCdr &cdr)
+{
+	cdr.deserialize(m_header);
+	cdr.deserialize(m_is_valid);
+	cdr.deserialize(m_speed_mps);
+	cdr.deserialize(m_acceleration_mps2);
+	cdr.deserialize(m_gear);
+
+	return cdr;
+}
+bool ChassisState::deserialize(char *const /*payload_buf*/, uint32_t const /*payload_len*/, void *const /*data*/)
+{
+	return false;
+}
+
+bool ChassisState::is_key_defined()
+{
+	return false;
+
+}
+void ChassisState::serialize_key(magna::dds::DdsCdr &cdr) const
+{
+
+}
+void ChassisState::serialize_key(char **buf,unsigned int *len)
+{
+	if (buf != nullptr)
+	{
+		*buf = nullptr;
+	}
+	if (len != nullptr)
+	{
+		*len = 0U;
+	}
+
+}
+bool ChassisState::is_key_serialize_by_cdr()
+{
+	return false;
+
+}
+bool ChassisState::is_plain_types()
+{
+	bool b0 = Header::is_plain_types();
+
+	return b0;
+}
+uint32_t ChassisState::max_align_size(uint32_t const _cur_al) const
+{
+	return _cur_al + DATA_SIZE;
+
+}
+void ChassisState::set_key_val(ChassisState const* const _data) noexcept
+{
+
+}
+void ChassisState::header(Header const &_header)
+{
+	m_header = _header;
+}
+void ChassisState::header(Header &&_header)
+{
+	m_header = std::move(_header);
+}
+Header const& ChassisState::header() const
+{
+	return m_header;
+}
+Header& ChassisState::header()
+{
+	return m_header;
+}
+
+void ChassisState::is_valid(bool const _is_valid)
+{
+	m_is_valid = _is_valid;
+}
+bool ChassisState::is_valid() const
+{
+	return m_is_valid;
+}
+bool& ChassisState::is_valid()
+{
+	return m_is_valid;
+}
+
+void ChassisState::speed_mps(double const _speed_mps)
+{
+	m_speed_mps = _speed_mps;
+}
+double ChassisState::speed_mps() const
+{
+	return m_speed_mps;
+}
+double& ChassisState::speed_mps()
+{
+	return m_speed_mps;
+}
+
+void ChassisState::acceleration_mps2(double const _acceleration_mps2)
+{
+	m_acceleration_mps2 = _acceleration_mps2;
+}
+double ChassisState::acceleration_mps2() const
+{
+	return m_acceleration_mps2;
+}
+double& ChassisState::acceleration_mps2()
+{
+	return m_acceleration_mps2;
+}
+
+void ChassisState::gear(GearPosition const _gear)
+{
+	m_gear = _gear;
+}
+GearPosition ChassisState::gear() const
+{
+	return m_gear;
+}
+GearPosition& ChassisState::gear()
+{
+	return m_gear;
+}
+
+Obstacle::Obstacle()
+{
+	m_id = 0;
+	m_is_dynamic = 0;
+	m_center_x = 0;
+	m_center_y = 0;
+	m_heading = 0;
+	m_length = 0;
+	m_width = 0;
+	m_velocity_x = 0;
+	m_velocity_y = 0;
+
+}
+
+magna::dds::DdsCdr& Obstacle::serialize(magna::dds::DdsCdr &cdr) const
+{
+	cdr.serialize(m_id);
+	cdr.serialize(m_type);
+	cdr.serialize(m_is_dynamic);
+	cdr.serialize(m_center_x);
+	cdr.serialize(m_center_y);
+	cdr.serialize(m_heading);
+	cdr.serialize(m_length);
+	cdr.serialize(m_width);
+	cdr.serialize(m_velocity_x);
+	cdr.serialize(m_velocity_y);
+
+	return cdr;
+}
+uint32_t Obstacle::serialize(void *const /*data*/, char *const /*payload_buf*/, uint32_t const /*payload_len*/)
+{
+	return 0U;
+}
+
+magna::dds::DdsCdr& Obstacle::deserialize(magna::dds::DdsCdr &cdr)
+{
+	cdr.deserialize(m_id);
+	cdr.deserialize(m_type);
+	cdr.deserialize(m_is_dynamic);
+	cdr.deserialize(m_center_x);
+	cdr.deserialize(m_center_y);
+	cdr.deserialize(m_heading);
+	cdr.deserialize(m_length);
+	cdr.deserialize(m_width);
+	cdr.deserialize(m_velocity_x);
+	cdr.deserialize(m_velocity_y);
+
+	return cdr;
+}
+bool Obstacle::deserialize(char *const /*payload_buf*/, uint32_t const /*payload_len*/, void *const /*data*/)
+{
+	return false;
+}
+
+bool Obstacle::is_key_defined()
+{
+	return false;
+
+}
+void Obstacle::serialize_key(magna::dds::DdsCdr &cdr) const
+{
+
+}
+void Obstacle::serialize_key(char **buf,unsigned int *len)
+{
+	if (buf != nullptr)
+	{
+		*buf = nullptr;
+	}
+	if (len != nullptr)
+	{
+		*len = 0U;
+	}
+
+}
+bool Obstacle::is_key_serialize_by_cdr()
+{
+	return false;
+
+}
+bool Obstacle::is_plain_types()
+{
+	return true;
+}
+uint32_t Obstacle::max_align_size(uint32_t const _cur_al) const
+{
+	return _cur_al + DATA_SIZE;
+
+}
+void Obstacle::set_key_val(Obstacle const* const _data) noexcept
+{
+
+}
+void Obstacle::id(uint32_t const _id)
+{
+	m_id = _id;
+}
+uint32_t Obstacle::id() const
+{
+	return m_id;
+}
+uint32_t& Obstacle::id()
+{
+	return m_id;
+}
+
+void Obstacle::type(ObstacleType const _type)
+{
+	m_type = _type;
+}
+ObstacleType Obstacle::type() const
+{
+	return m_type;
+}
+ObstacleType& Obstacle::type()
+{
+	return m_type;
+}
+
+void Obstacle::is_dynamic(bool const _is_dynamic)
+{
+	m_is_dynamic = _is_dynamic;
+}
+bool Obstacle::is_dynamic() const
+{
+	return m_is_dynamic;
+}
+bool& Obstacle::is_dynamic()
+{
+	return m_is_dynamic;
+}
+
+void Obstacle::center_x(double const _center_x)
+{
+	m_center_x = _center_x;
+}
+double Obstacle::center_x() const
+{
+	return m_center_x;
+}
+double& Obstacle::center_x()
+{
+	return m_center_x;
+}
+
+void Obstacle::center_y(double const _center_y)
+{
+	m_center_y = _center_y;
+}
+double Obstacle::center_y() const
+{
+	return m_center_y;
+}
+double& Obstacle::center_y()
+{
+	return m_center_y;
+}
+
+void Obstacle::heading(double const _heading)
+{
+	m_heading = _heading;
+}
+double Obstacle::heading() const
+{
+	return m_heading;
+}
+double& Obstacle::heading()
+{
+	return m_heading;
+}
+
+void Obstacle::length(double const _length)
+{
+	m_length = _length;
+}
+double Obstacle::length() const
+{
+	return m_length;
+}
+double& Obstacle::length()
+{
+	return m_length;
+}
+
+void Obstacle::width(double const _width)
+{
+	m_width = _width;
+}
+double Obstacle::width() const
+{
+	return m_width;
+}
+double& Obstacle::width()
+{
+	return m_width;
+}
+
+void Obstacle::velocity_x(double const _velocity_x)
+{
+	m_velocity_x = _velocity_x;
+}
+double Obstacle::velocity_x() const
+{
+	return m_velocity_x;
+}
+double& Obstacle::velocity_x()
+{
+	return m_velocity_x;
+}
+
+void Obstacle::velocity_y(double const _velocity_y)
+{
+	m_velocity_y = _velocity_y;
+}
+double Obstacle::velocity_y() const
+{
+	return m_velocity_y;
+}
+double& Obstacle::velocity_y()
+{
+	return m_velocity_y;
+}
+
+ObstacleArray::ObstacleArray()
+{
+	m_is_valid = 0;
+
+}
+
+magna::dds::DdsCdr& ObstacleArray::serialize(magna::dds::DdsCdr &cdr) const
+{
+	cdr.serialize(m_header);
+	cdr.serialize(m_is_valid);
+	cdr.serialize(m_obstacles);
+
+	return cdr;
+}
+uint32_t ObstacleArray::serialize(void *const /*data*/, char *const /*payload_buf*/, uint32_t const /*payload_len*/)
+{
+	return 0U;
+}
+
+magna::dds::DdsCdr& ObstacleArray::deserialize(magna::dds::DdsCdr &cdr)
+{
+	cdr.deserialize(m_header);
+	cdr.deserialize(m_is_valid);
+	cdr.deserialize(m_obstacles);
+
+	return cdr;
+}
+bool ObstacleArray::deserialize(char *const /*payload_buf*/, uint32_t const /*payload_len*/, void *const /*data*/)
+{
+	return false;
+}
+
+bool ObstacleArray::is_key_defined()
+{
+	return false;
+
+}
+void ObstacleArray::serialize_key(magna::dds::DdsCdr &cdr) const
+{
+
+}
+void ObstacleArray::serialize_key(char **buf,unsigned int *len)
+{
+	if (buf != nullptr)
+	{
+		*buf = nullptr;
+	}
+	if (len != nullptr)
+	{
+		*len = 0U;
+	}
+
+}
+bool ObstacleArray::is_key_serialize_by_cdr()
+{
+	return false;
+
+}
+bool ObstacleArray::is_plain_types()
+{
+	return false;
+}
+uint32_t ObstacleArray::max_align_size(uint32_t const _cur_al) const
+{
+	return _cur_al + DATA_SIZE;
+
+}
+void ObstacleArray::set_key_val(ObstacleArray const* const _data) noexcept
+{
+
+}
+void ObstacleArray::header(Header const &_header)
+{
+	m_header = _header;
+}
+void ObstacleArray::header(Header &&_header)
+{
+	m_header = std::move(_header);
+}
+Header const& ObstacleArray::header() const
+{
+	return m_header;
+}
+Header& ObstacleArray::header()
+{
+	return m_header;
+}
+
+void ObstacleArray::is_valid(bool const _is_valid)
+{
+	m_is_valid = _is_valid;
+}
+bool ObstacleArray::is_valid() const
+{
+	return m_is_valid;
+}
+bool& ObstacleArray::is_valid()
+{
+	return m_is_valid;
+}
+
+void ObstacleArray::obstacles(std::vector<Obstacle> const &_obstacles)
+{
+	m_obstacles = _obstacles;
+}
+void ObstacleArray::obstacles(std::vector<Obstacle> &&_obstacles)
+{
+	m_obstacles = std::move(_obstacles);
+}
+std::vector<Obstacle> const& ObstacleArray::obstacles() const
+{
+	return m_obstacles;
+}
+std::vector<Obstacle>& ObstacleArray::obstacles()
+{
+	return m_obstacles;
+}
+
 ParkingLot::ParkingLot()
 {
 	m_parking_seq = 0;

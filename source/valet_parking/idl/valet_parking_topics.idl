@@ -55,6 +55,16 @@ enum GearPosition
     GEAR_NONE
 };
 
+enum ObstacleType
+{
+    OBSTACLE_TYPE_UNKNOWN,
+    OBSTACLE_TYPE_UNKNOWN_MOVABLE,
+    OBSTACLE_TYPE_UNKNOWN_UNMOVABLE,
+    OBSTACLE_TYPE_PEDESTRIAN,
+    OBSTACLE_TYPE_BICYCLE,
+    OBSTACLE_TYPE_VEHICLE
+};
+
 enum PlanningTrajectoryType
 {
     TRAJECTORY_TYPE_UNKNOWN,
@@ -98,6 +108,46 @@ struct ParkingPathPoint
     double yaw;
     double accumulate_s;
     uint32 gear;
+};
+
+struct LocalizationEstimate
+{
+    Header header;
+    boolean is_valid;
+    double x;
+    double y;
+    double z;
+    double heading;
+};
+
+struct ChassisState
+{
+    Header header;
+    boolean is_valid;
+    double speed_mps;
+    double acceleration_mps2;
+    GearPosition gear;
+};
+
+struct Obstacle
+{
+    uint32 id;
+    ObstacleType type;
+    boolean is_dynamic;
+    double center_x;
+    double center_y;
+    double heading;
+    double length;
+    double width;
+    double velocity_x;
+    double velocity_y;
+};
+
+struct ObstacleArray
+{
+    Header header;
+    boolean is_valid;
+    sequence<Obstacle> obstacles;
 };
 
 struct ParkingLot

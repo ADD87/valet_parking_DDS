@@ -22,6 +22,10 @@ typedef struct valet_parking_config_t {
     uint32_t domain_id;
     const char* input_topic_name;
     const char* output_topic_name;
+    const char* localization_topic_name;
+    const char* chassis_topic_name;
+    const char* obstacle_topic_name;
+    uint32_t enable_aux_input_topics;
     uint32_t qos_depth;
 
     uint32_t max_parking_lots;

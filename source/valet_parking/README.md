@@ -5,6 +5,7 @@
 - 目标产物：`libvalet_parking.so`
 - 输入：订阅 typed DDS Topic `/selected_slot`
 - 输出：发布 typed DDS Topic `/planning/trajectory`
+- 可选辅助输入：默认订阅临时 typed DDS Topic `/localization/estimate`、`/chassis/state`、`/perception/obstacles`
 - 当前主链路：`SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory`
 - 异常行为：非法输入，如 NaN、empty、overflow，会发布显式 `estop` 输出
 
@@ -18,6 +19,7 @@
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
 - 外部输入边界：C API 已提供 `vehicle_state` 与 `obstacles` 的 update/clear 入口；未调用时继续使用 fake vehicle 和空障碍物。
+- DDS 辅助输入 reader：`ValetParkingComponent` 已默认订阅临时 `LocalizationEstimate`、`ChassisState`、`ObstacleArray` typed Topic，并把样本转入外部输入边界。
 - `PlanningTrajectory`：把 SPEED_OPTIMIZER 输出的轨迹转换成 DDS 输出；若 SPEED_OPTIMIZER 失败，则回退到 PATH_PARTITION 的 nominal speed 轨迹。
 
 暂未接入内容：
@@ -25,8 +27,8 @@
 - 完整 `OpenSpacePathProvider` 大类。
 - NLP smoother。
 - 完整原车 `Frame/DependencyInjector` history。
-- 真实定位/底盘 DDS reader。
-- 真实静态/动态障碍物 DDS reader。
+- 真实车端定位/底盘/障碍物 Topic 契约对齐。
+- 辅助输入 Topic 的实收样本 smoke。
 
 ## 外部输入 C API
 
@@ -45,6 +47,39 @@ int valet_parking_clear_obstacles(valet_parking_handle_t* handle);
 ```
 
 这些接口是给后续真实 DDS reader 或工程集成层调用的。现有 runner 不调用它们，因此默认行为仍然是 fake vehicle + 空障碍物。
+
+## DDS 辅助输入 Topic
+
+当前 IDL 中新增了三个临时输入类型：
+
+- `LocalizationEstimate`：车辆位置和朝向，字段包含 `x/y/z/heading`。
+- `ChassisState`：底盘运动状态，字段包含 `speed_mps`、`acceleration_mps2`、`gear`。
+- `ObstacleArray`：障碍物列表，字段包含障碍物中心点、尺寸、朝向、速度和类型。
+
+runner 默认订阅：
+
+```text
+/localization/estimate
+/chassis/state
+/perception/obstacles
+```
+
+可通过参数改名或关闭：
+
+```bash
+valet_parking_runner \
+  --localization-topic=/your/localization \
+  --chassis-topic=/your/chassis \
+  --obstacle-topic=/your/obstacles
+
+valet_parking_runner --disable-aux-input-topics
+```
+
+重要边界：
+
+- 这些 Topic 是当前 MVP 的临时 typed DDS 契约，不代表已经对齐真实车端协议。
+- 没有辅助发布者时，主链路仍回退到 fake vehicle 和空障碍物。
+- 车辆外部状态以 `LocalizationEstimate` 为生效门槛；`ChassisState` 只补充速度、加速度和档位，避免底盘先到时用默认原点覆盖车辆位姿。
 
 ## WSL 快捷编译
 
@@ -85,11 +120,12 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 
 ## 最近验证
 
-External input boundary 接入后，已验证：
+DDS 多输入接入后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
-- x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`，默认输入状态显示 `external_vehicle=false, external_obstacles=0`。
+- x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`，默认无辅助发布者时输入状态显示 `external_vehicle=false, external_obstacles=0`。
+- runner 启动日志已显示默认订阅 `/localization/estimate`、`/chassis/state`、`/perception/obstacles`。
 - x86/m57：`nm -D libvalet_parking.so` 可看到 `valet_parking_update_vehicle_state`、`valet_parking_clear_vehicle_state`、`valet_parking_update_obstacles`、`valet_parking_clear_obstacles`。
 
 m57 目前只完成交叉编译和依赖检查，尚未做真实板端运行验证。
