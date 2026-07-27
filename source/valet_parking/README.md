@@ -14,7 +14,7 @@
 已接入内容：
 
 - `ROI_DECIDER`：从选中车位计算 ROI、目标位姿、目标区域。
-- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径。
+- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 进一步接入轻量 `warm_start`/`path_strategy` 切片，能在保守条件下从历史路径截取 warm start，并在日志里显示策略字段。
 - `PATH_PARTITION`：使用 standalone 中已独立化的 `OpenSpacePathPartition::Execute` 做任务级路径仲裁，输出当前应执行的 `chosen_partitioned_path`。
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
@@ -27,7 +27,7 @@
 暂未接入内容：
 
 - 完整 `OpenSpacePathProvider` 大类。
-- 完整 `OpenSpacePathProvider` 的线程管理、PreCheck、完整 path strategy、warm start/splice path。
+- 完整 `OpenSpacePathProvider` 的线程管理、完整 PreCheck、完整 path strategy、完整 warm start/splice path。
 - NLP smoother。
 - 完整原车 `Frame/DependencyInjector` history。
 - 真实车端定位/底盘/障碍物 Topic 契约对齐。
@@ -168,13 +168,13 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
   --disable-aux-input-topics
 ```
 
-## PATH_PROVIDER 运行态日志
+## PATH_PROVIDER 运行态与策略日志
 
-NEXT-018 后，runner 的规划状态里会出现 PATH_PROVIDER 运行态字段：
+NEXT-019 后，runner 的规划状态里会出现 PATH_PROVIDER 运行态和轻量策略字段：
 
 ```text
-PATH_PROVIDER ok, ..., history=generated, replan=NO_VALID_PATH, reason=no_history
-PATH_PROVIDER ok, ..., history=reused, replan=NONE
+PATH_PROVIDER ok, ..., history=generated, replan=NO_VALID_PATH, reason=no_history, warm_start=none, warm_start_points=0, strategy_init_move=0
+PATH_PROVIDER ok, ..., history=reused, replan=NONE, warm_start=not_applied
 ```
 
 含义：
@@ -186,17 +186,20 @@ PATH_PROVIDER ok, ..., history=reused, replan=NONE
 - `replan=BLOCK_BY_STATIC_OBSTACLE`：外部障碍物签名变化。
 - `replan=TRACE_REPLAN`：当前起点已经无法匹配历史路径。
 - `replan=REPLAN_FOR_SPEED_WARN` 或 `DYNAMIC_REPLAN`：速度层或碰撞风险要求重新规划。
+- `warm_start=history_splice`：本帧重新搜索前，adapter 从上一帧历史路径截取了一段可用尾段作为 `OpenSpacePathGenerator` 的 warm start。
+- `warm_start=none`：本帧没有可用 warm start，或因为目标/障碍物/速度重规划/碰撞风险等原因不允许使用旧路径。
+- `strategy_init_move`、`strategy_kappa_cost`、`strategy_limit_steer`：对照完整 `SetPathStrategy` 提取的轻量策略字段，用于让当前简化 adapter 的搜索输入更接近原始 OpenSpacePathProvider 的语义。
 
-这只是完整 `OpenSpacePathProvider` 的轻量运行态切片，不包含完整线程管理、NLP smoother 或完整 `Frame/DependencyInjector`。
+这仍只是完整 `OpenSpacePathProvider` 的轻量切片，不包含完整线程管理、NLP smoother、完整 `PreCheck` 或完整 `Frame/DependencyInjector`。当前 mock 工具没有移动定位模式，因此默认 smoke 不会直接触发 `warm_start=history_splice` 分支；该分支已完成编译接线和保守条件限制。
 
 ## 最近验证
 
-NEXT-018 PATH_PROVIDER 轻量运行态复用后，已验证：
+NEXT-019 PATH_PROVIDER 轻量策略与 warm_start 切片后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
 - x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`，默认无辅助发布者时输入状态显示 `external_vehicle=false, external_obstacles=0`。
-- x86 PATH_PROVIDER 运行态：默认 smoke 中第一帧显示 `history=generated, replan=NO_VALID_PATH`，第二帧显示 `history=reused, replan=NONE`。
+- x86 PATH_PROVIDER 运行态与策略字段：默认 smoke 中第一帧显示 `history=generated, replan=NO_VALID_PATH, warm_start=none, strategy_init_move=0`，第二帧显示 `history=reused, replan=NONE`。
 - x86 DDS 辅助输入冒烟：`aux_input_mock_publisher` 发布三类辅助样本后，runner 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态显示 `external_vehicle=true, external_obstacles=1`。
 - x86 DDS 辅助输入边界硬化：`all-valid`、`invalid-localization`、`nan-localization`、`chassis-only`、`invalid-obstacles`、`bad-obstacle-geometry`、`--disable-aux-input-topics` 场景已验证；关键复验中 `bad-obstacle-geometry` 显示 `aux obstacles rejected` 且 `external_obstacles=0`。
 - runner 启动日志已显示默认订阅 `/localization/estimate`、`/chassis/state`、`/perception/obstacles`。

@@ -65,6 +65,9 @@ struct PathProviderRuntimeState {
     end_pose = TL::common::PathPoint();
     obstacle_signature = 0U;
     last_output.Reset();
+    last_splice_gear = TL::soc::GearPosition::GEAR_NONE;
+    last_warm_start_points = 0U;
+    last_strategy_init_moving_direction = 0;
     generated_count = 0U;
     reused_count = 0U;
   }
@@ -75,6 +78,10 @@ struct PathProviderRuntimeState {
   TL::common::PathPoint end_pose;
   uint64_t obstacle_signature{0U};
   TL::planning::OpenSpacePathOutput last_output;
+  TL::soc::GearPosition last_splice_gear{
+      TL::soc::GearPosition::GEAR_NONE};
+  std::size_t last_warm_start_points{0U};
+  int last_strategy_init_moving_direction{0};
   uint64_t generated_count{0U};
   uint64_t reused_count{0U};
 };
@@ -840,6 +847,173 @@ std::string ReplanStatusToString(uint32_t status) {
   return text.empty() ? "UNKNOWN" : text;
 }
 
+int GearToMovingDirection(TL::soc::GearPosition gear) {
+  if (gear == TL::soc::GearPosition::GEAR_DRIVE) {
+    return 1;
+  }
+  if (gear == TL::soc::GearPosition::GEAR_REVERSE) {
+    return -1;
+  }
+  return 0;
+}
+
+void RebaseWarmStartPath(const TL::common::PathPoint& start_point,
+                         TL::planning::DiscretizedPath* warm_start_path) {
+  if (warm_start_path == nullptr || warm_start_path->empty()) {
+    return;
+  }
+
+  warm_start_path->front() = start_point;
+  warm_start_path->front().s = 0.0;
+  warm_start_path->front().theta =
+      NormalizeAngle(warm_start_path->front().theta);
+  warm_start_path->front().x_derivative =
+      std::cos(warm_start_path->front().theta);
+  warm_start_path->front().y_derivative =
+      std::sin(warm_start_path->front().theta);
+
+  double accumulated_s = 0.0;
+  for (std::size_t i = 1U; i < warm_start_path->size(); ++i) {
+    TL::common::PathPoint& current_point = (*warm_start_path)[i];
+    const TL::common::PathPoint& previous_point = (*warm_start_path)[i - 1U];
+    accumulated_s += std::hypot(current_point.x - previous_point.x,
+                                current_point.y - previous_point.y);
+    current_point.s = accumulated_s;
+    current_point.theta = NormalizeAngle(current_point.theta);
+    current_point.x_derivative = std::cos(current_point.theta);
+    current_point.y_derivative = std::sin(current_point.theta);
+  }
+}
+
+bool ShouldUseHistoryWarmStart(uint32_t replan_status) {
+  const uint32_t unsafe_history_reasons =
+      kReplanTargetUpdate | kReplanBlockByStaticObstacle |
+      kReplanDynamicReplan | kReplanForSpeedWarn;
+  return (replan_status & kReplanTraceReplan) != 0U &&
+         (replan_status & unsafe_history_reasons) == 0U;
+}
+
+bool BuildWarmStartPathFromHistory(
+    const PathProviderRuntimeState& state,
+    const TL::common::PathPoint& start_point,
+    uint32_t replan_status,
+    TL::planning::DiscretizedPath* warm_start_path,
+    TL::soc::GearPosition* warm_start_gear) {
+  if (warm_start_path == nullptr || warm_start_gear == nullptr) {
+    return false;
+  }
+
+  warm_start_path->clear();
+  *warm_start_gear = TL::soc::GearPosition::GEAR_NONE;
+  if (!ShouldUseHistoryWarmStart(replan_status) ||
+      !HasUsablePathOutput(state.last_output)) {
+    return false;
+  }
+
+  constexpr double kMaxWarmStartLatOffset = 0.75;
+  constexpr double kWarmStartSBuffer = 0.50;
+  constexpr double kMinWarmStartLength = 0.50;
+
+  for (const TL::planning::PathGearPair& path_pair :
+       state.last_output.partitioned_path) {
+    const TL::planning::DiscretizedPath& path = path_pair.first;
+    if (path.size() < 2U) {
+      continue;
+    }
+
+    TL::common::SLPoint start_sl;
+    if (!path.XYToSL(start_point.x, start_point.y, &start_sl)) {
+      continue;
+    }
+    const bool start_projects_to_path =
+        std::fabs(start_sl.l) < kMaxWarmStartLatOffset &&
+        start_sl.s > path.front().s - kWarmStartSBuffer &&
+        start_sl.s < path.back().s + kWarmStartSBuffer;
+    if (!start_projects_to_path) {
+      continue;
+    }
+
+    auto iter = std::find_if(
+        path.begin(), path.end(),
+        [&start_sl](const TL::common::PathPoint& path_point) {
+          return start_sl.s < path_point.s;
+        });
+    if (iter == path.end()) {
+      continue;
+    }
+
+    warm_start_path->assign(iter, path.end());
+    if (warm_start_path->empty()) {
+      continue;
+    }
+    RebaseWarmStartPath(start_point, warm_start_path);
+    if (warm_start_path->back().s - warm_start_path->front().s <
+        kMinWarmStartLength) {
+      warm_start_path->clear();
+      continue;
+    }
+
+    *warm_start_gear = path_pair.second;
+    return true;
+  }
+  return false;
+}
+
+struct PathProviderStrategySummary {
+  std::size_t warm_start_points{0U};
+  std::size_t splice_path_points{0U};
+  TL::soc::GearPosition splice_gear{TL::soc::GearPosition::GEAR_NONE};
+  int init_moving_direction{0};
+  int init_path_direction{0};
+  bool enable_init_kappa_cost{false};
+  bool limit_init_steer_margin{false};
+  bool disable_search{false};
+  std::string warm_start_source{"none"};
+};
+
+void ApplyPathProviderStrategy(
+    const TL::planning::RoiDeciderOutput& roi_output,
+    const PathProviderRuntimeState& provider_state,
+    const TL::soc::GearPosition warm_start_gear,
+    const std::size_t warm_start_points,
+    TL::planning::PathStrategy* path_strategy,
+    PathProviderStrategySummary* summary) {
+  if (path_strategy == nullptr) {
+    return;
+  }
+
+  path_strategy->path_search_strategy.Reset();
+  path_strategy->disable_search = false;
+  path_strategy->init_moving_direction =
+      warm_start_points > 1U ? GearToMovingDirection(warm_start_gear) : 0;
+
+  TL::planning::PathSearchStrategy& search_strategy =
+      path_strategy->path_search_strategy;
+  search_strategy.init_path_direction = 0;
+  search_strategy.enable_init_kappa_cost = warm_start_points > 1U;
+  search_strategy.limit_init_steer_margin = provider_state.has_history;
+  search_strategy.is_plan_from_start = true;
+  search_strategy.space_structure = BuildSpaceStructure(roi_output.scenario_type);
+  search_strategy.park_direction =
+      roi_output.is_parking_inwards ? TL::planning::ParkDirection::PARKIN
+                                    : TL::planning::ParkDirection::NODIRECTION;
+
+  if (summary != nullptr) {
+    summary->warm_start_points = warm_start_points;
+    summary->splice_path_points = warm_start_points;
+    summary->splice_gear = warm_start_gear;
+    summary->init_moving_direction = path_strategy->init_moving_direction;
+    summary->init_path_direction = search_strategy.init_path_direction;
+    summary->enable_init_kappa_cost =
+        search_strategy.enable_init_kappa_cost;
+    summary->limit_init_steer_margin =
+        search_strategy.limit_init_steer_margin;
+    summary->disable_search = path_strategy->disable_search;
+    summary->warm_start_source =
+        warm_start_points > 1U ? "history_splice" : "none";
+  }
+}
+
 struct PathProviderDecision {
   TL::common::PathPoint start_point;
   TL::common::PathPoint end_pose;
@@ -909,9 +1083,11 @@ TL::planning::OpenSpacePathInput BuildPathProviderInput(
     uint32_t parking_seq,
     const TL::planning::RoiDeciderOutput& roi_output,
     const std::vector<RuntimeObstacleInput>& obstacles,
+    const PathProviderRuntimeState& provider_state,
     uint32_t replan_status,
     const TL::common::PathPoint& start_point,
-    const TL::common::PathPoint& end_pose) {
+    const TL::common::PathPoint& end_pose,
+    PathProviderStrategySummary* strategy_summary) {
   TL::planning::OpenSpacePathInput input;
   input.path_id = static_cast<int>(parking_seq);
   input.replan_status = replan_status;
@@ -923,14 +1099,13 @@ TL::planning::OpenSpacePathInput BuildPathProviderInput(
   input.xy_bounds_is_local = true;
   input.obstacles_segments_vec = BuildObstacleSegments(roi_output, obstacles);
   input.dest_region_with_angle = roi_output.dest_region;
-  input.path_strategy.init_moving_direction = -1;
-  input.path_strategy.disable_search = false;
-  input.path_strategy.path_search_strategy.init_path_direction = 0;
-  input.path_strategy.path_search_strategy.is_plan_from_start = true;
-  input.path_strategy.path_search_strategy.space_structure =
-      BuildSpaceStructure(roi_output.scenario_type);
-  input.path_strategy.path_search_strategy.park_direction =
-      TL::planning::ParkDirection::PARKIN;
+  TL::soc::GearPosition warm_start_gear =
+      TL::soc::GearPosition::GEAR_NONE;
+  BuildWarmStartPathFromHistory(provider_state, start_point, replan_status,
+                                &input.warm_start_path, &warm_start_gear);
+  ApplyPathProviderStrategy(roi_output, provider_state, warm_start_gear,
+                            input.warm_start_path.size(),
+                            &input.path_strategy, strategy_summary);
   (void)metadata;
   return input;
 }
@@ -980,6 +1155,11 @@ bool RunPathProvider(const valet_parking_config_t& config,
            << ", smoothed=false"
            << ", history=reused"
            << ", replan=" << replan_text
+           << ", warm_start=not_applied"
+           << ", last_warm_start_points="
+           << provider_state->last_warm_start_points
+           << ", last_strategy_init_move="
+           << provider_state->last_strategy_init_moving_direction
            << ", generated_count=" << provider_state->generated_count
            << ", reused_count=" << provider_state->reused_count
            << ", external_vehicle="
@@ -989,11 +1169,13 @@ bool RunPathProvider(const valet_parking_config_t& config,
     return true;
   }
 
+  PathProviderStrategySummary strategy_summary;
   try {
     const TL::planning::OpenSpacePathInput input =
         BuildPathProviderInput(metadata, parking_seq, roi_output, obstacles,
-                               decision.replan_status,
-                               decision.start_point, decision.end_pose);
+                               *provider_state, decision.replan_status,
+                               decision.start_point, decision.end_pose,
+                               &strategy_summary);
     std::atomic<bool> early_stop_flag(false);
     TL::planning::OpenSpacePathGenerator generator(
         BuildPathProviderConfig(), TL::planning::LoadEP30VehicleParam());
@@ -1029,6 +1211,11 @@ bool RunPathProvider(const valet_parking_config_t& config,
   provider_state->end_pose = decision.end_pose;
   provider_state->obstacle_signature = decision.obstacle_signature;
   provider_state->last_output = *path_output;
+  provider_state->last_splice_gear = strategy_summary.splice_gear;
+  provider_state->last_warm_start_points =
+      strategy_summary.warm_start_points;
+  provider_state->last_strategy_init_moving_direction =
+      strategy_summary.init_moving_direction;
   ++provider_state->generated_count;
 
   std::ostringstream stream;
@@ -1040,6 +1227,19 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << ", history=generated"
          << ", replan=" << replan_text
          << ", reason=" << decision.reason
+         << ", warm_start=" << strategy_summary.warm_start_source
+         << ", warm_start_points=" << strategy_summary.warm_start_points
+         << ", splice_points=" << strategy_summary.splice_path_points
+         << ", strategy_init_move="
+         << strategy_summary.init_moving_direction
+         << ", strategy_init_path="
+         << strategy_summary.init_path_direction
+         << ", strategy_kappa_cost="
+         << (strategy_summary.enable_init_kappa_cost ? "true" : "false")
+         << ", strategy_limit_steer="
+         << (strategy_summary.limit_init_steer_margin ? "true" : "false")
+         << ", strategy_disable_search="
+         << (strategy_summary.disable_search ? "true" : "false")
          << ", generated_count=" << provider_state->generated_count
          << ", reused_count=" << provider_state->reused_count
          << ", external_vehicle="
