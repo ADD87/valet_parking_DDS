@@ -14,7 +14,7 @@ Options:
   --count N           Mock SelectedSlot publish count. Default: 3.
   --interval-ms N     Mock publish interval. Default: 500.
   --slot-mode MODE    SelectedSlot publisher mode. Default: valid.
-                       valid|empty|overflow|nan|degenerate-corners
+                       valid|empty|overflow|nan|degenerate-corners|target-moves
   --with-aux-inputs   Publish localization/chassis/obstacle samples before SelectedSlot.
   --aux-mode MODE     Aux publisher mode. Default: all-valid.
                        all-valid|invalid-localization|nan-localization|
@@ -108,6 +108,11 @@ done
 effective_count="${count}"
 effective_aux_count="${aux_count}"
 effective_aux_interval_ms="${aux_interval_ms}"
+if [[ "${slot_mode}" == "target-moves" ]]; then
+  if ((effective_count < 6)); then
+    effective_count=6
+  fi
+fi
 if [[ "${with_aux_inputs}" == "1" &&
       ( "${aux_mode}" == "moving-localization" ||
         "${aux_mode}" == "moving-localization-large" ||
@@ -273,6 +278,13 @@ if [[ "${slot_mode}" == "degenerate-corners" ]]; then
   wait_for_runner_log "selected parking lot corner geometry is degenerate" \
     "${runner_wait_seconds}" || true
 fi
+if [[ "${slot_mode}" == "target-moves" ]]; then
+  runner_wait_seconds=$(((timeout_ms + 999) / 1000))
+  if ((runner_wait_seconds < 5)); then
+    runner_wait_seconds=5
+  fi
+  wait_for_runner_log "replan=TARGET_UPDATE" "${runner_wait_seconds}" || true
+fi
 
 set +e
 wait "${subscriber_pid}"
@@ -322,8 +334,29 @@ require_subscriber_log() {
   fi
 }
 
+require_publisher_log() {
+  local pattern="$1"
+  local message="$2"
+  if ! grep -Eq "${pattern}" "${publisher_log}"; then
+    echo "[valet_parking_smoke] ${message}" >&2
+    validation_status=8
+  fi
+}
+
 case "${slot_mode}" in
   valid)
+    ;;
+  target-moves)
+    require_publisher_log "published sample [1-3]/[0-9]+ .*target=base" \
+      "missing base target samples in target-moves slot mode"
+    require_publisher_log "published sample [4-6]/[0-9]+ .*target=moved" \
+      "missing moved target samples in target-moves slot mode"
+    require_runner_log "PATH_PROVIDER ok.*history=generated, replan=TARGET_UPDATE.*reason=target_update" \
+      "missing generated path after selected slot target update"
+    require_runner_log "PATH_PROVIDER ok.*history=reused, replan=NONE.*generated_count=2" \
+      "missing history reuse after moved selected slot becomes stable"
+    require_subscriber_log "is_estop=false" \
+      "missing non-estop trajectory for target-moves slot mode"
     ;;
   degenerate-corners)
     require_runner_log "selected parking lot corner geometry is degenerate" \

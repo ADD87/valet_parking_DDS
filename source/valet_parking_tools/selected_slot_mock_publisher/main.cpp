@@ -24,6 +24,8 @@ struct PublisherOptions {
   uint32_t interval_ms{100U};
 };
 
+constexpr uint32_t kTargetMovesStartIndex = 3U;
+
 uint64_t NowMilliseconds() {
   return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch()).count());
@@ -52,7 +54,8 @@ bool ParseUint32(const std::string& text, uint32_t* out_value) {
 
 bool IsModeSupported(const std::string& mode) {
   return mode == "valid" || mode == "empty" || mode == "overflow" ||
-         mode == "nan" || mode == "degenerate-corners";
+         mode == "nan" || mode == "degenerate-corners" ||
+         mode == "target-moves";
 }
 
 std::string ReturnCodeToString(magna::dds::ReturnCode_t rc) {
@@ -146,10 +149,13 @@ std::vector<PsPoint> BuildSlotCorners(double center_x,
   return corners;
 }
 
-ParkingLot BuildParkingLot(const PublisherOptions& options) {
+ParkingLot BuildParkingLot(const PublisherOptions& options, uint32_t index) {
   const double center_x = (options.mode == "nan")
       ? std::numeric_limits<double>::quiet_NaN()
-      : 8.5;
+      : ((options.mode == "target-moves" &&
+          index >= kTargetMovesStartIndex)
+             ? 9.3
+             : 8.5);
   const double center_y = 2.0;
   const double heading = 0.2;
   const double length = 5.2;
@@ -203,7 +209,7 @@ SelectedSlot BuildSample(const PublisherOptions& options, uint32_t index) {
   }
 
   std::vector<ParkingLot> lots;
-  lots.push_back(BuildParkingLot(options));
+  lots.push_back(BuildParkingLot(options, index));
   sample.parking_lots(lots);
   sample.count(options.mode == "overflow" ? 999999U : static_cast<uint32_t>(lots.size()));
   sample.is_valid(true);
@@ -215,7 +221,7 @@ void PrintUsage() {
             << "Options:\n"
             << "  --domain-id=<uint32>          DDS domain id (default 0)\n"
             << "  --topic=<name>                topic name (default /selected_slot)\n"
-            << "  --mode=<valid|empty|overflow|nan|degenerate-corners>\n"
+            << "  --mode=<valid|empty|overflow|nan|degenerate-corners|target-moves>\n"
             << "  --count=<uint32>              number of samples to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between samples (default 100)\n"
             << "  --help                        show this message\n";
@@ -372,6 +378,9 @@ int main(int argc, char* argv[]) {
               << " count=" << sample.count()
               << " lots=" << sample.parking_lots().size()
               << " is_valid=" << (sample.is_valid() ? "true" : "false")
+              << " target="
+              << (options.mode == "target-moves" &&
+                  i >= kTargetMovesStartIndex ? "moved" : "base")
               << std::endl;
 
     if (i + 1U < options.count && options.interval_ms > 0U) {
