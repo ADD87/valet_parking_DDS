@@ -111,15 +111,19 @@ runtime_status:
 
 next_action:
   id: NEXT-032
-  description: 继续沿用简化 DDS Topic，验证 SelectedSlot 多车位列表中 opt_parking_seq 选择不同 ParkingLot 的行为：构造同一帧只选中一个车位但消息内包含多个 ParkingLot 的样本，确认 opt_parking_seq 切换时 adapter 选择对应车位并触发 TARGET_UPDATE/重新生成路径，稳定后回到 history=reused。仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
+  description: 泊车算法源码本地化：把当前 valet_parking/CMakeLists.txt 实际编译使用的 parking_algorithm_standalone 最小源码集合复制到 applications/source/valet_parking/algorithm/parking_algorithm_standalone，并修改 CMake 改用本地相对路径，解除 applications 对 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径的构建依赖。只迁移当前已验证链路所需源码和头文件依赖，不全量复制 standalone，不复制 proto/**/*.pb.*、ROS2 节点、demo、out 或未验证第三方依赖。完成后必须保持 x86 构建、核心 smoke 回归和 m57 交叉编译通过。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
+    - 新增 applications/source/valet_parking/algorithm/**
     - 修改 applications/source/valet_parking_tools/**
     - 修改 applications/config/valet_parking_mvp_bom.yaml
     - 维护 applications/.gitignore 与 applications Git 状态
   forbidden_actions:
     - 修改 compile/ 或 thirdparty/
+    - 全量复制 parking_algorithm_standalone 整个目录
+    - 复制 standalone 的 proto/**/*.pb.* 或 ROS2/demo/out 产物进入产品构建链路
+    - 修改 E:\APA\DDS\parking_algorithm_standalone 原始参考目录
     - 扩展到完整 Stage/Frame/DependencyInjector 框架
     - 将无板端 runtime 写成已通过
 
@@ -152,6 +156,9 @@ decision_records:
     status: ACTIVE
   - id: DR-003
     file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-003_IDL线协议与生成代码管理策略.md
+    status: ACTIVE
+  - id: DR-004
+    file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-004_泊车算法源码本地化策略.md
     status: ACTIVE
 
 status_snapshots:

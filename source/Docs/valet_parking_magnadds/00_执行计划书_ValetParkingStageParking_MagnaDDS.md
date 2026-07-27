@@ -796,6 +796,20 @@ flowchart TB
 | 生成的 `*.pb.*` | 不直接复用 | standalone Protobuf 版本与当前 Thirdparty 可能不兼容 |
 | IPOPT/glog/gflags/Abseil 相关代码 | 不直接引入 | Thirdparty 中未确认具备正式版本 |
 
+### 13.4 NEXT-032：泊车算法源码本地化
+
+在 `SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory` MVP 链路已通过 x86 smoke 和 m57 交叉编译后，下一步优先做源码本地化，而不是继续扩展更多 smoke 场景。
+
+目标：
+
+1. 把当前 `valet_parking/CMakeLists.txt` 实际编译使用的 `parking_algorithm_standalone` 最小源码集合复制到 `applications/source/valet_parking/algorithm/parking_algorithm_standalone`。
+2. 修改 CMake，让 `applications` 不再依赖 `E:\APA\DDS\parking_algorithm_standalone` 外部绝对路径。
+3. 只迁移当前已验证链路所需源码和头文件依赖。
+4. 不全量复制 standalone，不复制 `proto/**/*.pb.*`、ROS2 节点、demo、out 或未验证第三方依赖。
+5. 完成后保持 x86 构建、核心 smoke 回归和 m57 交叉编译通过。
+
+详细执行步骤以 `03_泊车算法源码本地化执行计划.md` 和 `decision_records/DR-004_泊车算法源码本地化策略.md` 为准。
+
 ---
 
 ## 14. 阶段执行规则

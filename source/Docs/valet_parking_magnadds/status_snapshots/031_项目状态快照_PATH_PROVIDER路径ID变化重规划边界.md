@@ -115,6 +115,6 @@ bash applications/source/valet_parking_tools/build_valet_parking.sh \
 
 ## 6. 下一步
 
-进入 NEXT-032：继续沿用简化 DDS Topic，验证 SelectedSlot 多车位列表中 `opt_parking_seq` 选择不同 `ParkingLot` 的行为。构造同一消息内包含多个 `ParkingLot` 的样本，确认 `opt_parking_seq` 切换时 adapter 选择对应车位并触发 `TARGET_UPDATE`/重新生成路径，稳定后回到 `history=reused`。
+进入 NEXT-032：泊车算法源码本地化。把当前 `valet_parking/CMakeLists.txt` 实际编译使用的 `parking_algorithm_standalone` 最小源码集合复制到 `applications/source/valet_parking/algorithm/parking_algorithm_standalone`，并修改 CMake 改用本地相对路径，解除 `applications` 对 `E:\APA\DDS\parking_algorithm_standalone` 外部绝对路径的构建依赖。
 
-仍不引入完整 `Frame/DependencyInjector`、线程管理、NLP smoother 或真实车端 Topic 协议。
+本地化只迁移当前已验证链路所需源码和头文件依赖，不全量复制 standalone，不复制 `proto/**/*.pb.*`、ROS2 节点、demo、out 或未验证第三方依赖。完成后必须保持 x86 构建、核心 smoke 回归和 m57 交叉编译通过。仍不引入完整 `Frame/DependencyInjector`、线程管理、NLP smoother 或真实车端 Topic 协议。

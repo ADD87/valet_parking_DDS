@@ -11,6 +11,7 @@
 | `00_执行计划书_ValetParkingStageParking_MagnaDDS.md` | 总体执行计划、阶段划分、输入输出、验收标准、风险点 | 每次开始工作前、阶段验收前 |
 | `01_换机中断交接与防偏离方案.md` | AI 无缝交接、防止执行偏离、卡住排查 Runbook | 换电脑/换 AI/卡住/方案变更时 |
 | `02_零基础解释_本阶段代码与DDS术语.md` | 用生活类比解释 DDS 术语、本阶段新增代码文件和数据流 | 对 DDS 或当前代码分层不熟时先看 |
+| `03_泊车算法源码本地化执行计划.md` | NEXT-032 源码本地化的范围、路径、步骤和验收标准 | 开始搬迁算法源码前 |
 | `STATUS.yaml` | 当前唯一状态入口，记录当前阶段、下一步、阻塞项 | 每次接手第一眼先看 |
 | `status_snapshots/` | 每个阶段完成后输出一份带序号的项目状态快照 | 阶段完成、暂停、恢复前 |
 | `decision_records/` | 所有偏离原计划或关键架构选择的决策留痕 | 方案争议、后续追溯 |
@@ -18,7 +19,7 @@
 
 ## 当前约束
 
-1. 首版只做 MagnaDDS 通信骨架和 m57 可编译 `.so`，不接完整泊车算法。
+1. 当前 MVP 已接入 `ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER` 轻量链路，但仍不接完整 `OpenSpacePathProvider` 大类、完整 `Frame/DependencyInjector`、线程管理或 NLP smoother。
 2. 不修改 `compile/`、`thirdparty/`，不覆盖 `math/`、`sort/`、历史 temp code。
 3. 只链接当前 workspace 的 Thirdparty MagnaDDS；官方 SDK 仅用于 IDL 生成和 API 参考。
 4. 当前无 m57 板端，板端 DDS 通信验证只能标记为 `BLOCKED_NO_M57_BOARD`，不能冒充已通过。
