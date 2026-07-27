@@ -923,6 +923,7 @@ PathProviderPreCheckResult RunPathProviderPreCheck(
            << result.obstacle_segment_count;
     return MakePathProviderPreCheckFailure(stream.str());
   }
+  constexpr double kObstacleLocalBoundsMargin = 250.0;
   for (std::size_t i = 0U; i < obstacle_segments.size(); ++i) {
     const TL::common::math::LineSegment2d& segment =
         obstacle_segments[i].first;
@@ -936,6 +937,32 @@ PathProviderPreCheckResult RunPathProviderPreCheck(
     if (!std::isfinite(buffer) || buffer < 0.0) {
       std::ostringstream stream;
       stream << "invalid_obstacle_buffer[" << i << "]=" << buffer;
+      return MakePathProviderPreCheckFailure(stream.str());
+    }
+    const TL::common::math::Vec2d segment_start_local =
+        TransformPointToRoiLocal(roi_output.origin_point,
+                                 roi_output.origin_heading,
+                                 segment.start().x(), segment.start().y());
+    const TL::common::math::Vec2d segment_end_local =
+        TransformPointToRoiLocal(roi_output.origin_point,
+                                 roi_output.origin_heading,
+                                 segment.end().x(), segment.end().y());
+    if (!IsFiniteVec2d(segment_start_local) ||
+        !IsFiniteVec2d(segment_end_local)) {
+      std::ostringstream stream;
+      stream << "non_finite_obstacle_segment_local[" << i << "]";
+      return MakePathProviderPreCheckFailure(stream.str());
+    }
+    if (!IsLocalPointNearBounds(segment_start_local, roi_output.xy_bounds,
+                                kObstacleLocalBoundsMargin) ||
+        !IsLocalPointNearBounds(segment_end_local, roi_output.xy_bounds,
+                                kObstacleLocalBoundsMargin)) {
+      std::ostringstream stream;
+      stream << "obstacle_segment_outside_xy_bounds[" << i << "]"
+             << " local_start=(" << segment_start_local.x() << ","
+             << segment_start_local.y() << ")"
+             << ", local_end=(" << segment_end_local.x() << ","
+             << segment_end_local.y() << ")";
       return MakePathProviderPreCheckFailure(stream.str());
     }
   }

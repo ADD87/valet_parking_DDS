@@ -25,6 +25,7 @@ enum class AuxPublishMode {
   kMovingLocalization,
   kMovingLocalizationLarge,
   kFarLocalization,
+  kFarObstacles,
   kManyObstacles,
 };
 
@@ -107,6 +108,10 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
   }
   if (text == "far-localization") {
     *out_mode = AuxPublishMode::kFarLocalization;
+    return true;
+  }
+  if (text == "far-obstacles") {
+    *out_mode = AuxPublishMode::kFarObstacles;
     return true;
   }
   if (text == "many-obstacles") {
@@ -211,6 +216,9 @@ std::string ObstacleStatusForLog(const PublisherOptions& options,
   if (options.mode == AuxPublishMode::kManyObstacles) {
     return "many-valid";
   }
+  if (options.mode == AuxPublishMode::kFarObstacles) {
+    return "far-valid";
+  }
   return sample.is_valid() ? "valid" : "invalid";
 }
 
@@ -265,6 +273,8 @@ Obstacle BuildObstacle(const PublisherOptions& options,
     obstacle.id(1000U);
   } else if (options.mode == AuxPublishMode::kManyObstacles) {
     obstacle.id(100000U + index * 1000U + obstacle_index);
+  } else if (options.mode == AuxPublishMode::kFarObstacles) {
+    obstacle.id(200000U + index);
   } else {
     obstacle.id(1000U + index);
   }
@@ -275,6 +285,9 @@ Obstacle BuildObstacle(const PublisherOptions& options,
     const uint32_t column = obstacle_index % 16U;
     obstacle.center_x(18.0 + static_cast<double>(column) * 0.8);
     obstacle.center_y(18.0 + static_cast<double>(row) * 0.8);
+  } else if (options.mode == AuxPublishMode::kFarObstacles) {
+    obstacle.center_x(1000.0);
+    obstacle.center_y(1000.0);
   } else {
     obstacle.center_x(30.0);
     obstacle.center_y(30.0);
@@ -327,7 +340,7 @@ void PrintUsage() {
             << "  --mode=<name>                 all-valid|invalid-localization|nan-localization|\n"
             << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry|\n"
             << "                                moving-localization|moving-localization-large|\n"
-            << "                                far-localization|many-obstacles\n"
+            << "                                far-localization|far-obstacles|many-obstacles\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";

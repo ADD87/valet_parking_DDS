@@ -24,18 +24,18 @@ local_git:
 
 current_phase:
   id: Fast-2
-  name: .so + typed DDS + PATH_PROVIDER obstacle segment overload smoke
-  status: PASS_PATH_PROVIDER_OBSTACLE_SEGMENT_OVERLOAD_X86_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前仍使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；NEXT-018 至 NEXT-025 已完成轻量运行态复用、warm_start/trace_adjust 诊断、vehicle_lot_precheck、moving-localization-large 负向 smoke 和 SelectedSlot degenerate-corners 几何退化保护。NEXT-026 新增 many-obstacles 辅助输入样本，保持外部障碍物上限 128 不放宽，将 PATH_PROVIDER_PRECHECK 可进入路径搜索的障碍物线段上限收紧为 500；当 128 个合法障碍物产生 512 条线段时，adapter 在 PATH_PROVIDER 前输出 PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512 并发布 estop。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
+  name: .so + typed DDS + PATH_PROVIDER obstacle local bounds smoke
+  status: PASS_PATH_PROVIDER_OBSTACLE_LOCAL_BOUNDS_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前仍使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；NEXT-018 至 NEXT-026 已完成轻量运行态复用、warm_start/trace_adjust 诊断、vehicle_lot_precheck、moving-localization-large、SelectedSlot degenerate-corners 和 many-obstacles 负向 smoke。NEXT-027 新增 far-obstacles 辅助输入样本，发布一个合法但坐标极远的静态障碍物；ValetParkingStageParkingAdapter 在 PATH_PROVIDER_PRECHECK 中把障碍物线段端点转换到 ROI local 坐标，并在明显落出 xy_bounds 大 margin 时输出 PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[...] 和 estop。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '026'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/026_项目状态快照_PATH_PROVIDER障碍物线段过载边界.md
+  id: '027'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/027_项目状态快照_PATH_PROVIDER障碍物局部边界.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-27
-  summary: 已完成 NEXT-026 PATH_PROVIDER 障碍物线段过载边界：aux_input_mock_publisher 新增 many-obstacles 模式，发布 128 个合法静态障碍物；ValetParkingStageParkingAdapter 将 PATH_PROVIDER_PRECHECK 的障碍物线段上限收紧为 500，使 128 个障碍物产生的 512 条线段在 PATH_PROVIDER 前被拒绝；smoke_valet_parking_x86.sh 新增 many-obstacles 断言，要求 runner 显示 aux obstacles count=128、PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512、estop=true，subscriber 显示 is_estop=true。x86 构建通过；many-obstacles 负向 smoke、默认 valid 回归、all-valid 辅助输入回归通过；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
+  summary: 已完成 NEXT-027 PATH_PROVIDER 障碍物局部边界：aux_input_mock_publisher 新增 far-obstacles 模式，发布合法定位/底盘和 1 个合法但位于 (1000,1000) 的静态障碍物；ValetParkingStageParkingAdapter 在 PATH_PROVIDER_PRECHECK 中新增障碍物线段 ROI local bounds 检查，远障碍物会输出 obstacle_segment_outside_xy_bounds[...] 与 local_start/local_end 诊断并 estop；smoke_valet_parking_x86.sh 新增 far-obstacles 断言，要求 runner 显示 aux obstacles count=1、PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds、estop=true，subscriber 显示 is_estop=true。x86 构建通过；far-obstacles 负向 smoke、默认 valid 回归、all-valid 辅助输入回归通过；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
   evidence:
     - applications/config/valet_parking_mvp_bom.yaml
     - applications/source/valet_parking/idl/valet_parking_topics.idl
@@ -53,12 +53,12 @@ last_successful_action:
     - applications/source/valet_parking_tools/selected_slot_mock_publisher/main.cpp
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
     - applications/source/valet_parking_tools/valet_parking_runner/main.cpp
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/026_项目状态快照_PATH_PROVIDER障碍物线段过载边界.md
-    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/x86/smoke_latest/domain_199_20260727_204042_1013
-    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/x86/smoke_latest/domain_200_20260727_204112_723
-    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/x86/smoke_latest/domain_201_20260727_204112_724
-    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/027_项目状态快照_PATH_PROVIDER障碍物局部边界.md
+    - out/valet_parking_obstacle_local_bounds_027/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_obstacle_local_bounds_027/valet_parking_mvp/x86/smoke_latest/domain_202_20260727_205509_1555
+    - out/valet_parking_obstacle_local_bounds_027/valet_parking_mvp/x86/smoke_latest/domain_203_20260727_205526_1704
+    - out/valet_parking_obstacle_local_bounds_027/valet_parking_mvp/x86/smoke_latest/domain_204_20260727_205526_1712
+    - out/valet_parking_obstacle_local_bounds_027/valet_parking_mvp/m57/lib/libvalet_parking.so
 
 blockers:
   - id: B-001
@@ -98,15 +98,16 @@ runtime_status:
   x86_path_provider_negative_boundary_smoke_test: PASS
   x86_selected_slot_geometry_boundary_smoke_test: PASS
   x86_path_provider_obstacle_segment_overload_smoke_test: PASS
+  x86_path_provider_obstacle_local_bounds_smoke_test: PASS
   x86_vehicle_lot_precheck_far_localization_test: PASS
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-026 新增 many-obstacles，在 domain_199 发布 128 个合法静态障碍物，runner 显示 aux obstacles count=128、PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512、estop=true，subscriber 显示 is_estop=true；默认 valid 回归在 domain_200 仍显示 179 点 PlanningTrajectory、PATH_PROVIDER_PRECHECK ok、history=generated 后 history=reused；all-valid 辅助输入回归在 domain_201 显示 aux localization/chassis/obstacles 与 external_vehicle=true/external_obstacles=1。NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-027 新增 far-obstacles，在 domain_202 发布 1 个位于 (1000,1000) 的合法静态障碍物，runner 显示 aux obstacles count=1、PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[0]、local_start/local_end、estop=true，subscriber 显示 is_estop=true；默认 valid 回归在 domain_203 仍显示 179 点 PlanningTrajectory、PATH_PROVIDER_PRECHECK ok、history=generated 后 history=reused；all-valid 辅助输入回归在 domain_204 显示 aux localization/chassis/obstacles 与 external_vehicle=true/external_obstacles=1、PATH_PROVIDER_PRECHECK ok、obstacle_segments=4。NEXT-026 的 many-obstacles、NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-027
-  description: 继续沿用简化 DDS Topic，在 NEXT-026 障碍物线段过载边界通过后，优先增加 PATH_PROVIDER_PRECHECK 对外部障碍物局部几何位置的保护，例如障碍物线段明显落在 ROI local xy_bounds 外时输出可诊断 estop；仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
+  id: NEXT-028
+  description: 继续沿用简化 DDS Topic，在 NEXT-027 障碍物局部边界通过后，优先验证障碍物输入变化对 PATH_PROVIDER 运行态复用和 replan 标记的影响，例如外部障碍物从无到有或签名变化时应触发 BLOCK_BY_STATIC_OBSTACLE/重新生成路径，而不是误复用历史路径；仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -262,3 +263,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/026_项目状态快照_PATH_PROVIDER障碍物线段过载边界.md
     phase: Fast-2
     status: PASS_PATH_PROVIDER_OBSTACLE_SEGMENT_OVERLOAD_X86_M57_STATIC_BLOCKED_BOARD
+  - id: '027'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/027_项目状态快照_PATH_PROVIDER障碍物局部边界.md
+    phase: Fast-2
+    status: PASS_PATH_PROVIDER_OBSTACLE_LOCAL_BOUNDS_X86_M57_STATIC_BLOCKED_BOARD

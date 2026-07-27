@@ -20,7 +20,7 @@ Options:
                        all-valid|invalid-localization|nan-localization|
                        chassis-only|invalid-obstacles|bad-obstacle-geometry|
                        moving-localization|moving-localization-large|
-                       far-localization|many-obstacles
+                       far-localization|far-obstacles|many-obstacles
   --aux-count N       Aux sample group count. Default: 3.
   --aux-interval-ms N Aux sample group interval. Default: 200.
   --disable-aux-input-topics
@@ -485,6 +485,20 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           echo "[valet_parking_smoke] missing estop trajectory in far-localization mode" >&2
           validation_status=8
         fi
+        ;;
+      far-obstacles)
+        require_log "aux localization #[0-9]+" \
+          "missing aux localization consumption in far-obstacles mode"
+        require_log "aux chassis #[0-9]+" \
+          "missing aux chassis consumption in far-obstacles mode"
+        require_log "aux obstacles #[0-9]+ \\(count=1\\)" \
+          "missing aux obstacle consumption in far-obstacles mode"
+        require_log "PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds\\[[0-9]+\\]" \
+          "missing obstacle local bounds precheck failure"
+        require_log "estop=true" \
+          "missing runner estop for far-obstacles mode"
+        require_subscriber_log "is_estop=true" \
+          "missing subscriber estop for far-obstacles mode"
         ;;
       many-obstacles)
         require_log "aux localization #[0-9]+" \
