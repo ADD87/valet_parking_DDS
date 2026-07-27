@@ -4,13 +4,13 @@ set(MODULE_INTERFACE include/valet_parking_c_api.h)
 set(MODULE_DEPENDS thirdparty::magna-dds-core thirdparty::magna-dds-impl thirdparty::eigen pthread)
 
 get_filename_component(STANDALONE_PARKING_ROOT
-    "${APP_SOURCE_ROOT}/../../../../parking_algorithm_standalone"
+    "${CMAKE_CURRENT_SOURCE_DIR}/algorithm/parking_algorithm_standalone"
     ABSOLUTE
 )
 
 if(NOT EXISTS "${STANDALONE_PARKING_ROOT}/planning/tasks/deciders/open_space_decider/open_space_roi_decider.h")
     message(FATAL_ERROR
-        "[valet_parking] parking_algorithm_standalone not found at: ${STANDALONE_PARKING_ROOT}")
+        "[valet_parking] local parking_algorithm_standalone subset not found at: ${STANDALONE_PARKING_ROOT}")
 endif()
 
 set(STANDALONE_ROI_SOURCES
