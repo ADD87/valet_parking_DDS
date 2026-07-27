@@ -57,6 +57,28 @@ struct RuntimeObstacleInput {
   double velocity_y{0.0};
 };
 
+struct PathProviderRuntimeState {
+  void Reset() {
+    has_history = false;
+    path_id = -1;
+    start_point = TL::common::PathPoint();
+    end_pose = TL::common::PathPoint();
+    obstacle_signature = 0U;
+    last_output.Reset();
+    generated_count = 0U;
+    reused_count = 0U;
+  }
+
+  bool has_history{false};
+  int path_id{-1};
+  TL::common::PathPoint start_point;
+  TL::common::PathPoint end_pose;
+  uint64_t obstacle_signature{0U};
+  TL::planning::OpenSpacePathOutput last_output;
+  uint64_t generated_count{0U};
+  uint64_t reused_count{0U};
+};
+
 TL::soc::GearPosition MapApiGearPosition(
     valet_parking_gear_position_t gear) {
   switch (gear) {
@@ -138,6 +160,7 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
     replan_triggered_by_speed_plan = false;
     current_path_has_collision_risk = false;
     last_published_gear = TL::soc::GearPosition::GEAR_PARKING;
+    path_provider.Reset();
     return path_partition_ready;
   }
 
@@ -236,6 +259,7 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
   TL::planning::OpenSpacePathPartition path_partition;
   TL::planning::OpenSpaceSpeedOptimizerConfig speed_config;
   TL::planning::OpenSpaceSpeedOptimizer speed_optimizer;
+  PathProviderRuntimeState path_provider;
   TL::planning_internal::AvpSpeedPlanCollisionInfo
       last_speed_plan_collision_info;
   RuntimeVehicleInput vehicle_input;
@@ -692,22 +716,209 @@ TL::planning::HybridAStarConfig BuildPathProviderConfig() {
   return config;
 }
 
-TL::planning::OpenSpacePathInput BuildPathProviderInput(
+constexpr uint32_t kReplanNoValidPath = 1U;
+constexpr uint32_t kReplanTargetUpdate = 2U;
+constexpr uint32_t kReplanBlockByStaticObstacle = 4U;
+constexpr uint32_t kReplanDynamicReplan = 256U;
+constexpr uint32_t kReplanTraceReplan = 512U;
+constexpr uint32_t kReplanForSpeedWarn = 4096U;
+
+uint64_t HashCombine(uint64_t seed, uint64_t value) {
+  constexpr uint64_t kMagic = 0x9e3779b97f4a7c15ULL;
+  return seed ^ (value + kMagic + (seed << 6U) + (seed >> 2U));
+}
+
+uint64_t QuantizeForHash(double value, double resolution) {
+  if (!std::isfinite(value) || resolution <= 0.0) {
+    return 0U;
+  }
+  return static_cast<uint64_t>(
+      static_cast<int64_t>(std::llround(value / resolution)));
+}
+
+uint64_t BuildObstacleSignature(
+    const std::vector<RuntimeObstacleInput>& obstacles) {
+  uint64_t signature = 1469598103934665603ULL;
+  signature = HashCombine(signature, static_cast<uint64_t>(obstacles.size()));
+  for (const RuntimeObstacleInput& obstacle : obstacles) {
+    signature = HashCombine(signature, static_cast<uint64_t>(obstacle.id));
+    signature = HashCombine(signature, static_cast<uint64_t>(obstacle.type));
+    signature = HashCombine(signature, obstacle.is_dynamic ? 1ULL : 0ULL);
+    signature = HashCombine(signature,
+                            QuantizeForHash(obstacle.center_x, 0.01));
+    signature = HashCombine(signature,
+                            QuantizeForHash(obstacle.center_y, 0.01));
+    signature = HashCombine(signature,
+                            QuantizeForHash(obstacle.heading, 0.001));
+    signature = HashCombine(signature,
+                            QuantizeForHash(obstacle.length, 0.01));
+    signature = HashCombine(signature,
+                            QuantizeForHash(obstacle.width, 0.01));
+    signature = HashCombine(signature,
+                            QuantizeForHash(obstacle.velocity_x, 0.01));
+    signature = HashCombine(signature,
+                            QuantizeForHash(obstacle.velocity_y, 0.01));
+  }
+  return signature;
+}
+
+bool IsSamePathPoint(const TL::common::PathPoint& lhs,
+                     const TL::common::PathPoint& rhs,
+                     double distance_threshold,
+                     double heading_threshold) {
+  return std::hypot(lhs.x - rhs.x, lhs.y - rhs.y) < distance_threshold &&
+         std::fabs(NormalizeAngle(lhs.theta - rhs.theta)) < heading_threshold;
+}
+
+bool HasUsablePathOutput(
+    const TL::planning::OpenSpacePathOutput& path_output) {
+  std::size_t point_count = 0U;
+  for (const auto& path_pair : path_output.partitioned_path) {
+    point_count += path_pair.first.size();
+  }
+  return path_output.error_msg.empty() &&
+         !path_output.partitioned_path.empty() &&
+         point_count >= 2U;
+}
+
+bool IsHistoryPathReusable(
+    const PathProviderRuntimeState& state,
+    const TL::common::PathPoint& start_point) {
+  if (!state.has_history || !HasUsablePathOutput(state.last_output)) {
+    return false;
+  }
+
+  for (const TL::planning::PathGearPair& path_pair :
+       state.last_output.partitioned_path) {
+    const TL::planning::DiscretizedPath& path = path_pair.first;
+    if (path.empty()) {
+      continue;
+    }
+    if (path.IsPointIn(start_point, 0.30, 0.35) ||
+        TL::planning::DiscretizedPath::IsSamePoint(path.front(), start_point,
+                                                   0.30, 0.35)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void AppendReason(std::string* text, const std::string& reason) {
+  if (text == nullptr || reason.empty()) {
+    return;
+  }
+  if (!text->empty()) {
+    *text += "|";
+  }
+  *text += reason;
+}
+
+std::string ReplanStatusToString(uint32_t status) {
+  if (status == 0U) {
+    return "NONE";
+  }
+
+  std::string text;
+  if ((status & kReplanNoValidPath) != 0U) {
+    AppendReason(&text, "NO_VALID_PATH");
+  }
+  if ((status & kReplanTargetUpdate) != 0U) {
+    AppendReason(&text, "TARGET_UPDATE");
+  }
+  if ((status & kReplanBlockByStaticObstacle) != 0U) {
+    AppendReason(&text, "BLOCK_BY_STATIC_OBSTACLE");
+  }
+  if ((status & kReplanDynamicReplan) != 0U) {
+    AppendReason(&text, "DYNAMIC_REPLAN");
+  }
+  if ((status & kReplanTraceReplan) != 0U) {
+    AppendReason(&text, "TRACE_REPLAN");
+  }
+  if ((status & kReplanForSpeedWarn) != 0U) {
+    AppendReason(&text, "REPLAN_FOR_SPEED_WARN");
+  }
+  return text.empty() ? "UNKNOWN" : text;
+}
+
+struct PathProviderDecision {
+  TL::common::PathPoint start_point;
+  TL::common::PathPoint end_pose;
+  uint64_t obstacle_signature{0U};
+  uint32_t replan_status{0U};
+  bool can_reuse_history{false};
+  std::string reason;
+};
+
+PathProviderDecision BuildPathProviderDecision(
     const valet_parking_config_t& config,
-    const InputMetadata& metadata,
     uint32_t parking_seq,
     const TL::planning::RoiDeciderOutput& roi_output,
     const RuntimeVehicleInput& vehicle_input,
-    const std::vector<RuntimeObstacleInput>& obstacles) {
-  TL::planning::OpenSpacePathInput input;
-  input.path_id = static_cast<int>(parking_seq);
-  input.replan_status = 0U;
-  input.rotate_angle = roi_output.origin_heading;
-  input.translate_origin = roi_output.origin_point;
-  input.start_point = BuildStartPathPoint(config, vehicle_input);
-  input.end_pose =
+    const std::vector<RuntimeObstacleInput>& obstacles,
+    bool replan_triggered_by_speed_plan,
+    bool current_path_has_collision_risk,
+    const PathProviderRuntimeState& state) {
+  PathProviderDecision decision;
+  decision.start_point = BuildStartPathPoint(config, vehicle_input);
+  decision.end_pose =
       roi_output.has_fine_tuned ? roi_output.fine_tuned_end_pose
                                 : roi_output.end_pose;
+  decision.obstacle_signature = BuildObstacleSignature(obstacles);
+
+  if (!state.has_history || !HasUsablePathOutput(state.last_output)) {
+    decision.replan_status |= kReplanNoValidPath;
+    AppendReason(&decision.reason, "no_history");
+  } else {
+    if (state.path_id != static_cast<int>(parking_seq) ||
+        !IsSamePathPoint(state.end_pose, decision.end_pose, 0.05, 0.03)) {
+      decision.replan_status |= kReplanTargetUpdate;
+      AppendReason(&decision.reason, "target_update");
+    }
+
+    if (state.obstacle_signature != decision.obstacle_signature) {
+      decision.replan_status |= kReplanBlockByStaticObstacle;
+      AppendReason(&decision.reason, "obstacles_changed");
+    }
+
+    if (!IsHistoryPathReusable(state, decision.start_point)) {
+      decision.replan_status |= kReplanTraceReplan;
+      AppendReason(&decision.reason, "history_start_mismatch");
+    }
+  }
+
+  if (replan_triggered_by_speed_plan) {
+    decision.replan_status |= kReplanForSpeedWarn;
+    AppendReason(&decision.reason, "speed_replan");
+  }
+  if (current_path_has_collision_risk) {
+    decision.replan_status |= kReplanDynamicReplan;
+    AppendReason(&decision.reason, "collision_risk");
+  }
+
+  decision.can_reuse_history =
+      state.has_history && decision.replan_status == 0U &&
+      IsHistoryPathReusable(state, decision.start_point);
+  if (decision.reason.empty()) {
+    decision.reason = decision.can_reuse_history ? "history_valid" : "NONE";
+  }
+  return decision;
+}
+
+TL::planning::OpenSpacePathInput BuildPathProviderInput(
+    const InputMetadata& metadata,
+    uint32_t parking_seq,
+    const TL::planning::RoiDeciderOutput& roi_output,
+    const std::vector<RuntimeObstacleInput>& obstacles,
+    uint32_t replan_status,
+    const TL::common::PathPoint& start_point,
+    const TL::common::PathPoint& end_pose) {
+  TL::planning::OpenSpacePathInput input;
+  input.path_id = static_cast<int>(parking_seq);
+  input.replan_status = replan_status;
+  input.rotate_angle = roi_output.origin_heading;
+  input.translate_origin = roi_output.origin_point;
+  input.start_point = start_point;
+  input.end_pose = end_pose;
   input.xy_bounds = roi_output.xy_bounds;
   input.xy_bounds_is_local = true;
   input.obstacles_segments_vec = BuildObstacleSegments(roi_output, obstacles);
@@ -739,16 +950,50 @@ bool RunPathProvider(const valet_parking_config_t& config,
                      const TL::planning::RoiDeciderOutput& roi_output,
                      const RuntimeVehicleInput& vehicle_input,
                      const std::vector<RuntimeObstacleInput>& obstacles,
+                     bool replan_triggered_by_speed_plan,
+                     bool current_path_has_collision_risk,
+                     PathProviderRuntimeState* provider_state,
                      TL::planning::OpenSpacePathOutput* path_output,
                      std::string* status_reason) {
-  if (path_output == nullptr || status_reason == nullptr) {
+  if (provider_state == nullptr || path_output == nullptr ||
+      status_reason == nullptr) {
     return false;
+  }
+
+  const PathProviderDecision decision = BuildPathProviderDecision(
+      config, parking_seq, roi_output, vehicle_input, obstacles,
+      replan_triggered_by_speed_plan, current_path_has_collision_risk,
+      *provider_state);
+  const std::string replan_text =
+      ReplanStatusToString(decision.replan_status);
+
+  if (decision.can_reuse_history) {
+    *path_output = provider_state->last_output;
+    path_output->replan_status = 0U;
+    ++provider_state->reused_count;
+
+    std::ostringstream stream;
+    stream << "PATH_PROVIDER ok"
+           << ", partitions=" << path_output->partitioned_path.size()
+           << ", points=" << CountPathProviderPoints(*path_output)
+           << ", path_type=" << path_output->path_type
+           << ", smoothed=false"
+           << ", history=reused"
+           << ", replan=" << replan_text
+           << ", generated_count=" << provider_state->generated_count
+           << ", reused_count=" << provider_state->reused_count
+           << ", external_vehicle="
+           << (vehicle_input.has_vehicle_state ? "true" : "false")
+           << ", external_obstacles=" << obstacles.size();
+    *status_reason = stream.str();
+    return true;
   }
 
   try {
     const TL::planning::OpenSpacePathInput input =
-        BuildPathProviderInput(config, metadata, parking_seq, roi_output,
-                               vehicle_input, obstacles);
+        BuildPathProviderInput(metadata, parking_seq, roi_output, obstacles,
+                               decision.replan_status,
+                               decision.start_point, decision.end_pose);
     std::atomic<bool> early_stop_flag(false);
     TL::planning::OpenSpacePathGenerator generator(
         BuildPathProviderConfig(), TL::planning::LoadEP30VehicleParam());
@@ -775,12 +1020,28 @@ bool RunPathProvider(const valet_parking_config_t& config,
     return false;
   }
 
+  if (path_output->replan_status == 0U) {
+    path_output->replan_status = decision.replan_status;
+  }
+  provider_state->has_history = true;
+  provider_state->path_id = static_cast<int>(parking_seq);
+  provider_state->start_point = decision.start_point;
+  provider_state->end_pose = decision.end_pose;
+  provider_state->obstacle_signature = decision.obstacle_signature;
+  provider_state->last_output = *path_output;
+  ++provider_state->generated_count;
+
   std::ostringstream stream;
   stream << "PATH_PROVIDER ok"
          << ", partitions=" << path_output->partitioned_path.size()
          << ", points=" << point_count
          << ", path_type=" << path_output->path_type
          << ", smoothed=false"
+         << ", history=generated"
+         << ", replan=" << replan_text
+         << ", reason=" << decision.reason
+         << ", generated_count=" << provider_state->generated_count
+         << ", reused_count=" << provider_state->reused_count
          << ", external_vehicle="
          << (vehicle_input.has_vehicle_state ? "true" : "false")
          << ", external_obstacles=" << obstacles.size();
@@ -1649,7 +1910,10 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   std::string path_provider_reason;
   if (RunPathProvider(config_, metadata, selected_lot->parking_seq(),
                       roi_output, runtime_->vehicle_input,
-                      runtime_->obstacles, &path_output,
+                      runtime_->obstacles,
+                      runtime_->replan_triggered_by_speed_plan,
+                      runtime_->current_path_has_collision_risk,
+                      &runtime_->path_provider, &path_output,
                       &path_provider_reason)) {
     TL::planning::PartitionOutput partition_output;
     std::string path_partition_reason;
