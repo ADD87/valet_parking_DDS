@@ -25,6 +25,7 @@ struct PublisherOptions {
 };
 
 constexpr uint32_t kTargetMovesStartIndex = 3U;
+constexpr uint32_t kParkingSeqChangesStartIndex = 3U;
 
 uint64_t NowMilliseconds() {
   return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -55,7 +56,7 @@ bool ParseUint32(const std::string& text, uint32_t* out_value) {
 bool IsModeSupported(const std::string& mode) {
   return mode == "valid" || mode == "empty" || mode == "overflow" ||
          mode == "nan" || mode == "degenerate-corners" ||
-         mode == "target-moves";
+         mode == "target-moves" || mode == "parking-seq-changes";
 }
 
 std::string ReturnCodeToString(magna::dds::ReturnCode_t rc) {
@@ -149,6 +150,14 @@ std::vector<PsPoint> BuildSlotCorners(double center_x,
   return corners;
 }
 
+uint32_t BuildParkingSeq(const PublisherOptions& options, uint32_t index) {
+  if (options.mode == "parking-seq-changes" &&
+      index >= kParkingSeqChangesStartIndex) {
+    return 2U;
+  }
+  return 1U;
+}
+
 ParkingLot BuildParkingLot(const PublisherOptions& options, uint32_t index) {
   const double center_x = (options.mode == "nan")
       ? std::numeric_limits<double>::quiet_NaN()
@@ -173,7 +182,7 @@ ParkingLot BuildParkingLot(const PublisherOptions& options, uint32_t index) {
   }
 
   ParkingLot lot;
-  lot.parking_seq(1U);
+  lot.parking_seq(BuildParkingSeq(options, index));
   lot.type(ParkingType::PARKING_TYPE_VERTICAL);
   lot.status(ParkingStatus::PARKING_STATUS_FREE);
   lot.sensor_type(ParkingSensorType::PARKING_SENSOR_CAMERA);
@@ -195,7 +204,7 @@ SelectedSlot BuildSample(const PublisherOptions& options, uint32_t index) {
   SelectedSlot sample;
   sample.header(BuildHeader(options, index));
   sample.loc_seq(index);
-  sample.opt_parking_seq(1U);
+  sample.opt_parking_seq(BuildParkingSeq(options, index));
   sample.path_point_size(0U);
   sample.traced_path(std::vector<ParkingPathPoint>{});
   sample.hpp_cruising_to_parking(false);
@@ -221,7 +230,7 @@ void PrintUsage() {
             << "Options:\n"
             << "  --domain-id=<uint32>          DDS domain id (default 0)\n"
             << "  --topic=<name>                topic name (default /selected_slot)\n"
-            << "  --mode=<valid|empty|overflow|nan|degenerate-corners|target-moves>\n"
+            << "  --mode=<valid|empty|overflow|nan|degenerate-corners|target-moves|parking-seq-changes>\n"
             << "  --count=<uint32>              number of samples to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between samples (default 100)\n"
             << "  --help                        show this message\n";
@@ -378,6 +387,7 @@ int main(int argc, char* argv[]) {
               << " count=" << sample.count()
               << " lots=" << sample.parking_lots().size()
               << " is_valid=" << (sample.is_valid() ? "true" : "false")
+              << " parking_seq=" << sample.opt_parking_seq()
               << " target="
               << (options.mode == "target-moves" &&
                   i >= kTargetMovesStartIndex ? "moved" : "base")

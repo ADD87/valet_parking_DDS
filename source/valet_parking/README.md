@@ -18,13 +18,14 @@
 - NEXT-028 后，新增辅助输入 `obstacle-appears` smoke，验证障碍物从无到有时 PATH_PROVIDER 必须 `replan=BLOCK_BY_STATIC_OBSTACLE` 并重新生成路径；障碍物签名稳定后应回到 `history=reused, replan=NONE`。
 - NEXT-029 后，新增辅助输入 `obstacle-disappears` smoke，验证合法空 `ObstacleArray` 会清空外部障碍物；障碍物从有到无时必须 `replan=BLOCK_BY_STATIC_OBSTACLE` 并重新生成路径，稳定为空后再复用历史路径。
 - NEXT-030 后，新增 SelectedSlot `target-moves` smoke，验证选中车位目标位姿变化时 PATH_PROVIDER 必须 `replan=TARGET_UPDATE` 并重新生成路径；目标稳定后应回到 `history=reused, replan=NONE`。
+- NEXT-031 后，新增 SelectedSlot `parking-seq-changes` smoke，验证目标位姿基本不变但 `parking_seq/path_id` 变化时，PATH_PROVIDER 也必须 `replan=TARGET_UPDATE` 并重新生成路径；path_id 稳定后应回到 `history=reused, replan=NONE`。
 
 ## 当前算法状态
 
 已接入内容：
 
 - `ROI_DECIDER`：从选中车位计算 ROI、目标位姿、目标区域。
-- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 接入轻量 `warm_start`/`path_strategy` 切片；NEXT-020 改为基于历史路径几何累计距离截取 warm start，并用 `moving-localization` smoke 直接验证 `TRACE_REPLAN -> history_splice`；NEXT-021 在 PATH_PROVIDER 前增加轻量 PreCheck，检查 ROI bounds、起点/终点、目标区域和障碍物线段几何；NEXT-022 在 `TRACE_REPLAN + history_splice` 的保守条件下接入轻量 `trace_adjust` 策略；NEXT-023 补齐 trace adjust 拒绝原因、路径长度和失败路径诊断；NEXT-024 新增可控大偏移负向样本，覆盖 warm start/trace adjust 拒绝原因；NEXT-026 将可进入路径搜索的障碍物线段上限收紧为 500，并新增 128 障碍物过载 smoke；NEXT-027 新增障碍物线段 ROI local bounds 检查，拦截明显错坐标的远障碍物；NEXT-028 新增障碍物从无到有 smoke；NEXT-029 新增障碍物从有到无 smoke；NEXT-030 新增 SelectedSlot 目标位姿变化 smoke，确保目标变化时重新生成路径，目标稳定后再复用历史路径。
+- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 接入轻量 `warm_start`/`path_strategy` 切片；NEXT-020 改为基于历史路径几何累计距离截取 warm start，并用 `moving-localization` smoke 直接验证 `TRACE_REPLAN -> history_splice`；NEXT-021 在 PATH_PROVIDER 前增加轻量 PreCheck，检查 ROI bounds、起点/终点、目标区域和障碍物线段几何；NEXT-022 在 `TRACE_REPLAN + history_splice` 的保守条件下接入轻量 `trace_adjust` 策略；NEXT-023 补齐 trace adjust 拒绝原因、路径长度和失败路径诊断；NEXT-024 新增可控大偏移负向样本，覆盖 warm start/trace adjust 拒绝原因；NEXT-026 将可进入路径搜索的障碍物线段上限收紧为 500，并新增 128 障碍物过载 smoke；NEXT-027 新增障碍物线段 ROI local bounds 检查，拦截明显错坐标的远障碍物；NEXT-028 新增障碍物从无到有 smoke；NEXT-029 新增障碍物从有到无 smoke；NEXT-030 新增 SelectedSlot 目标位姿变化 smoke；NEXT-031 新增 `parking_seq/path_id` 变化 smoke，确保目标变化或 path_id 变化时重新生成路径，稳定后再复用历史路径。
 - `PATH_PARTITION`：使用 standalone 中已独立化的 `OpenSpacePathPartition::Execute` 做任务级路径仲裁，输出当前应执行的 `chosen_partitioned_path`。
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
@@ -257,6 +258,17 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 
 该模式会先发布 3 组基础车位目标，再发布 3 组中心点移动后的车位目标。runner 应先显示基础目标下的 `history=generated` 与 `history=reused`，目标变化时显示 `history=generated, replan=TARGET_UPDATE, reason=target_update`，新目标稳定后显示 `history=reused, replan=NONE, generated_count=2`，subscriber 应保持 `is_estop=false`。
 
+如需验证 SelectedSlot `parking_seq/path_id` 变化会触发重规划：
+
+```bash
+bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
+  --run-root /mnt/e/APA/DDS/feature_integration/feature_integration_workspace/out/valet_parking_quick_build/valet_parking_mvp/x86 \
+  --slot-mode parking-seq-changes \
+  --interval-ms 650
+```
+
+该模式会先发布 3 组 `parking_seq=1` 的车位目标，再发布 3 组几何基本相同但 `parking_seq=2` 的车位目标。runner 应在 path_id 变化时显示 `history=generated, replan=TARGET_UPDATE, reason=target_update, generated_count=2`，`parking_seq=2` 稳定后显示 `history=reused, replan=NONE, generated_count=2`，subscriber 应保持 `is_estop=false`。
+
 如需验证 runner 完全不订阅辅助输入 Topic：
 
 ```bash
@@ -285,7 +297,7 @@ PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[0] local_start
 - `history=generated`：本帧重新调用 `OpenSpacePathGenerator` 生成路径。
 - `history=reused`：本帧复用上一帧有效路径，避免同目标、同起点、同障碍物时重复搜索。
 - `replan=NO_VALID_PATH`：没有可复用历史路径，通常出现在第一帧。
-- `replan=TARGET_UPDATE`：目标车位、目标位姿或 `parking_seq/path_id` 变化。NEXT-030 的 `target-moves` smoke 已验证目标中心移动时会触发该状态，而不是误复用上一目标的历史路径。
+- `replan=TARGET_UPDATE`：目标车位、目标位姿或 `parking_seq/path_id` 变化。NEXT-030 的 `target-moves` smoke 已验证目标中心移动时会触发该状态；NEXT-031 的 `parking-seq-changes` smoke 已验证目标几何基本不变但 path_id 变化时也会触发该状态，而不是误复用上一 path_id 的历史路径。
 - `replan=BLOCK_BY_STATIC_OBSTACLE`：外部障碍物签名变化。
 - `replan=TRACE_REPLAN`：当前起点已经无法匹配历史路径。
 - `replan=REPLAN_FOR_SPEED_WARN` 或 `DYNAMIC_REPLAN`：速度层或碰撞风险要求重新规划。
@@ -303,17 +315,18 @@ PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[0] local_start
 - `too_many_obstacle_segments=512`：NEXT-026 新增验证，表示外部障碍物线段规模超过当前轻量 precheck 允许的 500 条，adapter 会在 PATH_PROVIDER 前发布 estop。
 - `obstacle_segment_outside_xy_bounds[...]`：NEXT-027 新增验证，表示障碍物线段端点转换到 ROI local 坐标后明显远离当前 `xy_bounds`，adapter 会在 PATH_PROVIDER 前发布 estop，并输出 `local_start/local_end` 方便定位坐标系问题。
 
-这仍只是完整 `OpenSpacePathProvider` 的轻量切片，不包含完整线程管理、NLP smoother、完整 `PreCheck` 或完整 `Frame/DependencyInjector`。当前 `target-moves` mock 已能验证 SelectedSlot 目标位姿变化会触发 `TARGET_UPDATE`；`moving-localization` mock 已能直接触发并验证 `TRACE_REPLAN -> history_splice -> trace_adjust=true` 分支；`far-localization` mock 已能验证错 frame/远定位会被前置 estop；`many-obstacles` mock 已能验证障碍物线段过载会在 PATH_PROVIDER 前被 estop；`far-obstacles` mock 已能验证远障碍物会在 PATH_PROVIDER 前被 estop；但真实车端定位/底盘/障碍物 Topic 仍未对齐。
+这仍只是完整 `OpenSpacePathProvider` 的轻量切片，不包含完整线程管理、NLP smoother、完整 `PreCheck` 或完整 `Frame/DependencyInjector`。当前 `target-moves` mock 已能验证 SelectedSlot 目标位姿变化会触发 `TARGET_UPDATE`；`parking-seq-changes` mock 已能验证 `parking_seq/path_id` 变化会触发 `TARGET_UPDATE`；`moving-localization` mock 已能直接触发并验证 `TRACE_REPLAN -> history_splice -> trace_adjust=true` 分支；`far-localization` mock 已能验证错 frame/远定位会被前置 estop；`many-obstacles` mock 已能验证障碍物线段过载会在 PATH_PROVIDER 前被 estop；`far-obstacles` mock 已能验证远障碍物会在 PATH_PROVIDER 前被 estop；但真实车端定位/底盘/障碍物 Topic 仍未对齐。
 
 ## 最近验证
 
-NEXT-030 PATH_PROVIDER 目标变化重规划边界后，已验证：
+NEXT-031 PATH_PROVIDER path_id 变化重规划边界后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
+- x86 SelectedSlot `parking_seq/path_id` 变化 smoke：domain_216 `parking-seq-changes` 前 3 组发布 `parking_seq=1`，后 3 组发布几何基本相同的 `parking_seq=2`；runner 显示 path_id 变化时 `history=generated, replan=TARGET_UPDATE, reason=target_update, generated_count=2`，`parking_seq=2` 稳定后显示 `history=reused, replan=NONE, generated_count=2`，subscriber 收到 `is_estop=false`。
+- x86 默认 valid 回归：domain_217 默认 mock `SelectedSlot` 输入后仍输出非 estop `PlanningTrajectory`，并保持 `PATH_PROVIDER_PRECHECK ok`、`history=generated` 后 `history=reused`。
+- x86 all-valid 辅助输入回归：domain_218 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态保持 `external_vehicle=true`、`external_obstacles=1`，并输出非 estop 轨迹。
 - x86 SelectedSlot 目标变化 smoke：domain_213 `target-moves` 前 3 组发布基础目标，后 3 组发布移动后的目标；runner 显示目标变化时 `history=generated, replan=TARGET_UPDATE, reason=target_update, generated_count=2`，新目标稳定后显示 `history=reused, replan=NONE, generated_count=2`，subscriber 收到 `is_estop=false`。
-- x86 默认 valid 回归：domain_214 默认 mock `SelectedSlot` 输入后仍输出非 estop `PlanningTrajectory`，并保持 `PATH_PROVIDER_PRECHECK ok`、`history=generated` 后 `history=reused`。
-- x86 all-valid 辅助输入回归：domain_215 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态保持 `external_vehicle=true`、`external_obstacles=1`，并输出非 estop 轨迹。
 - x86 障碍物局部位置负向 smoke：domain_202 `far-obstacles` 发布 1 个位于 `(1000,1000)` 的合法静态障碍物，runner 显示 `aux obstacles #1 (count=1)`、`PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[0]`、`local_start/local_end`、`estop=true`，subscriber 收到 `is_estop=true`。
 - x86 障碍物线段过载负向 smoke：`many-obstacles` 已验证发布 128 个合法静态障碍物时，runner 显示 `PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512`、`estop=true`，subscriber 收到 `is_estop=true`。
 - x86 SelectedSlot 几何负向 smoke：`degenerate-corners` 已验证发布端 `is_valid=true`、`count=1`、`lots=1`，runner 显示 `selected parking lot corner geometry is degenerate`、`estop=true`，subscriber 收到 `is_estop=true`。

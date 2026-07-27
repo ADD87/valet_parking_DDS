@@ -24,18 +24,18 @@ local_git:
 
 current_phase:
   id: Fast-2
-  name: .so + typed DDS + PATH_PROVIDER target update smoke
-  status: PASS_PATH_PROVIDER_TARGET_UPDATE_X86_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前仍使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；NEXT-018 至 NEXT-029 已完成轻量运行态复用、warm_start/trace_adjust 诊断、vehicle_lot_precheck、moving-localization-large、SelectedSlot degenerate-corners、many-obstacles 过载、far-obstacles 局部边界、obstacle-appears 障碍物出现重规划和 obstacle-disappears 障碍物清空重规划 smoke。NEXT-030 新增 SelectedSlot target-moves 样本，前 3 组发布基础车位目标，后 3 组发布中心点移动后的车位目标；smoke 验证目标变化时 PATH_PROVIDER 输出 history=generated、replan=TARGET_UPDATE、reason=target_update、generated_count=2，目标稳定后回到 history=reused、replan=NONE，避免误复用上一目标的旧路径。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
+  name: .so + typed DDS + PATH_PROVIDER path_id update smoke
+  status: PASS_PATH_PROVIDER_PATH_ID_UPDATE_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前仍使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；NEXT-018 至 NEXT-030 已完成轻量运行态复用、warm_start/trace_adjust 诊断、vehicle_lot_precheck、moving-localization-large、SelectedSlot degenerate-corners、many-obstacles 过载、far-obstacles 局部边界、obstacle-appears 障碍物出现重规划、obstacle-disappears 障碍物清空重规划和 target-moves 目标位姿变化重规划 smoke。NEXT-031 新增 SelectedSlot parking-seq-changes 样本，前 3 组发布 parking_seq=1，后 3 组发布几何基本相同但 parking_seq=2 的车位目标；smoke 验证 path_id 变化时 PATH_PROVIDER 输出 history=generated、replan=TARGET_UPDATE、reason=target_update、generated_count=2，path_id 稳定后回到 history=reused、replan=NONE，避免误复用上一 path_id 的旧路径。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '030'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/030_项目状态快照_PATH_PROVIDER目标变化重规划边界.md
+  id: '031'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/031_项目状态快照_PATH_PROVIDER路径ID变化重规划边界.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-27
-  summary: 已完成 NEXT-030 PATH_PROVIDER 目标变化重规划边界：selected_slot_mock_publisher 新增 target-moves 模式，前 3 组发布基础车位目标，后 3 组发布中心点移动后的车位目标；smoke_valet_parking_x86.sh 新增 target-moves 断言，要求 publisher 日志显示 base 后 moved，runner 在目标变化时显示 PATH_PROVIDER ok history=generated/replan=TARGET_UPDATE/reason=target_update/generated_count=2，新目标稳定后显示 history=reused/replan=NONE/generated_count=2，subscriber 保持 is_estop=false。x86 构建通过；target-moves smoke、默认 valid 回归、all-valid 辅助输入回归通过；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
+  summary: 已完成 NEXT-031 PATH_PROVIDER path_id 变化重规划边界：selected_slot_mock_publisher 新增 parking-seq-changes 模式，前 3 组发布 parking_seq=1，后 3 组发布几何基本相同但 parking_seq=2 的车位目标；smoke_valet_parking_x86.sh 新增 parking-seq-changes 断言，要求 publisher 日志显示 parking_seq=1 后 parking_seq=2，runner 在 path_id 变化时显示 PATH_PROVIDER ok history=generated/replan=TARGET_UPDATE/reason=target_update/generated_count=2，path_id 稳定后显示 history=reused/replan=NONE/generated_count=2，subscriber 保持 is_estop=false。x86 构建通过；parking-seq-changes smoke、默认 valid 回归、all-valid 辅助输入回归通过；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
   evidence:
     - applications/config/valet_parking_mvp_bom.yaml
     - applications/source/valet_parking/idl/valet_parking_topics.idl
@@ -53,12 +53,12 @@ last_successful_action:
     - applications/source/valet_parking_tools/selected_slot_mock_publisher/main.cpp
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
     - applications/source/valet_parking_tools/valet_parking_runner/main.cpp
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/030_项目状态快照_PATH_PROVIDER目标变化重规划边界.md
-    - out/valet_parking_target_update_030/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_target_update_030/valet_parking_mvp/x86/smoke_latest/domain_213_20260727_221535_1538
-    - out/valet_parking_target_update_030/valet_parking_mvp/x86/smoke_latest/domain_214_20260727_221559_1757
-    - out/valet_parking_target_update_030/valet_parking_mvp/x86/smoke_latest/domain_215_20260727_221559_1760
-    - out/valet_parking_target_update_030/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/031_项目状态快照_PATH_PROVIDER路径ID变化重规划边界.md
+    - out/valet_parking_path_id_update_031/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_path_id_update_031/valet_parking_mvp/x86/smoke_latest/domain_216_20260727_224642_718
+    - out/valet_parking_path_id_update_031/valet_parking_mvp/x86/smoke_latest/domain_217_20260727_224716_725
+    - out/valet_parking_path_id_update_031/valet_parking_mvp/x86/smoke_latest/domain_218_20260727_224716_726
+    - out/valet_parking_path_id_update_031/valet_parking_mvp/m57/lib/libvalet_parking.so
 
 blockers:
   - id: B-001
@@ -102,15 +102,16 @@ runtime_status:
   x86_path_provider_obstacle_change_replan_smoke_test: PASS
   x86_path_provider_obstacle_clear_replan_smoke_test: PASS
   x86_path_provider_target_update_smoke_test: PASS
+  x86_path_provider_path_id_update_smoke_test: PASS
   x86_vehicle_lot_precheck_far_localization_test: PASS
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-030 新增 target-moves，在 domain_213 前 3 组发布基础目标、后 3 组发布移动后的目标，runner 显示目标变化时 PATH_PROVIDER 输出 history=generated、replan=TARGET_UPDATE、reason=target_update、generated_count=2，新目标稳定后输出 history=reused、replan=NONE、generated_count=2，subscriber 保持 is_estop=false；默认 valid 回归在 domain_214 仍显示非 estop PlanningTrajectory、PATH_PROVIDER_PRECHECK ok、history=generated 后 history=reused；all-valid 辅助输入回归在 domain_215 显示 aux localization/chassis/obstacles 与 external_vehicle=true/external_obstacles=1、PATH_PROVIDER_PRECHECK ok、obstacle_segments=4。NEXT-029 的 obstacle-disappears、NEXT-028 的 obstacle-appears、NEXT-027 的 far-obstacles、NEXT-026 的 many-obstacles、NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-031 新增 parking-seq-changes，在 domain_216 前 3 组发布 parking_seq=1、后 3 组发布几何基本相同但 parking_seq=2 的目标，runner 显示 path_id 变化时 PATH_PROVIDER 输出 history=generated、replan=TARGET_UPDATE、reason=target_update、generated_count=2，path_id 稳定后输出 history=reused、replan=NONE、generated_count=2，subscriber 保持 is_estop=false；默认 valid 回归在 domain_217 仍显示非 estop PlanningTrajectory、PATH_PROVIDER_PRECHECK ok、history=generated 后 history=reused；all-valid 辅助输入回归在 domain_218 显示 aux localization/chassis/obstacles 与 external_vehicle=true/external_obstacles=1、PATH_PROVIDER_PRECHECK ok、obstacle_segments=4。NEXT-030 的 target-moves、NEXT-029 的 obstacle-disappears、NEXT-028 的 obstacle-appears、NEXT-027 的 far-obstacles、NEXT-026 的 many-obstacles、NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-031
-  description: 继续沿用简化 DDS Topic，在 SelectedSlot 目标位姿变化重规划边界通过后，验证 parking_seq/path_id 变化对 PATH_PROVIDER 运行态复用和 replan 标记的影响：当车位目标位姿基本不变但 parking_seq/path_id 变化时，也应触发 TARGET_UPDATE/重新生成路径，而不是误复用上一 path_id 的历史路径；当 path_id 稳定后，应重新回到 history=reused。仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
+  id: NEXT-032
+  description: 继续沿用简化 DDS Topic，验证 SelectedSlot 多车位列表中 opt_parking_seq 选择不同 ParkingLot 的行为：构造同一帧只选中一个车位但消息内包含多个 ParkingLot 的样本，确认 opt_parking_seq 切换时 adapter 选择对应车位并触发 TARGET_UPDATE/重新生成路径，稳定后回到 history=reused。仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -282,3 +283,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/030_项目状态快照_PATH_PROVIDER目标变化重规划边界.md
     phase: Fast-2
     status: PASS_PATH_PROVIDER_TARGET_UPDATE_X86_M57_STATIC_BLOCKED_BOARD
+  - id: '031'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/031_项目状态快照_PATH_PROVIDER路径ID变化重规划边界.md
+    phase: Fast-2
+    status: PASS_PATH_PROVIDER_PATH_ID_UPDATE_X86_M57_STATIC_BLOCKED_BOARD
