@@ -382,8 +382,12 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing enabled steer limit in moving-localization mode"
         require_log "trace_adjust=true" \
           "missing trace adjust strategy in moving-localization mode"
+        require_log "trace_adjust_reject=accepted" \
+          "missing accepted trace adjust diagnostic in moving-localization mode"
         require_log "trace_adjust_points=[1-9][0-9]*" \
           "missing trace adjust path points in moving-localization mode"
+        require_log "trace_adjust_path_length=[1-9]" \
+          "missing trace adjust path length in moving-localization mode"
         ;;
       far-localization)
         require_log "aux localization #[0-9]+ .*x=1000" \

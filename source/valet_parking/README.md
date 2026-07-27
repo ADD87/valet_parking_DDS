@@ -10,13 +10,14 @@
 - 异常行为：非法主输入，如 NaN、empty、overflow，会发布显式 `estop` 输出；非法辅助输入会清理对应外部状态，避免污染后续规划
 - NEXT-021 后，外部定位与选中车位几何明显不在同一 envelope 时，会在 ROI_DECIDER 前输出 `estop`；ROI 成功后进入 PATH_PROVIDER 前会执行轻量 `PATH_PROVIDER_PRECHECK`
 - NEXT-022 后，`TRACE_REPLAN` 且历史 warm start 被接受时，会启用轻量 `trace_adjust` 策略切片，并在状态日志中输出可验证字段。
+- NEXT-023 后，PATH_PROVIDER 的失败和策略状态日志会输出更完整的 `warm_start`/`trace_adjust` 诊断，`moving-localization` mock 也固定为稳定小偏移，避免测试样本自己漂出 warm start 接受阈值。
 
 ## 当前算法状态
 
 已接入内容：
 
 - `ROI_DECIDER`：从选中车位计算 ROI、目标位姿、目标区域。
-- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 接入轻量 `warm_start`/`path_strategy` 切片；NEXT-020 改为基于历史路径几何累计距离截取 warm start，并用 `moving-localization` smoke 直接验证 `TRACE_REPLAN -> history_splice`；NEXT-021 在 PATH_PROVIDER 前增加轻量 PreCheck，检查 ROI bounds、起点/终点、目标区域和障碍物线段几何；NEXT-022 在 `TRACE_REPLAN + history_splice` 的保守条件下接入轻量 `trace_adjust` 策略。
+- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 接入轻量 `warm_start`/`path_strategy` 切片；NEXT-020 改为基于历史路径几何累计距离截取 warm start，并用 `moving-localization` smoke 直接验证 `TRACE_REPLAN -> history_splice`；NEXT-021 在 PATH_PROVIDER 前增加轻量 PreCheck，检查 ROI bounds、起点/终点、目标区域和障碍物线段几何；NEXT-022 在 `TRACE_REPLAN + history_splice` 的保守条件下接入轻量 `trace_adjust` 策略；NEXT-023 补齐 trace adjust 拒绝原因、路径长度和失败路径诊断。
 - `PATH_PARTITION`：使用 standalone 中已独立化的 `OpenSpacePathPartition::Execute` 做任务级路径仲裁，输出当前应执行的 `chosen_partitioned_path`。
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
@@ -161,7 +162,7 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 - `chassis-only`：只发布底盘，不发布定位和障碍物，期望 `external_vehicle=false`。
 - `invalid-obstacles`：最后一组障碍物数组 invalid，期望清空外部障碍物。
 - `bad-obstacle-geometry`：最后一组障碍物尺寸非法，期望拒绝并清空外部障碍物。
-- `moving-localization`：先发布原点定位，再发布小幅横向移动定位，期望触发 `TRACE_REPLAN`，生成 `warm_start=history_splice`，并启用 `trace_adjust=true`。
+- `moving-localization`：先发布原点定位，再稳定发布小幅横向移动定位 `(0.80,0.70)`，期望触发 `TRACE_REPLAN`，生成 `warm_start=history_splice`，并启用 `trace_adjust=true`。
 - `far-localization`：发布远离车位的定位，期望触发 `vehicle_lot_precheck failed` 并输出 `is_estop=true`，用于验证错坐标/错 frame 不会进入 ROI。
 
 如需直接验证 `TRACE_REPLAN/history_splice`：
@@ -177,7 +178,7 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
   --aux-interval-ms 650
 ```
 
-该模式会让辅助发布者和 `SelectedSlot` 发布者并发运行，并等待 runner 处理到 trace adjust 分支；脚本会校验 `replan=TRACE_REPLAN`、`warm_start=history_splice`、`warm_start_points>0`、`strategy_kappa_cost=true`、`trace_adjust=true`、`trace_adjust_points>0`。
+该模式会让辅助发布者和 `SelectedSlot` 发布者并发运行，并等待 runner 处理到 trace adjust 分支；脚本会校验 `replan=TRACE_REPLAN`、`warm_start=history_splice`、`warm_start_points>0`、`strategy_kappa_cost=true`、`trace_adjust=true`、`trace_adjust_reject=accepted`、`trace_adjust_points>0`、`trace_adjust_path_length>0`。
 
 如需验证远定位保护：
 ```bash
@@ -205,7 +206,7 @@ NEXT-019 后，runner 的规划状态里会出现 PATH_PROVIDER 运行态和轻�
 ```text
 PATH_PROVIDER ok, ..., history=generated, replan=NO_VALID_PATH, reason=no_history, warm_start=none, warm_start_points=0, strategy_init_move=0
 PATH_PROVIDER ok, ..., history=reused, replan=NONE, warm_start=not_applied
-PATH_PROVIDER ok, ..., replan=TRACE_REPLAN, warm_start=history_splice, trace_adjust=true, trace_adjust_source=history_warm_start
+PATH_PROVIDER ok, ..., replan=TRACE_REPLAN, warm_start=history_splice, trace_adjust=true, trace_adjust_source=history_warm_start, trace_adjust_reject=accepted
 PATH_PROVIDER_PRECHECK ok, xy_bounds_span=16.000x23.283, dest_points=4, obstacle_segments=4
 ```
 
@@ -225,20 +226,22 @@ PATH_PROVIDER_PRECHECK ok, xy_bounds_span=16.000x23.283, dest_points=4, obstacle
 - `strategy_init_move`、`strategy_kappa_cost`、`strategy_limit_steer`：对照完整 `SetPathStrategy` 提取的轻量策略字段，用于让当前简化 adapter 的搜索输入更接近原始 OpenSpacePathProvider 的语义。
 - `trace_adjust=true`：NEXT-022 新增，表示本帧在 `TRACE_REPLAN` 且历史 warm start 可用时启用了轻量 `LocalTraceAdjustSearchStrategy` 切片。
 - `trace_adjust_source=history_warm_start`：表示 trace adjust 使用的是上一帧路径截取出的历史 warm start。
+- `trace_adjust_reject=...`：NEXT-023 新增，说明 trace adjust 未启用或已接受的原因，常见值包括 `not_trace_replan`、`unsafe_replan_status`、`no_trace_path`、`trace_path_too_short`、`trace_path_length_short`、`accepted`。
 - `trace_adjust_points`、`trace_adjust_target_s`、`trace_adjust_finish_l`、`trace_adjust_finish_theta`、`trace_adjust_bounds`：用于核对 trace adjust 输入规模和阈值；当前固定对照原始逻辑使用 `target_s=8`、`finish_l_threshold=0.05`、`finish_theta_threshold=0.02`、`xy_bounds=[-30,30,-30,30]`。
+- `trace_adjust_path_length`、`trace_adjust_min_length`：NEXT-023 新增，用于确认 trace adjust 使用的历史 warm start 尾段长度是否足够。
 - `PATH_PROVIDER_PRECHECK ok`：NEXT-021 新增，表示 ROI origin、`xy_bounds`、start/end pose、目标区域 polygon/角度和障碍物线段几何已通过轻量输入检查；它不是完整原车 `OpenSpacePathProvider::PreCheck`。
 
 这仍只是完整 `OpenSpacePathProvider` 的轻量切片，不包含完整线程管理、NLP smoother、完整 `PreCheck` 或完整 `Frame/DependencyInjector`。当前 `moving-localization` mock 已能直接触发并验证 `TRACE_REPLAN -> history_splice -> trace_adjust=true` 分支；`far-localization` mock 已能验证错 frame/远定位会被前置 estop；但真实车端定位/底盘/障碍物 Topic 仍未对齐。
 
 ## 最近验证
 
-NEXT-022 轻量 trace adjust 策略切片后，已验证：
+NEXT-023 PATH_PROVIDER 诊断增强后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
 - x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`，默认无辅助发布者时输入状态显示 `external_vehicle=false, external_obstacles=0`。
 - x86 PATH_PROVIDER 运行态与策略字段：默认 smoke 中第一帧显示 `history=generated, replan=NO_VALID_PATH, warm_start=none, strategy_init_move=0`，第二帧显示 `history=reused, replan=NONE`。
-- x86 trace warm start + trace adjust：`moving-localization` smoke 中第二帧显示 `replan=TRACE_REPLAN, warm_start=history_splice, warm_start_reject=accepted, warm_start_points=73, strategy_kappa_cost=true, strategy_limit_steer=true, trace_adjust=true, trace_adjust_source=history_warm_start, trace_adjust_points=73`。
+- x86 trace warm start + trace adjust：`moving-localization` smoke 中第二帧显示 `replan=TRACE_REPLAN, warm_start=history_splice, warm_start_reject=accepted, warm_start_points=96, strategy_kappa_cost=true, strategy_limit_steer=true, trace_adjust=true, trace_adjust_source=history_warm_start, trace_adjust_reject=accepted, trace_adjust_points=96, trace_adjust_path_length=7.24982`。
 - x86 PATH_PROVIDER_PRECHECK：默认和辅助输入 smoke 中均显示 `PATH_PROVIDER_PRECHECK ok`，包含 `xy_bounds_span`、`dest_points`、`obstacle_segments`。
 - x86 远定位保护：`far-localization` smoke 显示 `vehicle_lot_precheck failed`，subscriber 收到 `is_estop=true`，runner 不再崩溃。
 - x86 DDS 辅助输入冒烟：`aux_input_mock_publisher` 发布三类辅助样本后，runner 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态显示 `external_vehicle=true, external_obstacles=1`。

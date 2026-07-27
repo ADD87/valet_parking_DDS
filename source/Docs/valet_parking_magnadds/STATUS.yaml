@@ -24,18 +24,18 @@ local_git:
 
 current_phase:
   id: Fast-2
-  name: .so + typed DDS + ROI_DECIDER/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER light trace adjust slice
-  status: PASS_PATH_PROVIDER_TRACE_ADJUST_SLICE_X86_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前仍使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；NEXT-018 已接入轻量运行态复用与 replan 标记；NEXT-019 对照完整 OpenSpacePathProvider 的 SetWarmStartPath/SetPathStrategy 思路新增历史路径 warm_start 构造、轻量策略字段和状态日志；NEXT-020 新增可控 moving-localization mock/smoke，并把 warm_start 截尾从依赖历史点 PathPoint.s 修订为基于历史路径 x/y 的几何累计距离投影；NEXT-021 新增轻量 PATH_PROVIDER_PRECHECK 与 vehicle_lot_precheck，保护 ROI/PATH_PROVIDER 前的输入几何边界；NEXT-022 新增轻量 LocalTraceAdjustSearchStrategy 切片，仅在 TRACE_REPLAN 且 history warm start 被接受时启用，设置 trace_adjust=true、target_s=8、finish_l_threshold=0.05、finish_theta_threshold=0.02、xy_bounds=[-30,30,-30,30]、cut_off_strategy=0、is_plan_from_start=true，并在状态日志输出 trace_adjust_source、trace_adjust_points 和阈值。moving-localization smoke 已直接验证第二帧 replan=TRACE_REPLAN、warm_start=history_splice、warm_start_reject=accepted、trace_adjust=true、trace_adjust_points>0。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
+  name: .so + typed DDS + ROI_DECIDER/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER path diagnostics slice
+  status: PASS_PATH_PROVIDER_DIAGNOSTICS_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前仍使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；NEXT-018 已接入轻量运行态复用与 replan 标记；NEXT-019 对照完整 OpenSpacePathProvider 的 SetWarmStartPath/SetPathStrategy 思路新增历史路径 warm_start 构造、轻量策略字段和状态日志；NEXT-020 新增可控 moving-localization mock/smoke，并把 warm_start 截尾从依赖历史点 PathPoint.s 修订为基于历史路径 x/y 的几何累计距离投影；NEXT-021 新增轻量 PATH_PROVIDER_PRECHECK 与 vehicle_lot_precheck，保护 ROI/PATH_PROVIDER 前的输入几何边界；NEXT-022 新增轻量 LocalTraceAdjustSearchStrategy 切片，仅在 TRACE_REPLAN 且 history warm start 被接受时启用；NEXT-023 新增 trace_adjust 判定诊断与 PATH_PROVIDER 失败路径输入摘要，状态日志可显示 trace_adjust_reject、trace_adjust_path_length、trace_adjust_min_length，PATH_PROVIDER exception/error/insufficient path points 也会追加 replan、warm_start、trace_adjust 和外部输入摘要。moving-localization mock 已修正为前两组原点定位、后续稳定小偏移 (0.80,0.70)，避免 mock 自己漂出 warm start 接受阈值。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '022'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/022_项目状态快照_PATH_PROVIDER轻量TraceAdjust策略切片.md
+  id: '023'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/023_项目状态快照_PATH_PROVIDER诊断增强与TraceAdjust边界修订.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-27
-  summary: 已完成 NEXT-022 轻量 trace adjust 策略切片：ValetParkingStageParkingAdapter 在 PATH_PROVIDER 策略构造中新增 LocalTraceAdjustSearchStrategy 对照实现，仅在 TRACE_REPLAN 且 history warm start 可用、路径长度足够时启用；启用时设置 trace_adjust=true、target_s=8、finish_l_threshold=0.05、finish_theta_threshold=0.02、xy_bounds=[-30,30,-30,30]、cut_off_strategy=0、is_plan_from_start=true，并在状态日志输出 trace_adjust_source=history_warm_start、trace_adjust_points、trace_adjust_target_s、trace_adjust_finish_l、trace_adjust_finish_theta、trace_adjust_bounds。aux_input_mock_publisher 的 moving-localization 模式已改为前两组原点定位、后续小幅横向移动定位，使其稳定触发 TRACE_REPLAN 且不破坏 warm start 接受阈值；smoke_valet_parking_x86.sh 已对 moving-localization 批量硬化有效发布窗口、等待 trace_adjust=true，并新增 trace_adjust=true/trace_adjust_points>0 断言。x86 构建通过；默认、all-valid、bad-obstacle-geometry、disable aux、moving-localization、far-localization smoke 全部通过；moving-localization 第二帧显示 replan=TRACE_REPLAN、warm_start=history_splice、warm_start_reject=accepted、warm_start_points=73、trace_adjust=true、trace_adjust_points=73；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
+  summary: 已完成 NEXT-023 PATH_PROVIDER 诊断增强与 trace adjust 边界修订：新增 TraceAdjustDecision，区分 not_trace_replan、unsafe_replan_status、no_trace_path、trace_path_too_short、trace_path_length_short、accepted 等原因；PATH_PROVIDER 成功日志新增 trace_adjust_reject、trace_adjust_path_length、trace_adjust_min_length；PATH_PROVIDER exception、error_msg、insufficient path points 失败路径会追加 replan、reason、warm_start、trace_adjust、external_vehicle、external_obstacles 等输入摘要。moving-localization mock 已由递增位移改为稳定发布 (0.80,0.70)，修复 runner 第二帧有时读到过大横向偏移导致 warm_start 被 lateral_offset_large 拒绝的问题；smoke_valet_parking_x86.sh 新增 trace_adjust_reject=accepted 和 trace_adjust_path_length>0 断言。x86 构建通过；moving-localization、默认、all-valid、bad-obstacle-geometry、disable aux、far-localization smoke 全部通过；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
   evidence:
     - applications/config/valet_parking_mvp_bom.yaml
     - applications/source/valet_parking/idl/valet_parking_topics.idl
@@ -52,15 +52,15 @@ last_successful_action:
     - applications/source/valet_parking_tools/aux_input_mock_publisher/CMakeLists.txt
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
     - applications/source/valet_parking_tools/valet_parking_runner/main.cpp
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/022_项目状态快照_PATH_PROVIDER轻量TraceAdjust策略切片.md
-    - out/valet_parking_trace_adjust_022/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_trace_adjust_022/valet_parking_mvp/x86/smoke_latest/domain_226_20260727_120239_766
-    - out/valet_parking_trace_adjust_022/valet_parking_mvp/x86/smoke_latest/domain_227_20260727_120313_728
-    - out/valet_parking_trace_adjust_022/valet_parking_mvp/x86/smoke_latest/domain_228_20260727_120333_858
-    - out/valet_parking_trace_adjust_022/valet_parking_mvp/x86/smoke_latest/domain_229_20260727_120356_1033
-    - out/valet_parking_trace_adjust_022/valet_parking_mvp/x86/smoke_latest/domain_230_20260727_120429_719
-    - out/valet_parking_trace_adjust_022/valet_parking_mvp/x86/smoke_latest/domain_180_20260727_120639_730
-    - out/valet_parking_trace_adjust_022/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/023_项目状态快照_PATH_PROVIDER诊断增强与TraceAdjust边界修订.md
+    - out/valet_parking_diagnostics_023/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_diagnostics_023/valet_parking_mvp/x86/smoke_latest/domain_182_20260727_122335_979
+    - out/valet_parking_diagnostics_023/valet_parking_mvp/x86/smoke_latest/domain_183_20260727_122358_1179
+    - out/valet_parking_diagnostics_023/valet_parking_mvp/x86/smoke_latest/domain_184_20260727_122416_1314
+    - out/valet_parking_diagnostics_023/valet_parking_mvp/x86/smoke_latest/domain_185_20260727_122441_1498
+    - out/valet_parking_diagnostics_023/valet_parking_mvp/x86/smoke_latest/domain_186_20260727_122500_1656
+    - out/valet_parking_diagnostics_023/valet_parking_mvp/x86/smoke_latest/domain_187_20260727_122524_1842
+    - out/valet_parking_diagnostics_023/valet_parking_mvp/m57/lib/libvalet_parking.so
 
 blockers:
   - id: B-001
@@ -96,15 +96,16 @@ runtime_status:
   x86_path_provider_trace_warm_start_smoke_test: PASS
   x86_path_provider_precheck_slice_test: PASS
   x86_path_provider_trace_adjust_strategy_test: PASS
+  x86_path_provider_diagnostics_test: PASS
   x86_vehicle_lot_precheck_far_localization_test: PASS
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 179 点 PlanningTrajectory；默认 smoke 显示 PATH_PROVIDER 第一帧 history=generated/replan=NO_VALID_PATH/warm_start=none，第二帧 history=reused/replan=NONE，且状态中保留 PATH_PROVIDER_PRECHECK ok、xy_bounds_span、dest_points、obstacle_segments；带 --with-aux-inputs --aux-mode all-valid 时 runner 日志显示 aux localization、aux chassis、aux obstacles，并在规划状态中显示 external_vehicle=true/external_obstacles=1、obstacle_segments=4；bad-obstacle-geometry 时 runner 显示 aux obstacles rejected 且 external_obstacles=0；--disable-aux-input-topics 时保持 external_vehicle=false/external_obstacles=0。moving-localization smoke 在 domain_226 第二帧直接触发 TRACE_REPLAN/history_splice/trace_adjust=true，显示 warm_start=history_splice、warm_start_reject=accepted、warm_start_points=73、strategy_kappa_cost=true、strategy_limit_steer=true、trace_adjust_source=history_warm_start、trace_adjust_points=73、trace_adjust_target_s=8、trace_adjust_finish_l=0.05、trace_adjust_finish_theta=0.02、trace_adjust_bounds=[-30,30,-30,30]。far-localization smoke 在 domain_180 显示 vehicle_lot_precheck failed，subscriber 收到 is_estop=true，验证外部定位与选中车位坐标 envelope 不一致时不会进入 ROI_DECIDER/PATH_PROVIDER。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 179 点 PlanningTrajectory；默认 smoke 在 domain_183 显示 PATH_PROVIDER 第一帧 history=generated/replan=NO_VALID_PATH/warm_start=none/trace_adjust_reject=not_trace_replan，第二帧 history=reused/replan=NONE；all-valid 在 domain_184 显示 aux localization、aux chassis、aux obstacles、external_vehicle=true、external_obstacles=1、obstacle_segments=4；bad-obstacle-geometry 在 domain_185 显示 aux obstacles rejected 且 external_obstacles=0；--disable-aux-input-topics 在 domain_186 保持 external_vehicle=false、external_obstacles=0。moving-localization smoke 在 domain_182 第二帧直接触发 TRACE_REPLAN/history_splice/trace_adjust=true，显示 warm_start=history_splice、warm_start_reject=accepted、warm_start_points=96、strategy_kappa_cost=true、strategy_limit_steer=true、trace_adjust_source=history_warm_start、trace_adjust_reject=accepted、trace_adjust_points=96、trace_adjust_path_length=7.24982、trace_adjust_min_length=0.5、trace_adjust_target_s=8、trace_adjust_finish_l=0.05、trace_adjust_finish_theta=0.02、trace_adjust_bounds=[-30,30,-30,30]。far-localization smoke 在 domain_187 显示 vehicle_lot_precheck failed，subscriber 收到 is_estop=true，验证外部定位与选中车位坐标 envelope 不一致时不会进入 ROI_DECIDER/PATH_PROVIDER。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-023
-  description: 继续沿用简化 DDS Topic，在 NEXT-022 trace adjust 切片通过后，筛选下一批不依赖完整 Frame/DependencyInjector、线程管理或 NLP smoother 的 PATH_PROVIDER 可迁移逻辑；优先关注 path strategy 参数诊断、warm_start/trace_adjust 边界保护、路径生成失败时的状态解释和 smoke 可验证断言，并保持默认、辅助输入、moving-localization、far-localization、m57 交叉编译全部通过。
+  id: NEXT-024
+  description: 继续沿用简化 DDS Topic，在 NEXT-023 诊断增强通过后，优先增加可控负向样本或更细的边界 smoke，用于验证 PATH_PROVIDER 失败路径诊断、warm_start 拒绝原因和 trace_adjust 拒绝原因；仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -244,3 +245,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/022_项目状态快照_PATH_PROVIDER轻量TraceAdjust策略切片.md
     phase: Fast-2
     status: PASS_PATH_PROVIDER_TRACE_ADJUST_SLICE_X86_M57_STATIC_BLOCKED_BOARD
+  - id: '023'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/023_项目状态快照_PATH_PROVIDER诊断增强与TraceAdjust边界修订.md
+    phase: Fast-2
+    status: PASS_PATH_PROVIDER_DIAGNOSTICS_X86_M57_STATIC_BLOCKED_BOARD

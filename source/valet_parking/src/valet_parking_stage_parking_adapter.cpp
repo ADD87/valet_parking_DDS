@@ -1369,13 +1369,49 @@ struct PathProviderStrategySummary {
   double trace_adjust_finish_l_threshold{0.0};
   double trace_adjust_finish_theta_threshold{0.0};
   double trace_adjust_bound{0.0};
+  double trace_adjust_path_length{0.0};
+  double trace_adjust_min_length{kMinTraceAdjustPathLength};
   std::string trace_adjust_source{"none"};
+  std::string trace_adjust_reject_reason{"not_attempted"};
 };
 
-bool ShouldUseTraceAdjust(uint32_t replan_status,
-                          const TL::planning::DiscretizedPath& trace_path) {
-  return ShouldUseHistoryWarmStart(replan_status) && trace_path.size() > 1U &&
-         trace_path.Length() >= kMinTraceAdjustPathLength;
+struct TraceAdjustDecision {
+  bool enabled{false};
+  std::string reject_reason{"not_attempted"};
+  double path_length{0.0};
+};
+
+TraceAdjustDecision EvaluateTraceAdjust(
+    uint32_t replan_status,
+    const TL::planning::DiscretizedPath& trace_path) {
+  TraceAdjustDecision decision;
+  if ((replan_status & kReplanTraceReplan) == 0U) {
+    decision.reject_reason = "not_trace_replan";
+    return decision;
+  }
+  if (!ShouldUseHistoryWarmStart(replan_status)) {
+    decision.reject_reason = "unsafe_replan_status";
+    return decision;
+  }
+  if (trace_path.empty()) {
+    decision.reject_reason = "no_trace_path";
+    return decision;
+  }
+  if (trace_path.size() <= 1U) {
+    decision.reject_reason = "trace_path_too_short";
+    return decision;
+  }
+
+  decision.path_length = trace_path.Length();
+  if (!std::isfinite(decision.path_length) ||
+      decision.path_length < kMinTraceAdjustPathLength) {
+    decision.reject_reason = "trace_path_length_short";
+    return decision;
+  }
+
+  decision.enabled = true;
+  decision.reject_reason = "accepted";
+  return decision;
 }
 
 void ApplyLocalTraceAdjustSearchStrategy(
@@ -1425,7 +1461,9 @@ void ApplyPathProviderStrategy(
   search_strategy.park_direction =
       roi_output.is_parking_inwards ? TL::planning::ParkDirection::PARKIN
                                     : TL::planning::ParkDirection::NODIRECTION;
-  if (ShouldUseTraceAdjust(replan_status, trace_path)) {
+  const TraceAdjustDecision trace_adjust_decision =
+      EvaluateTraceAdjust(replan_status, trace_path);
+  if (trace_adjust_decision.enabled) {
     ApplyLocalTraceAdjustSearchStrategy(trace_path, &search_strategy);
   }
 
@@ -1454,8 +1492,12 @@ void ApplyPathProviderStrategy(
         summary->trace_adjust_enabled ? kTraceAdjustThetaDiffThreshold : 0.0;
     summary->trace_adjust_bound =
         summary->trace_adjust_enabled ? kTraceAdjustBound : 0.0;
+    summary->trace_adjust_path_length = trace_adjust_decision.path_length;
+    summary->trace_adjust_min_length = kMinTraceAdjustPathLength;
     summary->trace_adjust_source =
         summary->trace_adjust_enabled ? "history_warm_start" : "none";
+    summary->trace_adjust_reject_reason =
+        trace_adjust_decision.reject_reason;
   }
 }
 
@@ -1578,6 +1620,41 @@ std::size_t CountPathProviderPoints(
   return count;
 }
 
+void AppendPathProviderAttemptDiagnostics(
+    const PathProviderDecision& decision,
+    const std::string& replan_text,
+    const PathProviderStrategySummary& strategy_summary,
+    const RuntimeVehicleInput& vehicle_input,
+    std::size_t obstacle_count,
+    std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", replan=" << replan_text
+          << ", reason=" << decision.reason
+          << ", warm_start=" << strategy_summary.warm_start_source
+          << ", warm_start_reject="
+          << strategy_summary.warm_start_reject_reason
+          << ", warm_start_points=" << strategy_summary.warm_start_points
+          << ", warm_start_history_points="
+          << strategy_summary.warm_start_history_points
+          << ", warm_start_s=" << strategy_summary.warm_start_match_s
+          << ", warm_start_l=" << strategy_summary.warm_start_match_l
+          << ", trace_adjust="
+          << (strategy_summary.trace_adjust_enabled ? "true" : "false")
+          << ", trace_adjust_source=" << strategy_summary.trace_adjust_source
+          << ", trace_adjust_reject="
+          << strategy_summary.trace_adjust_reject_reason
+          << ", trace_adjust_points=" << strategy_summary.trace_adjust_points
+          << ", trace_adjust_path_length="
+          << strategy_summary.trace_adjust_path_length
+          << ", trace_adjust_min_length="
+          << strategy_summary.trace_adjust_min_length
+          << ", external_vehicle="
+          << (vehicle_input.has_vehicle_state ? "true" : "false")
+          << ", external_obstacles=" << obstacle_count;
+}
+
 bool RunPathProvider(const valet_parking_config_t& config,
                      const InputMetadata& metadata,
                      uint32_t parking_seq,
@@ -1640,16 +1717,33 @@ bool RunPathProvider(const valet_parking_config_t& config,
         BuildPathProviderConfig(), TL::planning::LoadEP30VehicleParam());
     generator.Plan(early_stop_flag, input, path_output);
   } catch (const std::exception& ex) {
-    *status_reason = std::string("PATH_PROVIDER failed: exception: ") + ex.what();
+    std::ostringstream stream;
+    stream << "PATH_PROVIDER failed: exception: " << ex.what();
+    AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
+                                         vehicle_input, obstacles.size(),
+                                         &stream);
+    *status_reason = stream.str();
     return false;
   } catch (...) {
-    *status_reason = "PATH_PROVIDER failed: unknown exception";
+    std::ostringstream stream;
+    stream << "PATH_PROVIDER failed: unknown exception";
+    AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
+                                         vehicle_input, obstacles.size(),
+                                         &stream);
+    *status_reason = stream.str();
     return false;
   }
 
   const std::size_t point_count = CountPathProviderPoints(*path_output);
   if (!path_output->error_msg.empty()) {
-    *status_reason = "PATH_PROVIDER failed: " + path_output->error_msg;
+    std::ostringstream stream;
+    stream << "PATH_PROVIDER failed: " << path_output->error_msg
+           << ", partitions=" << path_output->partitioned_path.size()
+           << ", points=" << point_count;
+    AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
+                                         vehicle_input, obstacles.size(),
+                                         &stream);
+    *status_reason = stream.str();
     return false;
   }
   if (path_output->partitioned_path.empty() || point_count < 2U) {
@@ -1657,6 +1751,9 @@ bool RunPathProvider(const valet_parking_config_t& config,
     stream << "PATH_PROVIDER failed: insufficient path points"
            << ", partitions=" << path_output->partitioned_path.size()
            << ", points=" << point_count;
+    AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
+                                         vehicle_input, obstacles.size(),
+                                         &stream);
     *status_reason = stream.str();
     return false;
   }
@@ -1710,7 +1807,13 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << ", trace_adjust="
          << (strategy_summary.trace_adjust_enabled ? "true" : "false")
          << ", trace_adjust_source=" << strategy_summary.trace_adjust_source
+         << ", trace_adjust_reject="
+         << strategy_summary.trace_adjust_reject_reason
          << ", trace_adjust_points=" << strategy_summary.trace_adjust_points
+         << ", trace_adjust_path_length="
+         << strategy_summary.trace_adjust_path_length
+         << ", trace_adjust_min_length="
+         << strategy_summary.trace_adjust_min_length
          << ", trace_adjust_target_s="
          << strategy_summary.trace_adjust_target_s
          << ", trace_adjust_finish_l="

@@ -205,8 +205,8 @@ LocalizationEstimate BuildLocalization(const PublisherOptions& options,
   sample.z(0.0);
   sample.heading(0.0);
   if (options.mode == AuxPublishMode::kMovingLocalization && index > 2U) {
-    sample.x(0.80 + 0.20 * static_cast<double>(index - 3U));
-    sample.y(0.70 + 0.20 * static_cast<double>(index - 3U));
+    sample.x(0.80);
+    sample.y(0.70);
   }
   if (options.mode == AuxPublishMode::kFarLocalization) {
     sample.x(1000.0);
