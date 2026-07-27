@@ -20,7 +20,8 @@ Options:
                        all-valid|invalid-localization|nan-localization|
                        chassis-only|invalid-obstacles|bad-obstacle-geometry|
                        moving-localization|moving-localization-large|
-                       far-localization|far-obstacles|many-obstacles
+                       far-localization|far-obstacles|many-obstacles|
+                       obstacle-appears
   --aux-count N       Aux sample group count. Default: 3.
   --aux-interval-ms N Aux sample group interval. Default: 200.
   --disable-aux-input-topics
@@ -109,7 +110,8 @@ effective_aux_count="${aux_count}"
 effective_aux_interval_ms="${aux_interval_ms}"
 if [[ "${with_aux_inputs}" == "1" &&
       ( "${aux_mode}" == "moving-localization" ||
-        "${aux_mode}" == "moving-localization-large" ) &&
+        "${aux_mode}" == "moving-localization-large" ||
+        "${aux_mode}" == "obstacle-appears" ) &&
       "${disable_aux_input_topics}" != "1" ]]; then
   if ((effective_count < 6)); then
     effective_count=6
@@ -200,7 +202,8 @@ aux_runs_in_background=0
 if [[ "${with_aux_inputs}" == "1" &&
       ( "${aux_mode}" == "moving-localization" ||
         "${aux_mode}" == "moving-localization-large" ||
-        "${aux_mode}" == "far-localization" ) &&
+        "${aux_mode}" == "far-localization" ||
+        "${aux_mode}" == "obstacle-appears" ) &&
       "${disable_aux_input_topics}" != "1" ]]; then
   aux_runs_in_background=1
 fi
@@ -252,6 +255,8 @@ if [[ "${aux_runs_in_background}" == "1" ]]; then
     runner_wait_pattern="warm_start_reject=lateral_offset_large"
   elif [[ "${aux_mode}" == "far-localization" ]]; then
     runner_wait_pattern="vehicle_lot_precheck failed"
+  elif [[ "${aux_mode}" == "obstacle-appears" ]]; then
+    runner_wait_pattern="replan=BLOCK_BY_STATIC_OBSTACLE"
   fi
   wait_for_runner_log "${runner_wait_pattern}" "${runner_wait_seconds}" || true
 fi
@@ -341,6 +346,15 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
     local pattern="$1"
     local message="$2"
     if ! grep -Eq "${pattern}" "${runner_log}"; then
+      echo "[valet_parking_smoke] ${message}" >&2
+      validation_status=8
+    fi
+  }
+
+  require_aux_log() {
+    local pattern="$1"
+    local message="$2"
+    if ! grep -Eq "${pattern}" "${aux_publisher_log}"; then
       echo "[valet_parking_smoke] ${message}" >&2
       validation_status=8
     fi
@@ -513,6 +527,24 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing runner estop for many-obstacles mode"
         require_subscriber_log "is_estop=true" \
           "missing subscriber estop for many-obstacles mode"
+        ;;
+      obstacle-appears)
+        require_log "aux localization #[0-9]+" \
+          "missing aux localization consumption in obstacle-appears mode"
+        require_log "aux chassis #[0-9]+" \
+          "missing aux chassis consumption in obstacle-appears mode"
+        require_aux_log "published sample group [1-3]/[0-9]+ .*obstacles=skipped obstacle_count=0" \
+          "missing initial skipped obstacle groups in obstacle-appears mode"
+        require_log "aux obstacles #[0-9]+ \\(count=1\\)" \
+          "missing appeared aux obstacle consumption in runner log"
+        require_log "external_obstacles=0" \
+          "missing initial empty obstacle planning state"
+        require_log "PATH_PROVIDER ok.*history=generated, replan=BLOCK_BY_STATIC_OBSTACLE.*reason=obstacles_changed" \
+          "missing generated path after obstacle signature change"
+        require_log "PATH_PROVIDER ok.*history=reused, replan=NONE.*external_obstacles=1" \
+          "missing history reuse after appeared obstacle becomes stable"
+        require_log "external_obstacles=1" \
+          "missing planning state with appeared obstacle"
         ;;
       *)
         echo "[valet_parking_smoke] unknown aux mode for validation: ${aux_mode}" >&2

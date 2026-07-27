@@ -15,13 +15,14 @@
 - NEXT-025 后，新增 SelectedSlot `degenerate-corners` 负向 smoke，验证角点标签齐全但几何退化的车位会被 adapter 明确 estop 拒绝。
 - NEXT-026 后，新增辅助输入 `many-obstacles` 负向 smoke，验证 128 个合法障碍物产生 512 条线段时，会在 PATH_PROVIDER 前被 `PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512` 拒绝。
 - NEXT-027 后，新增辅助输入 `far-obstacles` 负向 smoke，验证合法但明显远离 ROI local `xy_bounds` 的障碍物会被 `PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[...]` 拒绝。
+- NEXT-028 后，新增辅助输入 `obstacle-appears` smoke，验证障碍物从无到有时 PATH_PROVIDER 必须 `replan=BLOCK_BY_STATIC_OBSTACLE` 并重新生成路径；障碍物签名稳定后应回到 `history=reused, replan=NONE`。
 
 ## 当前算法状态
 
 已接入内容：
 
 - `ROI_DECIDER`：从选中车位计算 ROI、目标位姿、目标区域。
-- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 接入轻量 `warm_start`/`path_strategy` 切片；NEXT-020 改为基于历史路径几何累计距离截取 warm start，并用 `moving-localization` smoke 直接验证 `TRACE_REPLAN -> history_splice`；NEXT-021 在 PATH_PROVIDER 前增加轻量 PreCheck，检查 ROI bounds、起点/终点、目标区域和障碍物线段几何；NEXT-022 在 `TRACE_REPLAN + history_splice` 的保守条件下接入轻量 `trace_adjust` 策略；NEXT-023 补齐 trace adjust 拒绝原因、路径长度和失败路径诊断；NEXT-024 新增可控大偏移负向样本，覆盖 warm start/trace adjust 拒绝原因；NEXT-026 将可进入路径搜索的障碍物线段上限收紧为 500，并新增 128 障碍物过载 smoke；NEXT-027 新增障碍物线段 ROI local bounds 检查，拦截明显错坐标的远障碍物。
+- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 接入轻量 `warm_start`/`path_strategy` 切片；NEXT-020 改为基于历史路径几何累计距离截取 warm start，并用 `moving-localization` smoke 直接验证 `TRACE_REPLAN -> history_splice`；NEXT-021 在 PATH_PROVIDER 前增加轻量 PreCheck，检查 ROI bounds、起点/终点、目标区域和障碍物线段几何；NEXT-022 在 `TRACE_REPLAN + history_splice` 的保守条件下接入轻量 `trace_adjust` 策略；NEXT-023 补齐 trace adjust 拒绝原因、路径长度和失败路径诊断；NEXT-024 新增可控大偏移负向样本，覆盖 warm start/trace adjust 拒绝原因；NEXT-026 将可进入路径搜索的障碍物线段上限收紧为 500，并新增 128 障碍物过载 smoke；NEXT-027 新增障碍物线段 ROI local bounds 检查，拦截明显错坐标的远障碍物；NEXT-028 新增障碍物签名变化 smoke，确保障碍物从无到有时重新生成路径，障碍物稳定后再复用历史路径。
 - `PATH_PARTITION`：使用 standalone 中已独立化的 `OpenSpacePathPartition::Execute` 做任务级路径仲裁，输出当前应执行的 `chosen_partitioned_path`。
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
@@ -33,6 +34,7 @@
 - SelectedSlot 角点几何保护：当车位四角点标签齐全但几何退化为零面积或近零跨度时，adapter 会在 ROI_DECIDER 前输出 `estop`，避免 ROI/PATH_PROVIDER 接收不存在的车位几何。
 - 障碍物线段过载保护：当前外部障碍物数量上限仍是 128；当 128 个合法箱体障碍物生成 512 条线段时，adapter 会在 PATH_PROVIDER 前输出 `estop`，避免把过载输入交给路径搜索。
 - 障碍物局部位置保护：当外部障碍物本身合法，但线段端点转换到 ROI local 坐标后明显远离 `xy_bounds` 时，adapter 会在 PATH_PROVIDER 前输出 `estop`，避免错 frame/错坐标障碍物污染路径搜索。
+- 障碍物变化重规划保护：当外部障碍物从无到有、或障碍物签名变化时，PATH_PROVIDER 会拒绝直接复用旧路径，输出 `replan=BLOCK_BY_STATIC_OBSTACLE` 并重新生成；当障碍物签名保持稳定时，才允许 `history=reused`。
 - `PlanningTrajectory`：把 SPEED_OPTIMIZER 输出的轨迹转换成 DDS 输出；若 SPEED_OPTIMIZER 失败，则回退到 PATH_PARTITION 的 nominal speed 轨迹。
 
 暂未接入内容：
@@ -174,6 +176,7 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 - `far-localization`：发布远离车位的定位，期望触发 `vehicle_lot_precheck failed` 并输出 `is_estop=true`，用于验证错坐标/错 frame 不会进入 ROI。
 - `far-obstacles`：发布 1 个合法但坐标为 `(1000,1000)` 的静态障碍物，期望触发 `PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[...]` 并输出 `is_estop=true`。
 - `many-obstacles`：发布 128 个合法静态障碍物，期望触发 `PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512` 并输出 `is_estop=true`，用于验证障碍物线段规模不会进入路径搜索。
+- `obstacle-appears`：前 3 组只发布定位/底盘、不发布障碍物，之后发布 1 个稳定静态障碍物；期望先看到 `external_obstacles=0`，障碍物出现时看到 `history=generated, replan=BLOCK_BY_STATIC_OBSTACLE, reason=obstacles_changed`，障碍物稳定后看到 `history=reused, replan=NONE`。
 
 如需直接验证 `TRACE_REPLAN/history_splice`：
 

@@ -27,9 +27,11 @@ enum class AuxPublishMode {
   kFarLocalization,
   kFarObstacles,
   kManyObstacles,
+  kObstacleAppears,
 };
 
 constexpr uint32_t kManyObstaclesCount = 128U;
+constexpr uint32_t kObstacleAppearsStartIndex = 3U;
 
 struct PublisherOptions {
   uint32_t domain_id{0U};
@@ -118,6 +120,10 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
     *out_mode = AuxPublishMode::kManyObstacles;
     return true;
   }
+  if (text == "obstacle-appears") {
+    *out_mode = AuxPublishMode::kObstacleAppears;
+    return true;
+  }
   return false;
 }
 
@@ -177,8 +183,15 @@ bool ShouldPublishChassis(const PublisherOptions& /*options*/) {
   return true;
 }
 
-bool ShouldPublishObstacles(const PublisherOptions& options) {
-  return options.mode != AuxPublishMode::kChassisOnly;
+bool ShouldPublishObstacles(const PublisherOptions& options, uint32_t index) {
+  if (options.mode == AuxPublishMode::kChassisOnly) {
+    return false;
+  }
+  if (options.mode == AuxPublishMode::kObstacleAppears &&
+      index < kObstacleAppearsStartIndex) {
+    return false;
+  }
+  return true;
 }
 
 std::string LocalizationStatusForLog(const PublisherOptions& options,
@@ -206,7 +219,7 @@ std::string LocalizationStatusForLog(const PublisherOptions& options,
 std::string ObstacleStatusForLog(const PublisherOptions& options,
                                  const ObstacleArray& sample,
                                  uint32_t index) {
-  if (!ShouldPublishObstacles(options)) {
+  if (!ShouldPublishObstacles(options, index)) {
     return "skipped";
   }
   if (IsLastSample(options, index) &&
@@ -218,6 +231,9 @@ std::string ObstacleStatusForLog(const PublisherOptions& options,
   }
   if (options.mode == AuxPublishMode::kFarObstacles) {
     return "far-valid";
+  }
+  if (options.mode == AuxPublishMode::kObstacleAppears) {
+    return "appeared-valid";
   }
   return sample.is_valid() ? "valid" : "invalid";
 }
@@ -275,6 +291,8 @@ Obstacle BuildObstacle(const PublisherOptions& options,
     obstacle.id(100000U + index * 1000U + obstacle_index);
   } else if (options.mode == AuxPublishMode::kFarObstacles) {
     obstacle.id(200000U + index);
+  } else if (options.mode == AuxPublishMode::kObstacleAppears) {
+    obstacle.id(300000U);
   } else {
     obstacle.id(1000U + index);
   }
@@ -340,7 +358,8 @@ void PrintUsage() {
             << "  --mode=<name>                 all-valid|invalid-localization|nan-localization|\n"
             << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry|\n"
             << "                                moving-localization|moving-localization-large|\n"
-            << "                                far-localization|far-obstacles|many-obstacles\n"
+            << "                                far-localization|far-obstacles|many-obstacles|\n"
+            << "                                obstacle-appears\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";
@@ -562,7 +581,7 @@ int main(int argc, char* argv[]) {
       }
     }
 
-    if (ShouldPublishObstacles(options)) {
+    if (ShouldPublishObstacles(options, i)) {
       rc = obstacle_writer->write(&obstacles, magna::dds::HANDLE_NIL);
       if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
         std::cerr << "[aux_input_mock_publisher] write obstacles failed: "
@@ -581,8 +600,9 @@ int main(int argc, char* argv[]) {
               << " obstacles="
               << ObstacleStatusForLog(options, obstacles, i)
               << " obstacle_count="
-              << (ShouldPublishObstacles(options) ? obstacles.obstacles().size()
-                                                  : 0U)
+              << (ShouldPublishObstacles(options, i)
+                      ? obstacles.obstacles().size()
+                      : 0U)
               << std::endl;
 
     if (i + 1U < options.count && options.interval_ms > 0U) {
