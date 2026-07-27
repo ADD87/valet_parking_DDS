@@ -28,10 +28,12 @@ enum class AuxPublishMode {
   kFarObstacles,
   kManyObstacles,
   kObstacleAppears,
+  kObstacleDisappears,
 };
 
 constexpr uint32_t kManyObstaclesCount = 128U;
 constexpr uint32_t kObstacleAppearsStartIndex = 3U;
+constexpr uint32_t kObstacleDisappearsClearIndex = 3U;
 
 struct PublisherOptions {
   uint32_t domain_id{0U};
@@ -122,6 +124,10 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
   }
   if (text == "obstacle-appears") {
     *out_mode = AuxPublishMode::kObstacleAppears;
+    return true;
+  }
+  if (text == "obstacle-disappears") {
+    *out_mode = AuxPublishMode::kObstacleDisappears;
     return true;
   }
   return false;
@@ -235,6 +241,9 @@ std::string ObstacleStatusForLog(const PublisherOptions& options,
   if (options.mode == AuxPublishMode::kObstacleAppears) {
     return "appeared-valid";
   }
+  if (options.mode == AuxPublishMode::kObstacleDisappears) {
+    return sample.obstacles().empty() ? "cleared-valid" : "present-valid";
+  }
   return sample.is_valid() ? "valid" : "invalid";
 }
 
@@ -293,6 +302,8 @@ Obstacle BuildObstacle(const PublisherOptions& options,
     obstacle.id(200000U + index);
   } else if (options.mode == AuxPublishMode::kObstacleAppears) {
     obstacle.id(300000U);
+  } else if (options.mode == AuxPublishMode::kObstacleDisappears) {
+    obstacle.id(400000U);
   } else {
     obstacle.id(1000U + index);
   }
@@ -338,6 +349,11 @@ ObstacleArray BuildObstacleArray(const PublisherOptions& options,
     sample.obstacles(std::move(obstacles));
     return sample;
   }
+  if (options.mode == AuxPublishMode::kObstacleDisappears &&
+      index >= kObstacleDisappearsClearIndex) {
+    sample.obstacles(std::vector<Obstacle>{});
+    return sample;
+  }
 
   Obstacle obstacle = BuildObstacle(options, index, 0U);
   if (IsLastSample(options, index) &&
@@ -359,7 +375,7 @@ void PrintUsage() {
             << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry|\n"
             << "                                moving-localization|moving-localization-large|\n"
             << "                                far-localization|far-obstacles|many-obstacles|\n"
-            << "                                obstacle-appears\n"
+            << "                                obstacle-appears|obstacle-disappears\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";
