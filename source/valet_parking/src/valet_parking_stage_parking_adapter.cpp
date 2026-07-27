@@ -500,6 +500,54 @@ bool HasUsableCorners(const std::vector<TL::perception::PSPoint>& points) {
   return has_top_left && has_top_right && has_bottom_left && has_bottom_right;
 }
 
+bool HasUsableCornerGeometry(
+    const std::vector<TL::perception::PSPoint>& points) {
+  constexpr double kMinCornerSpan = 1.0e-3;
+  constexpr double kMinCornerArea = 1.0e-4;
+  double min_x = std::numeric_limits<double>::infinity();
+  double min_y = std::numeric_limits<double>::infinity();
+  double max_x = -std::numeric_limits<double>::infinity();
+  double max_y = -std::numeric_limits<double>::infinity();
+  std::vector<TL::common::math::Vec2d> corners;
+  corners.reserve(points.size());
+
+  for (const TL::perception::PSPoint& point : points) {
+    if (point.position != TL::perception::PSPoint::TOP_LEFT &&
+        point.position != TL::perception::PSPoint::TOP_RIGHT &&
+        point.position != TL::perception::PSPoint::BOTTOM_LEFT &&
+        point.position != TL::perception::PSPoint::BOTTOM_RIGHT) {
+      continue;
+    }
+    min_x = std::min(min_x, point.point.x);
+    min_y = std::min(min_y, point.point.y);
+    max_x = std::max(max_x, point.point.x);
+    max_y = std::max(max_y, point.point.y);
+    corners.emplace_back(point.point.x, point.point.y);
+  }
+
+  if (corners.size() < 4U || !std::isfinite(min_x) || !std::isfinite(min_y) ||
+      !std::isfinite(max_x) || !std::isfinite(max_y) ||
+      max_x - min_x < kMinCornerSpan || max_y - min_y < kMinCornerSpan) {
+    return false;
+  }
+
+  TL::common::math::Vec2d center(0.0, 0.0);
+  for (const TL::common::math::Vec2d& corner : corners) {
+    center += corner;
+  }
+  center /= static_cast<double>(corners.size());
+  std::sort(corners.begin(), corners.end(),
+            [&center](const TL::common::math::Vec2d& lhs,
+                      const TL::common::math::Vec2d& rhs) {
+              return std::atan2(lhs.y() - center.y(), lhs.x() - center.x()) <
+                     std::atan2(rhs.y() - center.y(), rhs.x() - center.x());
+            });
+
+  const TL::common::math::Polygon2d corner_polygon(corners);
+  return std::isfinite(corner_polygon.area()) &&
+         std::fabs(corner_polygon.area()) >= kMinCornerArea;
+}
+
 bool ConvertParkingLot(const ParkingLot& input,
                        TL::perception::ParkingLotOut* output,
                        std::string* status_reason) {
@@ -529,6 +577,11 @@ bool ConvertParkingLot(const ParkingLot& input,
 
   if (!HasUsableCorners(lot.pts_vrf)) {
     *status_reason = "selected parking lot has insufficient or invalid corner points";
+    return false;
+  }
+
+  if (!HasUsableCornerGeometry(lot.pts_vrf)) {
+    *status_reason = "selected parking lot corner geometry is degenerate";
     return false;
   }
 

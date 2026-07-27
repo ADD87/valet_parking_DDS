@@ -13,6 +13,8 @@ Options:
   --timeout-ms N      Subscriber timeout. Default: 20000.
   --count N           Mock SelectedSlot publish count. Default: 3.
   --interval-ms N     Mock publish interval. Default: 500.
+  --slot-mode MODE    SelectedSlot publisher mode. Default: valid.
+                       valid|empty|overflow|nan|degenerate-corners
   --with-aux-inputs   Publish localization/chassis/obstacle samples before SelectedSlot.
   --aux-mode MODE     Aux publisher mode. Default: all-valid.
                        all-valid|invalid-localization|nan-localization|
@@ -37,6 +39,7 @@ domain_id=12
 timeout_ms=20000
 count=3
 interval_ms=500
+slot_mode="valid"
 with_aux_inputs=0
 aux_mode="all-valid"
 aux_count=3
@@ -63,6 +66,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --interval-ms)
       interval_ms="${2:-}"
+      shift 2
+      ;;
+    --slot-mode)
+      slot_mode="${2:-}"
       shift 2
       ;;
     --with-aux-inputs)
@@ -219,7 +226,7 @@ else
   sleep 2
 fi
 
-"${publisher}" --domain-id="${domain_id}" --mode=valid --count="${effective_count}" \
+"${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" --count="${effective_count}" \
   --interval-ms="${interval_ms}" >"${publisher_log}" 2>&1
 
 if [[ -n "${aux_publisher_pid:-}" ]]; then
@@ -247,6 +254,15 @@ if [[ "${aux_runs_in_background}" == "1" ]]; then
     runner_wait_pattern="vehicle_lot_precheck failed"
   fi
   wait_for_runner_log "${runner_wait_pattern}" "${runner_wait_seconds}" || true
+fi
+
+if [[ "${slot_mode}" == "degenerate-corners" ]]; then
+  runner_wait_seconds=$(((timeout_ms + 999) / 1000))
+  if ((runner_wait_seconds < 5)); then
+    runner_wait_seconds=5
+  fi
+  wait_for_runner_log "selected parking lot corner geometry is degenerate" \
+    "${runner_wait_seconds}" || true
 fi
 
 set +e
@@ -278,6 +294,48 @@ validation_status="${subscriber_status}"
 if [[ "${aux_publisher_status}" != "0" ]]; then
   validation_status="${aux_publisher_status}"
 fi
+
+require_runner_log() {
+  local pattern="$1"
+  local message="$2"
+  if ! grep -Eq "${pattern}" "${runner_log}"; then
+    echo "[valet_parking_smoke] ${message}" >&2
+    validation_status=8
+  fi
+}
+
+require_subscriber_log() {
+  local pattern="$1"
+  local message="$2"
+  if ! grep -Eq "${pattern}" "${subscriber_log}"; then
+    echo "[valet_parking_smoke] ${message}" >&2
+    validation_status=8
+  fi
+}
+
+case "${slot_mode}" in
+  valid)
+    ;;
+  degenerate-corners)
+    require_runner_log "selected parking lot corner geometry is degenerate" \
+      "missing degenerate corner geometry rejection in runner log"
+    require_runner_log "estop=true" \
+      "missing runner estop for degenerate-corners slot mode"
+    require_subscriber_log "is_estop=true" \
+      "missing subscriber estop for degenerate-corners slot mode"
+    ;;
+  empty|overflow|nan)
+    require_runner_log "estop=true" \
+      "missing runner estop for invalid slot mode ${slot_mode}"
+    require_subscriber_log "is_estop=true" \
+      "missing subscriber estop for invalid slot mode ${slot_mode}"
+    ;;
+  *)
+    echo "[valet_parking_smoke] unknown slot mode for validation: ${slot_mode}" >&2
+    validation_status=8
+    ;;
+esac
+
 if [[ "${with_aux_inputs}" == "1" ]]; then
   require_log() {
     local pattern="$1"

@@ -51,7 +51,8 @@ bool ParseUint32(const std::string& text, uint32_t* out_value) {
 }
 
 bool IsModeSupported(const std::string& mode) {
-  return mode == "valid" || mode == "empty" || mode == "overflow" || mode == "nan";
+  return mode == "valid" || mode == "empty" || mode == "overflow" ||
+         mode == "nan" || mode == "degenerate-corners";
 }
 
 std::string ReturnCodeToString(magna::dds::ReturnCode_t rc) {
@@ -153,7 +154,17 @@ ParkingLot BuildParkingLot(const PublisherOptions& options) {
   const double heading = 0.2;
   const double length = 5.2;
   const double width = 2.4;
-  const std::vector<PsPoint> corners = BuildSlotCorners(center_x, center_y, heading, length, width);
+  std::vector<PsPoint> corners;
+  if (options.mode == "degenerate-corners") {
+    corners = {
+        BuildPsPoint(center_x, center_y, PsPointPosition::PS_POSITION_TOP_LEFT),
+        BuildPsPoint(center_x, center_y, PsPointPosition::PS_POSITION_TOP_RIGHT),
+        BuildPsPoint(center_x, center_y, PsPointPosition::PS_POSITION_BOTTOM_LEFT),
+        BuildPsPoint(center_x, center_y, PsPointPosition::PS_POSITION_BOTTOM_RIGHT),
+    };
+  } else {
+    corners = BuildSlotCorners(center_x, center_y, heading, length, width);
+  }
 
   ParkingLot lot;
   lot.parking_seq(1U);
@@ -204,7 +215,7 @@ void PrintUsage() {
             << "Options:\n"
             << "  --domain-id=<uint32>          DDS domain id (default 0)\n"
             << "  --topic=<name>                topic name (default /selected_slot)\n"
-            << "  --mode=<valid|empty|overflow|nan>\n"
+            << "  --mode=<valid|empty|overflow|nan|degenerate-corners>\n"
             << "  --count=<uint32>              number of samples to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between samples (default 100)\n"
             << "  --help                        show this message\n";

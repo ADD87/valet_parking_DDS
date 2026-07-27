@@ -12,6 +12,7 @@
 - NEXT-022 后，`TRACE_REPLAN` 且历史 warm start 被接受时，会启用轻量 `trace_adjust` 策略切片，并在状态日志中输出可验证字段。
 - NEXT-023 后，PATH_PROVIDER 的失败和策略状态日志会输出更完整的 `warm_start`/`trace_adjust` 诊断，`moving-localization` mock 也固定为稳定小偏移，避免测试样本自己漂出 warm start 接受阈值。
 - NEXT-024 后，新增 `moving-localization-large` 负向 smoke，稳定验证 `warm_start_reject=lateral_offset_large` 与 `trace_adjust_reject=no_trace_path`。
+- NEXT-025 后，新增 SelectedSlot `degenerate-corners` 负向 smoke，验证角点标签齐全但几何退化的车位会被 adapter 明确 estop 拒绝。
 
 ## 当前算法状态
 
@@ -27,6 +28,7 @@
 - DDS 辅助输入 reader：`ValetParkingComponent` 已默认订阅临时 `LocalizationEstimate`、`ChassisState`、`ObstacleArray` typed Topic，并把样本转入外部输入边界。
 - 辅助输入边界硬化：invalid/nan localization 会清理外部车辆状态；invalid chassis 会清理速度、加速度和档位；invalid obstacle array 或非法障碍物几何会清空外部障碍物；chassis-only 不会误置 `external_vehicle=true`。
 - 定位/车位 envelope 保护：当外部定位和选中车位 AABB 明显不一致时，adapter 会在 ROI_DECIDER 前输出 `estop`，避免把远距离错坐标喂给 ROI。
+- SelectedSlot 角点几何保护：当车位四角点标签齐全但几何退化为零面积或近零跨度时，adapter 会在 ROI_DECIDER 前输出 `estop`，避免 ROI/PATH_PROVIDER 接收不存在的车位几何。
 - `PlanningTrajectory`：把 SPEED_OPTIMIZER 输出的轨迹转换成 DDS 输出；若 SPEED_OPTIMIZER 失败，则回退到 PATH_PARTITION 的 nominal speed 轨迹。
 
 暂未接入内容：
@@ -202,6 +204,15 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 
 该模式会在第二帧产生 `replan=TRACE_REPLAN`，但由于横向偏移超过 warm start 接受阈值，runner 应显示 `warm_start_reject=lateral_offset_large`、`warm_start_points=0`、`trace_adjust=false`、`trace_adjust_reject=no_trace_path`。
 
+如需验证 SelectedSlot 车位角点退化保护：
+```bash
+bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
+  --run-root /mnt/e/APA/DDS/feature_integration/feature_integration_workspace/out/valet_parking_quick_build/valet_parking_mvp/x86 \
+  --slot-mode degenerate-corners
+```
+
+该模式会发布一个 `is_valid=true`、角点位置标签齐全，但四个角点全部重合的车位。runner 应显示 `selected parking lot corner geometry is degenerate` 和 `estop=true`，subscriber 应显示 `is_estop=true`。
+
 如需验证 runner 完全不订阅辅助输入 Topic：
 
 ```bash
@@ -247,11 +258,13 @@ PATH_PROVIDER_PRECHECK ok, xy_bounds_span=16.000x23.283, dest_points=4, obstacle
 
 ## 最近验证
 
-NEXT-024 可控负向样本后，已验证：
+NEXT-025 SelectedSlot 角点几何退化边界后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
+- x86 SelectedSlot 几何负向 smoke：`degenerate-corners` 发布端显示 `is_valid=true`、`count=1`、`lots=1`，runner 显示 `selected parking lot corner geometry is degenerate`、`estop=true`，subscriber 收到 `is_estop=true`。
 - x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`，默认无辅助发布者时输入状态显示 `external_vehicle=false, external_obstacles=0`。
+- x86 DDS 辅助输入回归：`all-valid` 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态保持 `external_vehicle=true`、`external_obstacles=1`。
 - x86 PATH_PROVIDER 运行态与策略字段：默认 smoke 中第一帧显示 `history=generated, replan=NO_VALID_PATH, warm_start=none, strategy_init_move=0`，第二帧显示 `history=reused, replan=NONE`。
 - x86 trace warm start + trace adjust：`moving-localization` smoke 中第二帧显示 `replan=TRACE_REPLAN, warm_start=history_splice, warm_start_reject=accepted, warm_start_points=96, strategy_kappa_cost=true, strategy_limit_steer=true, trace_adjust=true, trace_adjust_source=history_warm_start, trace_adjust_reject=accepted, trace_adjust_points=96, trace_adjust_path_length=7.24982`。
 - x86 warm start 拒绝诊断：`moving-localization-large` smoke 中第二帧显示 `replan=TRACE_REPLAN, warm_start=none, warm_start_reject=lateral_offset_large, warm_start_points=0, trace_adjust=false, trace_adjust_reject=no_trace_path, trace_adjust_path_length=0`。
