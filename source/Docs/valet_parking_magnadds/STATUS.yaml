@@ -24,18 +24,18 @@ local_git:
 
 current_phase:
   id: Fast-2
-  name: .so + typed DDS + SelectedSlot geometry boundary smoke
-  status: PASS_SELECTED_SLOT_GEOMETRY_BOUNDARY_X86_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前仍使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；NEXT-018 已接入轻量运行态复用与 replan 标记；NEXT-019 对照完整 OpenSpacePathProvider 的 SetWarmStartPath/SetPathStrategy 思路新增历史路径 warm_start 构造、轻量策略字段和状态日志；NEXT-020 新增可控 moving-localization mock/smoke，并把 warm_start 截尾从依赖历史点 PathPoint.s 修订为基于历史路径 x/y 的几何累计距离投影；NEXT-021 新增轻量 PATH_PROVIDER_PRECHECK 与 vehicle_lot_precheck，保护 ROI/PATH_PROVIDER 前的输入几何边界；NEXT-022 新增轻量 LocalTraceAdjustSearchStrategy 切片，仅在 TRACE_REPLAN 且 history warm start 被接受时启用；NEXT-023 新增 trace_adjust 判定诊断与 PATH_PROVIDER 失败路径输入摘要；NEXT-024 新增 moving-localization-large 负向 smoke，验证 TRACE_REPLAN 下 warm_start_reject=lateral_offset_large、warm_start_points=0、trace_adjust=false、trace_adjust_reject=no_trace_path；NEXT-025 新增 SelectedSlot degenerate-corners 负向 smoke，验证车位角点标签齐全但几何退化时会在 ROI_DECIDER 前明确 estop，输出 selected parking lot corner geometry is degenerate。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
+  name: .so + typed DDS + PATH_PROVIDER obstacle segment overload smoke
+  status: PASS_PATH_PROVIDER_OBSTACLE_SEGMENT_OVERLOAD_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前仍使用 standalone 中已独立化的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路；NEXT-018 至 NEXT-025 已完成轻量运行态复用、warm_start/trace_adjust 诊断、vehicle_lot_precheck、moving-localization-large 负向 smoke 和 SelectedSlot degenerate-corners 几何退化保护。NEXT-026 新增 many-obstacles 辅助输入样本，保持外部障碍物上限 128 不放宽，将 PATH_PROVIDER_PRECHECK 可进入路径搜索的障碍物线段上限收紧为 500；当 128 个合法障碍物产生 512 条线段时，adapter 在 PATH_PROVIDER 前输出 PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512 并发布 estop。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '025'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/025_项目状态快照_SelectedSlot角点几何退化边界.md
+  id: '026'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/026_项目状态快照_PATH_PROVIDER障碍物线段过载边界.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-27
-  summary: 已完成 NEXT-025 SelectedSlot 角点几何退化边界：selected_slot_mock_publisher 新增 degenerate-corners 模式，发布 is_valid=true、count=1、parking_lots.size=1 且四个角点标签齐全但坐标全部重合的车位；ValetParkingStageParkingAdapter::ConvertParkingLot 在原有角点数量、标签和 finite 检查后新增 AABB 跨度与排序多边形面积检查，退化时输出 selected parking lot corner geometry is degenerate 并 estop；smoke_valet_parking_x86.sh 新增 --slot-mode，默认保持 valid，degenerate-corners 会断言 runner 拒绝原因、runner estop=true 和 subscriber is_estop=true。x86 构建通过；degenerate-corners、默认 valid、all-valid 辅助输入回归 smoke 通过；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
+  summary: 已完成 NEXT-026 PATH_PROVIDER 障碍物线段过载边界：aux_input_mock_publisher 新增 many-obstacles 模式，发布 128 个合法静态障碍物；ValetParkingStageParkingAdapter 将 PATH_PROVIDER_PRECHECK 的障碍物线段上限收紧为 500，使 128 个障碍物产生的 512 条线段在 PATH_PROVIDER 前被拒绝；smoke_valet_parking_x86.sh 新增 many-obstacles 断言，要求 runner 显示 aux obstacles count=128、PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512、estop=true，subscriber 显示 is_estop=true。x86 构建通过；many-obstacles 负向 smoke、默认 valid 回归、all-valid 辅助输入回归通过；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
   evidence:
     - applications/config/valet_parking_mvp_bom.yaml
     - applications/source/valet_parking/idl/valet_parking_topics.idl
@@ -53,12 +53,12 @@ last_successful_action:
     - applications/source/valet_parking_tools/selected_slot_mock_publisher/main.cpp
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
     - applications/source/valet_parking_tools/valet_parking_runner/main.cpp
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/025_项目状态快照_SelectedSlot角点几何退化边界.md
-    - out/valet_parking_slot_geometry_025/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_slot_geometry_025/valet_parking_mvp/x86/smoke_latest/domain_195_20260727_135243_713
-    - out/valet_parking_slot_geometry_025/valet_parking_mvp/x86/smoke_latest/domain_196_20260727_135300_845
-    - out/valet_parking_slot_geometry_025/valet_parking_mvp/x86/smoke_latest/domain_197_20260727_135337_711
-    - out/valet_parking_slot_geometry_025/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/026_项目状态快照_PATH_PROVIDER障碍物线段过载边界.md
+    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/x86/smoke_latest/domain_199_20260727_204042_1013
+    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/x86/smoke_latest/domain_200_20260727_204112_723
+    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/x86/smoke_latest/domain_201_20260727_204112_724
+    - out/valet_parking_obstacle_precheck_026/valet_parking_mvp/m57/lib/libvalet_parking.so
 
 blockers:
   - id: B-001
@@ -97,15 +97,16 @@ runtime_status:
   x86_path_provider_diagnostics_test: PASS
   x86_path_provider_negative_boundary_smoke_test: PASS
   x86_selected_slot_geometry_boundary_smoke_test: PASS
+  x86_path_provider_obstacle_segment_overload_smoke_test: PASS
   x86_vehicle_lot_precheck_far_localization_test: PASS
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-025 新增 degenerate-corners，在 domain_195 发布 is_valid=true/count=1/lots=1 但四角点重合的车位，runner 显示 selected parking lot corner geometry is degenerate、estop=true，subscriber 显示 is_estop=true；默认 valid 回归在 domain_196 仍显示 179 点 PlanningTrajectory、PATH_PROVIDER_PRECHECK ok、history=generated 后 history=reused；all-valid 辅助输入回归在 domain_197 显示 aux localization/chassis/obstacles 与 external_vehicle=true/external_obstacles=1。NEXT-024 的 moving-localization-large 已验证 TRACE_REPLAN 下 warm_start_reject=lateral_offset_large、warm_start_points=0、trace_adjust=false、trace_adjust_reject=no_trace_path。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-026 新增 many-obstacles，在 domain_199 发布 128 个合法静态障碍物，runner 显示 aux obstacles count=128、PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=512、estop=true，subscriber 显示 is_estop=true；默认 valid 回归在 domain_200 仍显示 179 点 PlanningTrajectory、PATH_PROVIDER_PRECHECK ok、history=generated 后 history=reused；all-valid 辅助输入回归在 domain_201 显示 aux localization/chassis/obstacles 与 external_vehicle=true/external_obstacles=1。NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-026
-  description: 继续沿用简化 DDS Topic，在 NEXT-025 SelectedSlot 角点几何边界通过后，优先增加可控障碍物数量或障碍物线段规模类负向样本，验证 PATH_PROVIDER_PRECHECK 对 too_many_obstacle_segments 或局部几何过载的诊断能力；仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
+  id: NEXT-027
+  description: 继续沿用简化 DDS Topic，在 NEXT-026 障碍物线段过载边界通过后，优先增加 PATH_PROVIDER_PRECHECK 对外部障碍物局部几何位置的保护，例如障碍物线段明显落在 ROI local xy_bounds 外时输出可诊断 estop；仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -257,3 +258,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/025_项目状态快照_SelectedSlot角点几何退化边界.md
     phase: Fast-2
     status: PASS_SELECTED_SLOT_GEOMETRY_BOUNDARY_X86_M57_STATIC_BLOCKED_BOARD
+  - id: '026'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/026_项目状态快照_PATH_PROVIDER障碍物线段过载边界.md
+    phase: Fast-2
+    status: PASS_PATH_PROVIDER_OBSTACLE_SEGMENT_OVERLOAD_X86_M57_STATIC_BLOCKED_BOARD

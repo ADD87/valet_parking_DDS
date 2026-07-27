@@ -10,6 +10,7 @@
 #include <limits>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -24,7 +25,10 @@ enum class AuxPublishMode {
   kMovingLocalization,
   kMovingLocalizationLarge,
   kFarLocalization,
+  kManyObstacles,
 };
+
+constexpr uint32_t kManyObstaclesCount = 128U;
 
 struct PublisherOptions {
   uint32_t domain_id{0U};
@@ -103,6 +107,10 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
   }
   if (text == "far-localization") {
     *out_mode = AuxPublishMode::kFarLocalization;
+    return true;
+  }
+  if (text == "many-obstacles") {
+    *out_mode = AuxPublishMode::kManyObstacles;
     return true;
   }
   return false;
@@ -200,6 +208,9 @@ std::string ObstacleStatusForLog(const PublisherOptions& options,
       options.mode == AuxPublishMode::kBadObstacleGeometry) {
     return "bad-geometry";
   }
+  if (options.mode == AuxPublishMode::kManyObstacles) {
+    return "many-valid";
+  }
   return sample.is_valid() ? "valid" : "invalid";
 }
 
@@ -245,19 +256,32 @@ ChassisState BuildChassis(uint32_t index) {
   return sample;
 }
 
-Obstacle BuildObstacle(const PublisherOptions& options, uint32_t index) {
+Obstacle BuildObstacle(const PublisherOptions& options,
+                       uint32_t index,
+                       uint32_t obstacle_index) {
   Obstacle obstacle;
-  obstacle.id((options.mode == AuxPublishMode::kMovingLocalization ||
-               options.mode == AuxPublishMode::kMovingLocalizationLarge)
-                  ? 1000U
-                  : 1000U + index);
+  if (options.mode == AuxPublishMode::kMovingLocalization ||
+      options.mode == AuxPublishMode::kMovingLocalizationLarge) {
+    obstacle.id(1000U);
+  } else if (options.mode == AuxPublishMode::kManyObstacles) {
+    obstacle.id(100000U + index * 1000U + obstacle_index);
+  } else {
+    obstacle.id(1000U + index);
+  }
   obstacle.type(ObstacleType::OBSTACLE_TYPE_UNKNOWN_UNMOVABLE);
   obstacle.is_dynamic(false);
-  obstacle.center_x(30.0);
-  obstacle.center_y(30.0);
+  if (options.mode == AuxPublishMode::kManyObstacles) {
+    const uint32_t row = obstacle_index / 16U;
+    const uint32_t column = obstacle_index % 16U;
+    obstacle.center_x(18.0 + static_cast<double>(column) * 0.8);
+    obstacle.center_y(18.0 + static_cast<double>(row) * 0.8);
+  } else {
+    obstacle.center_x(30.0);
+    obstacle.center_y(30.0);
+  }
   obstacle.heading(0.0);
-  obstacle.length(0.5);
-  obstacle.width(0.5);
+  obstacle.length(options.mode == AuxPublishMode::kManyObstacles ? 0.25 : 0.5);
+  obstacle.width(options.mode == AuxPublishMode::kManyObstacles ? 0.25 : 0.5);
   obstacle.velocity_x(0.0);
   obstacle.velocity_y(0.0);
   return obstacle;
@@ -268,13 +292,23 @@ ObstacleArray BuildObstacleArray(const PublisherOptions& options,
   ObstacleArray sample;
   sample.header(BuildHeader("aux_input_mock_publisher/obstacles", index));
   sample.is_valid(true);
-  Obstacle obstacle = BuildObstacle(options, index);
   if (IsLastSample(options, index) &&
       options.mode == AuxPublishMode::kInvalidObstacles) {
     sample.is_valid(false);
     sample.obstacles(std::vector<Obstacle>{});
     return sample;
   }
+  if (options.mode == AuxPublishMode::kManyObstacles) {
+    std::vector<Obstacle> obstacles;
+    obstacles.reserve(kManyObstaclesCount);
+    for (uint32_t i = 0U; i < kManyObstaclesCount; ++i) {
+      obstacles.push_back(BuildObstacle(options, index, i));
+    }
+    sample.obstacles(std::move(obstacles));
+    return sample;
+  }
+
+  Obstacle obstacle = BuildObstacle(options, index, 0U);
   if (IsLastSample(options, index) &&
       options.mode == AuxPublishMode::kBadObstacleGeometry) {
     obstacle.length(-1.0);
@@ -293,7 +327,7 @@ void PrintUsage() {
             << "  --mode=<name>                 all-valid|invalid-localization|nan-localization|\n"
             << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry|\n"
             << "                                moving-localization|moving-localization-large|\n"
-            << "                                far-localization\n"
+            << "                                far-localization|many-obstacles\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";

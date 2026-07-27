@@ -915,7 +915,8 @@ PathProviderPreCheckResult RunPathProviderPreCheck(
   const std::vector<std::pair<TL::common::math::LineSegment2d, double>>
       obstacle_segments = BuildObstacleSegments(roi_output, obstacles);
   result.obstacle_segment_count = obstacle_segments.size();
-  constexpr std::size_t kMaxPathProviderObstacleSegments = 2048U;
+  // 128 box obstacles generate 512 segments; keep that boundary out of search.
+  constexpr std::size_t kMaxPathProviderObstacleSegments = 500U;
   if (result.obstacle_segment_count > kMaxPathProviderObstacleSegments) {
     std::ostringstream stream;
     stream << "too_many_obstacle_segments="
