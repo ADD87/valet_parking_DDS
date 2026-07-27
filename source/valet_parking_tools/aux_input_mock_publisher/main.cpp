@@ -22,6 +22,7 @@ enum class AuxPublishMode {
   kInvalidObstacles,
   kBadObstacleGeometry,
   kMovingLocalization,
+  kFarLocalization,
 };
 
 struct PublisherOptions {
@@ -93,6 +94,10 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
   }
   if (text == "moving-localization") {
     *out_mode = AuxPublishMode::kMovingLocalization;
+    return true;
+  }
+  if (text == "far-localization") {
+    *out_mode = AuxPublishMode::kFarLocalization;
     return true;
   }
   return false;
@@ -171,6 +176,9 @@ std::string LocalizationStatusForLog(const PublisherOptions& options,
   if (options.mode == AuxPublishMode::kMovingLocalization) {
     return "moving-valid";
   }
+  if (options.mode == AuxPublishMode::kFarLocalization) {
+    return "far-valid";
+  }
   return sample.is_valid() ? "valid" : "invalid";
 }
 
@@ -199,6 +207,10 @@ LocalizationEstimate BuildLocalization(const PublisherOptions& options,
   if (options.mode == AuxPublishMode::kMovingLocalization && index > 1U) {
     sample.x(0.60 + 0.05 * static_cast<double>(index - 2U));
     sample.y(0.38);
+  }
+  if (options.mode == AuxPublishMode::kFarLocalization) {
+    sample.x(1000.0);
+    sample.y(1000.0);
   }
   if (IsLastSample(options, index) &&
       options.mode == AuxPublishMode::kInvalidLocalization) {
@@ -267,7 +279,7 @@ void PrintUsage() {
             << "  --obstacle-topic=<name>       obstacle topic (default /perception/obstacles)\n"
             << "  --mode=<name>                 all-valid|invalid-localization|nan-localization|\n"
             << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry|\n"
-            << "                                moving-localization\n"
+            << "                                moving-localization|far-localization\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";

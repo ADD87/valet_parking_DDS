@@ -22,6 +22,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -606,6 +607,59 @@ TL::common::PathPoint BuildStartPathPoint(
   return start_point;
 }
 
+bool IsFiniteVec2d(const TL::common::math::Vec2d& point) {
+  return std::isfinite(point.x()) && std::isfinite(point.y());
+}
+
+bool IsFinitePathPose(const TL::common::PathPoint& point) {
+  return std::isfinite(point.x) && std::isfinite(point.y) &&
+         std::isfinite(point.z) && std::isfinite(point.theta);
+}
+
+bool ValidateVehicleNearParkingLot(
+    const TL::perception::ParkingLotOut& parking_lot,
+    const RuntimeVehicleInput& vehicle_input,
+    std::string* status_reason) {
+  if (!vehicle_input.has_vehicle_state) {
+    return true;
+  }
+  if (status_reason == nullptr) {
+    return false;
+  }
+
+  double min_x = std::numeric_limits<double>::infinity();
+  double min_y = std::numeric_limits<double>::infinity();
+  double max_x = -std::numeric_limits<double>::infinity();
+  double max_y = -std::numeric_limits<double>::infinity();
+  for (const TL::perception::PSPoint& point : parking_lot.pts_vrf) {
+    min_x = std::min(min_x, point.point.x);
+    min_y = std::min(min_y, point.point.y);
+    max_x = std::max(max_x, point.point.x);
+    max_y = std::max(max_y, point.point.y);
+  }
+  if (!std::isfinite(min_x) || !std::isfinite(min_y) ||
+      !std::isfinite(max_x) || !std::isfinite(max_y) ||
+      min_x >= max_x || min_y >= max_y) {
+    *status_reason = "vehicle_lot_precheck failed: invalid parking lot AABB";
+    return false;
+  }
+
+  const double span_x = max_x - min_x;
+  const double span_y = max_y - min_y;
+  const double margin = std::max(20.0, 4.0 * std::max(span_x, span_y));
+  if (vehicle_input.x < min_x - margin || vehicle_input.x > max_x + margin ||
+      vehicle_input.y < min_y - margin || vehicle_input.y > max_y + margin) {
+    std::ostringstream stream;
+    stream << "vehicle_lot_precheck failed: vehicle outside selected lot "
+           << "envelope, vehicle=(" << vehicle_input.x << ","
+           << vehicle_input.y << "), lot_aabb=[" << min_x << "," << max_x
+           << "," << min_y << "," << max_y << "], margin=" << margin;
+    *status_reason = stream.str();
+    return false;
+  }
+  return true;
+}
+
 std::vector<TL::planning::SimpleStaticObstacle> BuildStaticObstacles(
     const std::vector<RuntimeObstacleInput>& obstacles) {
   std::vector<TL::planning::SimpleStaticObstacle> output;
@@ -659,6 +713,195 @@ BuildObstacleSegments(
     }
   }
   return segments;
+}
+
+struct PathProviderPreCheckResult {
+  bool ok{true};
+  std::string reason{"accepted"};
+  std::size_t obstacle_segment_count{0U};
+  std::size_t dest_region_point_count{0U};
+  double xy_width{0.0};
+  double xy_height{0.0};
+};
+
+PathProviderPreCheckResult MakePathProviderPreCheckFailure(
+    const std::string& reason) {
+  PathProviderPreCheckResult result;
+  result.ok = false;
+  result.reason = reason;
+  return result;
+}
+
+TL::common::math::Vec2d TransformPointToRoiLocal(
+    const TL::common::math::Vec2d& origin_point,
+    double origin_heading,
+    double x,
+    double y) {
+  const double dx = x - origin_point.x();
+  const double dy = y - origin_point.y();
+  const double cos_angle = std::cos(-origin_heading);
+  const double sin_angle = std::sin(-origin_heading);
+  return TL::common::math::Vec2d(
+      dx * cos_angle - dy * sin_angle,
+      dx * sin_angle + dy * cos_angle);
+}
+
+bool IsLocalPointNearBounds(const TL::common::math::Vec2d& point,
+                            const std::vector<double>& xy_bounds,
+                            double margin) {
+  return point.x() >= xy_bounds[0] - margin &&
+         point.x() <= xy_bounds[1] + margin &&
+         point.y() >= xy_bounds[2] - margin &&
+         point.y() <= xy_bounds[3] + margin;
+}
+
+PathProviderPreCheckResult RunPathProviderPreCheck(
+    const valet_parking_config_t& config,
+    const TL::planning::RoiDeciderOutput& roi_output,
+    const RuntimeVehicleInput& vehicle_input,
+    const std::vector<RuntimeObstacleInput>& obstacles) {
+  if (!IsFiniteVec2d(roi_output.origin_point) ||
+      !std::isfinite(roi_output.origin_heading)) {
+    return MakePathProviderPreCheckFailure("non_finite_roi_origin");
+  }
+
+  if (roi_output.xy_bounds.size() < 4U) {
+    std::ostringstream stream;
+    stream << "xy_bounds_size=" << roi_output.xy_bounds.size();
+    return MakePathProviderPreCheckFailure(stream.str());
+  }
+  for (std::size_t i = 0U; i < 4U; ++i) {
+    if (!std::isfinite(roi_output.xy_bounds[i])) {
+      std::ostringstream stream;
+      stream << "non_finite_xy_bounds[" << i << "]";
+      return MakePathProviderPreCheckFailure(stream.str());
+    }
+  }
+  if (roi_output.xy_bounds[0] >= roi_output.xy_bounds[1] ||
+      roi_output.xy_bounds[2] >= roi_output.xy_bounds[3]) {
+    std::ostringstream stream;
+    stream << "invalid_xy_bounds_order=["
+           << roi_output.xy_bounds[0] << "," << roi_output.xy_bounds[1]
+           << "," << roi_output.xy_bounds[2] << ","
+           << roi_output.xy_bounds[3] << "]";
+    return MakePathProviderPreCheckFailure(stream.str());
+  }
+
+  PathProviderPreCheckResult result;
+  result.xy_width = roi_output.xy_bounds[1] - roi_output.xy_bounds[0];
+  result.xy_height = roi_output.xy_bounds[3] - roi_output.xy_bounds[2];
+  constexpr double kMinRoiSpan = 0.50;
+  if (result.xy_width < kMinRoiSpan || result.xy_height < kMinRoiSpan) {
+    std::ostringstream stream;
+    stream << "xy_bounds_too_small="
+           << result.xy_width << "x" << result.xy_height;
+    return MakePathProviderPreCheckFailure(stream.str());
+  }
+
+  const TL::common::PathPoint start_point =
+      BuildStartPathPoint(config, vehicle_input);
+  const TL::common::PathPoint end_pose =
+      roi_output.has_fine_tuned ? roi_output.fine_tuned_end_pose
+                                : roi_output.end_pose;
+  if (!IsFinitePathPose(start_point)) {
+    return MakePathProviderPreCheckFailure("non_finite_start_point");
+  }
+  if (!IsFinitePathPose(end_pose)) {
+    return MakePathProviderPreCheckFailure("non_finite_end_pose");
+  }
+
+  const TL::common::math::Vec2d start_local = TransformPointToRoiLocal(
+      roi_output.origin_point, roi_output.origin_heading,
+      start_point.x, start_point.y);
+  const TL::common::math::Vec2d end_local = TransformPointToRoiLocal(
+      roi_output.origin_point, roi_output.origin_heading,
+      end_pose.x, end_pose.y);
+  if (!IsFiniteVec2d(start_local) || !IsFiniteVec2d(end_local)) {
+    return MakePathProviderPreCheckFailure("non_finite_local_pose");
+  }
+
+  constexpr double kLocalBoundsMargin = 10.0;
+  if (!IsLocalPointNearBounds(start_local, roi_output.xy_bounds,
+                              kLocalBoundsMargin)) {
+    std::ostringstream stream;
+    stream << "start_outside_xy_bounds_local=("
+           << start_local.x() << "," << start_local.y() << ")";
+    return MakePathProviderPreCheckFailure(stream.str());
+  }
+  if (!IsLocalPointNearBounds(end_local, roi_output.xy_bounds,
+                              kLocalBoundsMargin)) {
+    std::ostringstream stream;
+    stream << "end_outside_xy_bounds_local=("
+           << end_local.x() << "," << end_local.y() << ")";
+    return MakePathProviderPreCheckFailure(stream.str());
+  }
+
+  const TL::common::math::Polygon2d& dest_polygon =
+      std::get<0>(roi_output.dest_region);
+  result.dest_region_point_count =
+      static_cast<std::size_t>(dest_polygon.num_points());
+  if (result.dest_region_point_count < 3U) {
+    std::ostringstream stream;
+    stream << "dest_region_points=" << result.dest_region_point_count;
+    return MakePathProviderPreCheckFailure(stream.str());
+  }
+  if (!std::isfinite(std::get<1>(roi_output.dest_region)) ||
+      !std::isfinite(std::get<2>(roi_output.dest_region))) {
+    return MakePathProviderPreCheckFailure("non_finite_dest_region_angle");
+  }
+  if (!std::isfinite(dest_polygon.area()) ||
+      std::fabs(dest_polygon.area()) < 1.0e-6) {
+    return MakePathProviderPreCheckFailure("invalid_dest_region_area");
+  }
+  for (const TL::common::math::Vec2d& point : dest_polygon.points()) {
+    if (!IsFiniteVec2d(point)) {
+      return MakePathProviderPreCheckFailure("non_finite_dest_region_point");
+    }
+  }
+
+  const std::vector<std::pair<TL::common::math::LineSegment2d, double>>
+      obstacle_segments = BuildObstacleSegments(roi_output, obstacles);
+  result.obstacle_segment_count = obstacle_segments.size();
+  constexpr std::size_t kMaxPathProviderObstacleSegments = 2048U;
+  if (result.obstacle_segment_count > kMaxPathProviderObstacleSegments) {
+    std::ostringstream stream;
+    stream << "too_many_obstacle_segments="
+           << result.obstacle_segment_count;
+    return MakePathProviderPreCheckFailure(stream.str());
+  }
+  for (std::size_t i = 0U; i < obstacle_segments.size(); ++i) {
+    const TL::common::math::LineSegment2d& segment =
+        obstacle_segments[i].first;
+    const double buffer = obstacle_segments[i].second;
+    if (!IsFiniteVec2d(segment.start()) || !IsFiniteVec2d(segment.end()) ||
+        !std::isfinite(segment.length()) || segment.length() <= 1.0e-6) {
+      std::ostringstream stream;
+      stream << "invalid_obstacle_segment[" << i << "]";
+      return MakePathProviderPreCheckFailure(stream.str());
+    }
+    if (!std::isfinite(buffer) || buffer < 0.0) {
+      std::ostringstream stream;
+      stream << "invalid_obstacle_buffer[" << i << "]=" << buffer;
+      return MakePathProviderPreCheckFailure(stream.str());
+    }
+  }
+
+  return result;
+}
+
+std::string BuildPathProviderPreCheckReason(
+    const PathProviderPreCheckResult& result) {
+  std::ostringstream stream;
+  if (!result.ok) {
+    stream << "PATH_PROVIDER_PRECHECK failed: " << result.reason;
+    return stream.str();
+  }
+  stream << "PATH_PROVIDER_PRECHECK ok"
+         << ", xy_bounds_span=" << std::fixed << std::setprecision(3)
+         << result.xy_width << "x" << result.xy_height
+         << ", dest_points=" << result.dest_region_point_count
+         << ", obstacle_segments=" << result.obstacle_segment_count;
+  return stream.str();
 }
 
 ::GearPosition ConvertGear(TL::soc::GearPosition gear) {
@@ -2253,6 +2496,14 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
     return true;
   }
+  if (!ValidateVehicleNearParkingLot(parking_lot, runtime_->vehicle_input,
+                                     &metadata.status_reason)) {
+    runtime_->ResetPlanningState();
+    *status_reason = metadata.status_reason;
+    *output_sample =
+        BuildEstopTrajectory(config_, metadata, metadata.status_reason);
+    return true;
+  }
 
   const TL::common::VehicleState vehicle_state =
       BuildVehicleState(config_, metadata.data_stamp_ms,
@@ -2274,6 +2525,20 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   }
 
   const std::string roi_reason = BuildRoiReason(roi_output);
+  const PathProviderPreCheckResult precheck_result =
+      RunPathProviderPreCheck(config_, roi_output, runtime_->vehicle_input,
+                              runtime_->obstacles);
+  const std::string precheck_reason =
+      BuildPathProviderPreCheckReason(precheck_result);
+  if (!precheck_result.ok) {
+    runtime_->ResetPlanningState();
+    metadata.status_reason = precheck_reason + "; " + roi_reason;
+    *status_reason = metadata.status_reason;
+    *output_sample =
+        BuildEstopTrajectory(config_, metadata, metadata.status_reason);
+    return true;
+  }
+
   TL::planning::OpenSpacePathOutput path_output;
   std::string path_provider_reason;
   if (RunPathProvider(config_, metadata, selected_lot->parking_seq(),
@@ -2306,7 +2571,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
                                             speed_output);
         metadata.status_reason =
             speed_optimizer_reason + "; " + path_partition_reason + "; " +
-            path_provider_reason + "; " + roi_reason;
+            path_provider_reason + "; " + precheck_reason + "; " +
+            roi_reason;
         *status_reason = metadata.status_reason;
         *output_sample = BuildTrajectoryFromSpeedOptimizer(
             config_, metadata, speed_output, metadata.status_reason);
@@ -2317,7 +2583,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       metadata.status_reason =
           speed_optimizer_reason + "; fallback to PATH_PARTITION; " +
           path_partition_reason + "; " + path_provider_reason + "; " +
-          roi_reason;
+          precheck_reason + "; " + roi_reason;
       *status_reason = metadata.status_reason;
       *output_sample = BuildTrajectoryFromPathPartition(
           config_, metadata, partition_output, metadata.status_reason);
@@ -2327,7 +2593,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     runtime_->ResetPlanningState();
     metadata.status_reason =
         path_partition_reason + "; fallback to PATH_PROVIDER; " +
-        path_provider_reason + "; " + roi_reason;
+        path_provider_reason + "; " + precheck_reason + "; " + roi_reason;
     *status_reason = metadata.status_reason;
     *output_sample = BuildTrajectoryFromPathProvider(
         config_, metadata, path_output, metadata.status_reason);
@@ -2336,7 +2602,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   runtime_->ResetPlanningState();
   metadata.status_reason =
-      path_provider_reason + "; fallback to ROI seed; " + roi_reason;
+      path_provider_reason + "; fallback to ROI seed; " + precheck_reason +
+      "; " + roi_reason;
   *status_reason = metadata.status_reason;
   *output_sample =
       BuildTrajectoryToTarget(config_, metadata, roi_output.end_pose, false,

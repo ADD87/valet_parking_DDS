@@ -17,7 +17,7 @@ Options:
   --aux-mode MODE     Aux publisher mode. Default: all-valid.
                        all-valid|invalid-localization|nan-localization|
                        chassis-only|invalid-obstacles|bad-obstacle-geometry|
-                       moving-localization
+                       moving-localization|far-localization
   --aux-count N       Aux sample group count. Default: 3.
   --aux-interval-ms N Aux sample group interval. Default: 200.
   --disable-aux-input-topics
@@ -174,7 +174,10 @@ runner_pid=$!
 sleep 2
 
 aux_runs_in_background=0
-if [[ "${with_aux_inputs}" == "1" && "${aux_mode}" == "moving-localization" && "${disable_aux_input_topics}" != "1" ]]; then
+if [[ "${with_aux_inputs}" == "1" &&
+      ( "${aux_mode}" == "moving-localization" ||
+        "${aux_mode}" == "far-localization" ) &&
+      "${disable_aux_input_topics}" != "1" ]]; then
   aux_runs_in_background=1
 fi
 
@@ -357,6 +360,16 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing enabled kappa cost in moving-localization mode"
         require_log "strategy_limit_steer=true" \
           "missing enabled steer limit in moving-localization mode"
+        ;;
+      far-localization)
+        require_log "aux localization #[0-9]+ .*x=1000" \
+          "missing far localization sample"
+        require_log "vehicle_lot_precheck failed: vehicle outside selected lot envelope" \
+          "missing vehicle_lot_precheck failure in far-localization mode"
+        if ! grep -Eq "is_estop=true" "${subscriber_log}"; then
+          echo "[valet_parking_smoke] missing estop trajectory in far-localization mode" >&2
+          validation_status=8
+        fi
         ;;
       *)
         echo "[valet_parking_smoke] unknown aux mode for validation: ${aux_mode}" >&2
