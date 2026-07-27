@@ -972,6 +972,11 @@ constexpr uint32_t kReplanBlockByStaticObstacle = 4U;
 constexpr uint32_t kReplanDynamicReplan = 256U;
 constexpr uint32_t kReplanTraceReplan = 512U;
 constexpr uint32_t kReplanForSpeedWarn = 4096U;
+constexpr double kTraceAdjustBound = 30.0;
+constexpr double kTraceAdjustLatDiffThreshold = 0.05;
+constexpr double kTraceAdjustThetaDiffThreshold = 0.02;
+constexpr double kTraceAdjustTargetS = 8.0;
+constexpr double kMinTraceAdjustPathLength = 0.50;
 
 uint64_t HashCombine(uint64_t seed, uint64_t value) {
   constexpr uint64_t kMagic = 0x9e3779b97f4a7c15ULL;
@@ -1358,19 +1363,53 @@ struct PathProviderStrategySummary {
   double warm_start_match_l{0.0};
   double warm_start_path_front_s{0.0};
   double warm_start_path_back_s{0.0};
+  bool trace_adjust_enabled{false};
+  std::size_t trace_adjust_points{0U};
+  double trace_adjust_target_s{0.0};
+  double trace_adjust_finish_l_threshold{0.0};
+  double trace_adjust_finish_theta_threshold{0.0};
+  double trace_adjust_bound{0.0};
+  std::string trace_adjust_source{"none"};
 };
+
+bool ShouldUseTraceAdjust(uint32_t replan_status,
+                          const TL::planning::DiscretizedPath& trace_path) {
+  return ShouldUseHistoryWarmStart(replan_status) && trace_path.size() > 1U &&
+         trace_path.Length() >= kMinTraceAdjustPathLength;
+}
+
+void ApplyLocalTraceAdjustSearchStrategy(
+    const TL::planning::DiscretizedPath& trace_path,
+    TL::planning::PathSearchStrategy* search_strategy) {
+  if (search_strategy == nullptr) {
+    return;
+  }
+  TL::planning::TraceAdjustSearchStrategy& trace_adjust =
+      search_strategy->trace_adjust_search_strategy;
+  trace_adjust.is_trace_adjust = true;
+  trace_adjust.trace_path = trace_path;
+  trace_adjust.finish_l_threshold = kTraceAdjustLatDiffThreshold;
+  trace_adjust.finish_theta_threshold = kTraceAdjustThetaDiffThreshold;
+  trace_adjust.target_s = kTraceAdjustTargetS;
+  trace_adjust.xy_bounds = {-kTraceAdjustBound, kTraceAdjustBound,
+                            -kTraceAdjustBound, kTraceAdjustBound};
+  search_strategy->cut_off_strategy = 0;
+  search_strategy->is_plan_from_start = true;
+}
 
 void ApplyPathProviderStrategy(
     const TL::planning::RoiDeciderOutput& roi_output,
     const PathProviderRuntimeState& provider_state,
+    const uint32_t replan_status,
     const TL::soc::GearPosition warm_start_gear,
-    const std::size_t warm_start_points,
+    const TL::planning::DiscretizedPath& trace_path,
     TL::planning::PathStrategy* path_strategy,
     PathProviderStrategySummary* summary) {
   if (path_strategy == nullptr) {
     return;
   }
 
+  const std::size_t warm_start_points = trace_path.size();
   path_strategy->path_search_strategy.Reset();
   path_strategy->disable_search = false;
   path_strategy->init_moving_direction =
@@ -1386,6 +1425,9 @@ void ApplyPathProviderStrategy(
   search_strategy.park_direction =
       roi_output.is_parking_inwards ? TL::planning::ParkDirection::PARKIN
                                     : TL::planning::ParkDirection::NODIRECTION;
+  if (ShouldUseTraceAdjust(replan_status, trace_path)) {
+    ApplyLocalTraceAdjustSearchStrategy(trace_path, &search_strategy);
+  }
 
   if (summary != nullptr) {
     summary->warm_start_points = warm_start_points;
@@ -1400,6 +1442,20 @@ void ApplyPathProviderStrategy(
     summary->disable_search = path_strategy->disable_search;
     summary->warm_start_source =
         warm_start_points > 1U ? "history_splice" : "none";
+    summary->trace_adjust_enabled =
+        search_strategy.trace_adjust_search_strategy.is_trace_adjust;
+    summary->trace_adjust_points =
+        summary->trace_adjust_enabled ? trace_path.size() : 0U;
+    summary->trace_adjust_target_s =
+        summary->trace_adjust_enabled ? kTraceAdjustTargetS : 0.0;
+    summary->trace_adjust_finish_l_threshold =
+        summary->trace_adjust_enabled ? kTraceAdjustLatDiffThreshold : 0.0;
+    summary->trace_adjust_finish_theta_threshold =
+        summary->trace_adjust_enabled ? kTraceAdjustThetaDiffThreshold : 0.0;
+    summary->trace_adjust_bound =
+        summary->trace_adjust_enabled ? kTraceAdjustBound : 0.0;
+    summary->trace_adjust_source =
+        summary->trace_adjust_enabled ? "history_warm_start" : "none";
   }
 }
 
@@ -1494,8 +1550,8 @@ TL::planning::OpenSpacePathInput BuildPathProviderInput(
   BuildWarmStartPathFromHistory(provider_state, start_point, replan_status,
                                 &input.warm_start_path, &warm_start_gear,
                                 &warm_start_diagnostics);
-  ApplyPathProviderStrategy(roi_output, provider_state, warm_start_gear,
-                            input.warm_start_path.size(),
+  ApplyPathProviderStrategy(roi_output, provider_state, replan_status,
+                            warm_start_gear, input.warm_start_path,
                             &input.path_strategy, strategy_summary);
   if (strategy_summary != nullptr) {
     strategy_summary->warm_start_reject_reason =
@@ -1651,6 +1707,26 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << (strategy_summary.limit_init_steer_margin ? "true" : "false")
          << ", strategy_disable_search="
          << (strategy_summary.disable_search ? "true" : "false")
+         << ", trace_adjust="
+         << (strategy_summary.trace_adjust_enabled ? "true" : "false")
+         << ", trace_adjust_source=" << strategy_summary.trace_adjust_source
+         << ", trace_adjust_points=" << strategy_summary.trace_adjust_points
+         << ", trace_adjust_target_s="
+         << strategy_summary.trace_adjust_target_s
+         << ", trace_adjust_finish_l="
+         << strategy_summary.trace_adjust_finish_l_threshold
+         << ", trace_adjust_finish_theta="
+         << strategy_summary.trace_adjust_finish_theta_threshold
+         << ", trace_adjust_bounds=";
+  if (strategy_summary.trace_adjust_enabled) {
+    stream << "[-" << strategy_summary.trace_adjust_bound
+           << "," << strategy_summary.trace_adjust_bound
+           << ",-" << strategy_summary.trace_adjust_bound
+           << "," << strategy_summary.trace_adjust_bound << "]";
+  } else {
+    stream << "none";
+  }
+  stream
          << ", generated_count=" << provider_state->generated_count
          << ", reused_count=" << provider_state->reused_count
          << ", external_vehicle="

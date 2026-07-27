@@ -96,6 +96,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+effective_count="${count}"
+effective_aux_count="${aux_count}"
+effective_aux_interval_ms="${aux_interval_ms}"
+if [[ "${with_aux_inputs}" == "1" &&
+      "${aux_mode}" == "moving-localization" &&
+      "${disable_aux_input_topics}" != "1" ]]; then
+  if ((effective_count < 6)); then
+    effective_count=6
+  fi
+  if ((effective_aux_count < 8)); then
+    effective_aux_count=8
+  fi
+fi
+
 runner="${run_root}/app/valet_parking_runner"
 subscriber="${run_root}/app/planning_trajectory_mock_subscriber"
 publisher="${run_root}/app/selected_slot_mock_publisher"
@@ -183,8 +197,8 @@ fi
 
 if [[ "${with_aux_inputs}" == "1" && "${aux_runs_in_background}" != "1" ]]; then
   "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
-    --count="${aux_count}" \
-    --interval-ms="${aux_interval_ms}" >"${aux_publisher_log}" 2>&1
+    --count="${effective_aux_count}" \
+    --interval-ms="${effective_aux_interval_ms}" >"${aux_publisher_log}" 2>&1
   sleep 1
 fi
 
@@ -194,15 +208,15 @@ subscriber_pid=$!
 if [[ "${aux_runs_in_background}" == "1" ]]; then
   sleep 1
   "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
-    --count="${aux_count}" \
-    --interval-ms="${aux_interval_ms}" >"${aux_publisher_log}" 2>&1 &
+    --count="${effective_aux_count}" \
+    --interval-ms="${effective_aux_interval_ms}" >"${aux_publisher_log}" 2>&1 &
   aux_publisher_pid=$!
   sleep 0.15
 else
   sleep 2
 fi
 
-"${publisher}" --domain-id="${domain_id}" --mode=valid --count="${count}" \
+"${publisher}" --domain-id="${domain_id}" --mode=valid --count="${effective_count}" \
   --interval-ms="${interval_ms}" >"${publisher_log}" 2>&1
 
 if [[ -n "${aux_publisher_pid:-}" ]]; then
@@ -221,7 +235,13 @@ if [[ "${aux_runs_in_background}" == "1" ]]; then
   if ((runner_wait_seconds < 5)); then
     runner_wait_seconds=5
   fi
-  wait_for_runner_log "bridged sample #2" "${runner_wait_seconds}" || true
+  runner_wait_pattern="bridged sample #2"
+  if [[ "${aux_mode}" == "moving-localization" ]]; then
+    runner_wait_pattern="trace_adjust=true"
+  elif [[ "${aux_mode}" == "far-localization" ]]; then
+    runner_wait_pattern="vehicle_lot_precheck failed"
+  fi
+  wait_for_runner_log "${runner_wait_pattern}" "${runner_wait_seconds}" || true
 fi
 
 set +e
@@ -342,9 +362,9 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing external_obstacles=0 after bad obstacle geometry"
         ;;
       moving-localization)
-        require_log "aux localization #[0-9]+ .*x=0" \
+        require_log "aux localization #[0-9]+ \\(x=0(\\.00)?, y=0" \
           "missing initial moving localization sample"
-        require_log "aux localization #[0-9]+ .*y=0\\.38" \
+        require_log "aux localization #[0-9]+ .*x=0\\.8" \
           "missing shifted moving localization sample"
         require_log "external_vehicle=true" \
           "missing external_vehicle=true in moving-localization mode"
@@ -360,6 +380,10 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing enabled kappa cost in moving-localization mode"
         require_log "strategy_limit_steer=true" \
           "missing enabled steer limit in moving-localization mode"
+        require_log "trace_adjust=true" \
+          "missing trace adjust strategy in moving-localization mode"
+        require_log "trace_adjust_points=[1-9][0-9]*" \
+          "missing trace adjust path points in moving-localization mode"
         ;;
       far-localization)
         require_log "aux localization #[0-9]+ .*x=1000" \
