@@ -22,6 +22,7 @@ enum class AuxPublishMode {
   kInvalidObstacles,
   kBadObstacleGeometry,
   kMovingLocalization,
+  kMovingLocalizationLarge,
   kFarLocalization,
 };
 
@@ -94,6 +95,10 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
   }
   if (text == "moving-localization") {
     *out_mode = AuxPublishMode::kMovingLocalization;
+    return true;
+  }
+  if (text == "moving-localization-large") {
+    *out_mode = AuxPublishMode::kMovingLocalizationLarge;
     return true;
   }
   if (text == "far-localization") {
@@ -176,6 +181,9 @@ std::string LocalizationStatusForLog(const PublisherOptions& options,
   if (options.mode == AuxPublishMode::kMovingLocalization) {
     return "moving-valid";
   }
+  if (options.mode == AuxPublishMode::kMovingLocalizationLarge) {
+    return "moving-large-valid";
+  }
   if (options.mode == AuxPublishMode::kFarLocalization) {
     return "far-valid";
   }
@@ -208,6 +216,10 @@ LocalizationEstimate BuildLocalization(const PublisherOptions& options,
     sample.x(0.80);
     sample.y(0.70);
   }
+  if (options.mode == AuxPublishMode::kMovingLocalizationLarge && index > 2U) {
+    sample.x(1.40);
+    sample.y(1.30);
+  }
   if (options.mode == AuxPublishMode::kFarLocalization) {
     sample.x(1000.0);
     sample.y(1000.0);
@@ -235,7 +247,8 @@ ChassisState BuildChassis(uint32_t index) {
 
 Obstacle BuildObstacle(const PublisherOptions& options, uint32_t index) {
   Obstacle obstacle;
-  obstacle.id(options.mode == AuxPublishMode::kMovingLocalization
+  obstacle.id((options.mode == AuxPublishMode::kMovingLocalization ||
+               options.mode == AuxPublishMode::kMovingLocalizationLarge)
                   ? 1000U
                   : 1000U + index);
   obstacle.type(ObstacleType::OBSTACLE_TYPE_UNKNOWN_UNMOVABLE);
@@ -279,7 +292,8 @@ void PrintUsage() {
             << "  --obstacle-topic=<name>       obstacle topic (default /perception/obstacles)\n"
             << "  --mode=<name>                 all-valid|invalid-localization|nan-localization|\n"
             << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry|\n"
-            << "                                moving-localization|far-localization\n"
+            << "                                moving-localization|moving-localization-large|\n"
+            << "                                far-localization\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";

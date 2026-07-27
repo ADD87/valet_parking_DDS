@@ -17,7 +17,8 @@ Options:
   --aux-mode MODE     Aux publisher mode. Default: all-valid.
                        all-valid|invalid-localization|nan-localization|
                        chassis-only|invalid-obstacles|bad-obstacle-geometry|
-                       moving-localization|far-localization
+                       moving-localization|moving-localization-large|
+                       far-localization
   --aux-count N       Aux sample group count. Default: 3.
   --aux-interval-ms N Aux sample group interval. Default: 200.
   --disable-aux-input-topics
@@ -100,7 +101,8 @@ effective_count="${count}"
 effective_aux_count="${aux_count}"
 effective_aux_interval_ms="${aux_interval_ms}"
 if [[ "${with_aux_inputs}" == "1" &&
-      "${aux_mode}" == "moving-localization" &&
+      ( "${aux_mode}" == "moving-localization" ||
+        "${aux_mode}" == "moving-localization-large" ) &&
       "${disable_aux_input_topics}" != "1" ]]; then
   if ((effective_count < 6)); then
     effective_count=6
@@ -190,6 +192,7 @@ sleep 2
 aux_runs_in_background=0
 if [[ "${with_aux_inputs}" == "1" &&
       ( "${aux_mode}" == "moving-localization" ||
+        "${aux_mode}" == "moving-localization-large" ||
         "${aux_mode}" == "far-localization" ) &&
       "${disable_aux_input_topics}" != "1" ]]; then
   aux_runs_in_background=1
@@ -238,6 +241,8 @@ if [[ "${aux_runs_in_background}" == "1" ]]; then
   runner_wait_pattern="bridged sample #2"
   if [[ "${aux_mode}" == "moving-localization" ]]; then
     runner_wait_pattern="trace_adjust=true"
+  elif [[ "${aux_mode}" == "moving-localization-large" ]]; then
+    runner_wait_pattern="warm_start_reject=lateral_offset_large"
   elif [[ "${aux_mode}" == "far-localization" ]]; then
     runner_wait_pattern="vehicle_lot_precheck failed"
   fi
@@ -388,6 +393,30 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing trace adjust path points in moving-localization mode"
         require_log "trace_adjust_path_length=[1-9]" \
           "missing trace adjust path length in moving-localization mode"
+        ;;
+      moving-localization-large)
+        require_log "aux localization #[0-9]+ \\(x=0(\\.00)?, y=0" \
+          "missing initial large moving localization sample"
+        require_log "aux localization #[0-9]+ .*x=1\\.4" \
+          "missing shifted large moving localization sample"
+        require_log "external_vehicle=true" \
+          "missing external_vehicle=true in moving-localization-large mode"
+        require_log "external_obstacles=[1-9]" \
+          "missing retained external obstacles in moving-localization-large mode"
+        require_log "replan=TRACE_REPLAN" \
+          "missing TRACE_REPLAN in moving-localization-large mode"
+        require_log "warm_start=none" \
+          "missing rejected warm start source in moving-localization-large mode"
+        require_log "warm_start_reject=lateral_offset_large" \
+          "missing lateral_offset_large warm start diagnostic"
+        require_log "warm_start_points=0" \
+          "missing zero warm_start_points after large localization shift"
+        require_log "trace_adjust=false" \
+          "missing disabled trace adjust after rejected warm start"
+        require_log "trace_adjust_reject=no_trace_path" \
+          "missing no_trace_path trace adjust diagnostic"
+        require_log "trace_adjust_path_length=0" \
+          "missing zero trace adjust path length after rejected warm start"
         ;;
       far-localization)
         require_log "aux localization #[0-9]+ .*x=1000" \
