@@ -893,24 +893,143 @@ bool ShouldUseHistoryWarmStart(uint32_t replan_status) {
          (replan_status & unsafe_history_reasons) == 0U;
 }
 
+struct WarmStartBuildDiagnostics {
+  std::string reject_reason{"not_attempted"};
+  std::size_t history_points{0U};
+  double start_s{0.0};
+  double start_l{0.0};
+  double path_front_s{0.0};
+  double path_back_s{0.0};
+};
+
+struct HistoryPathProjection {
+  double s{0.0};
+  double l{0.0};
+  double path_length{0.0};
+  std::size_t next_point_index{0U};
+};
+
+void UpdateWarmStartDiagnostics(
+    WarmStartBuildDiagnostics* diagnostics,
+    const std::string& reason,
+    const TL::planning::DiscretizedPath* path,
+    const TL::common::SLPoint* start_sl) {
+  if (diagnostics == nullptr) {
+    return;
+  }
+  diagnostics->reject_reason = reason;
+  if (path != nullptr) {
+    diagnostics->history_points = path->size();
+    if (!path->empty()) {
+      diagnostics->path_front_s = path->front().s;
+      diagnostics->path_back_s = path->back().s;
+    }
+  }
+  if (start_sl != nullptr) {
+    diagnostics->start_s = start_sl->s;
+    diagnostics->start_l = start_sl->l;
+  }
+}
+
+void UpdateWarmStartProjectionDiagnostics(
+    WarmStartBuildDiagnostics* diagnostics,
+    const std::string& reason,
+    const TL::planning::DiscretizedPath& path,
+    const HistoryPathProjection& projection) {
+  if (diagnostics == nullptr) {
+    return;
+  }
+  diagnostics->reject_reason = reason;
+  diagnostics->history_points = path.size();
+  diagnostics->start_s = projection.s;
+  diagnostics->start_l = projection.l;
+  diagnostics->path_front_s = 0.0;
+  diagnostics->path_back_s = projection.path_length;
+}
+
+bool ProjectPointToPathGeometry(
+    const TL::planning::DiscretizedPath& path,
+    const TL::common::PathPoint& point,
+    HistoryPathProjection* projection) {
+  if (projection == nullptr || path.size() < 2U) {
+    return false;
+  }
+
+  constexpr double kMinSegmentLength = 1.0e-6;
+  double accumulated_s = 0.0;
+  double best_distance_square = std::numeric_limits<double>::infinity();
+  bool found_projection = false;
+  HistoryPathProjection best_projection;
+
+  for (std::size_t i = 0U; i + 1U < path.size(); ++i) {
+    const TL::common::PathPoint& segment_start = path[i];
+    const TL::common::PathPoint& segment_end = path[i + 1U];
+    const double dx = segment_end.x - segment_start.x;
+    const double dy = segment_end.y - segment_start.y;
+    const double length_square = dx * dx + dy * dy;
+    if (length_square < kMinSegmentLength * kMinSegmentLength) {
+      continue;
+    }
+
+    const double segment_length = std::sqrt(length_square);
+    const double point_dx = point.x - segment_start.x;
+    const double point_dy = point.y - segment_start.y;
+    double ratio = (point_dx * dx + point_dy * dy) / length_square;
+    ratio = std::max(0.0, std::min(1.0, ratio));
+    const double projection_x = segment_start.x + ratio * dx;
+    const double projection_y = segment_start.y + ratio * dy;
+    const double distance_dx = point.x - projection_x;
+    const double distance_dy = point.y - projection_y;
+    const double distance_square =
+        distance_dx * distance_dx + distance_dy * distance_dy;
+    if (distance_square < best_distance_square) {
+      best_distance_square = distance_square;
+      best_projection.s = accumulated_s + ratio * segment_length;
+      best_projection.l = (dx * point_dy - dy * point_dx) / segment_length;
+      best_projection.next_point_index =
+          ratio >= 1.0 ? i + 2U : i + 1U;
+      found_projection = true;
+    }
+    accumulated_s += segment_length;
+  }
+
+  if (!found_projection || accumulated_s < kMinSegmentLength) {
+    return false;
+  }
+  best_projection.path_length = accumulated_s;
+  if (best_projection.next_point_index > path.size()) {
+    best_projection.next_point_index = path.size();
+  }
+  *projection = best_projection;
+  return true;
+}
+
 bool BuildWarmStartPathFromHistory(
     const PathProviderRuntimeState& state,
     const TL::common::PathPoint& start_point,
     uint32_t replan_status,
     TL::planning::DiscretizedPath* warm_start_path,
-    TL::soc::GearPosition* warm_start_gear) {
+    TL::soc::GearPosition* warm_start_gear,
+    WarmStartBuildDiagnostics* diagnostics) {
   if (warm_start_path == nullptr || warm_start_gear == nullptr) {
     return false;
   }
 
   warm_start_path->clear();
   *warm_start_gear = TL::soc::GearPosition::GEAR_NONE;
-  if (!ShouldUseHistoryWarmStart(replan_status) ||
-      !HasUsablePathOutput(state.last_output)) {
+  UpdateWarmStartDiagnostics(diagnostics, "not_attempted", nullptr, nullptr);
+  if (!HasUsablePathOutput(state.last_output)) {
+    UpdateWarmStartDiagnostics(diagnostics, "no_history_path", nullptr,
+                               nullptr);
+    return false;
+  }
+  if (!ShouldUseHistoryWarmStart(replan_status)) {
+    UpdateWarmStartDiagnostics(diagnostics, "disallowed_replan_status",
+                               nullptr, nullptr);
     return false;
   }
 
-  constexpr double kMaxWarmStartLatOffset = 0.75;
+  constexpr double kMaxWarmStartLatOffset = 1.20;
   constexpr double kWarmStartSBuffer = 0.50;
   constexpr double kMinWarmStartLength = 0.50;
 
@@ -918,43 +1037,64 @@ bool BuildWarmStartPathFromHistory(
        state.last_output.partitioned_path) {
     const TL::planning::DiscretizedPath& path = path_pair.first;
     if (path.size() < 2U) {
+      UpdateWarmStartDiagnostics(diagnostics, "history_path_too_short", &path,
+                                 nullptr);
       continue;
     }
 
-    TL::common::SLPoint start_sl;
-    if (!path.XYToSL(start_point.x, start_point.y, &start_sl)) {
+    HistoryPathProjection projection;
+    if (!ProjectPointToPathGeometry(path, start_point, &projection)) {
+      UpdateWarmStartDiagnostics(diagnostics, "projection_failed", &path,
+                                 nullptr);
       continue;
     }
     const bool start_projects_to_path =
-        std::fabs(start_sl.l) < kMaxWarmStartLatOffset &&
-        start_sl.s > path.front().s - kWarmStartSBuffer &&
-        start_sl.s < path.back().s + kWarmStartSBuffer;
+        std::fabs(projection.l) < kMaxWarmStartLatOffset &&
+        projection.s > -kWarmStartSBuffer &&
+        projection.s < projection.path_length + kWarmStartSBuffer;
     if (!start_projects_to_path) {
+      const std::string reason =
+          std::fabs(projection.l) >= kMaxWarmStartLatOffset
+              ? "lateral_offset_large"
+              : "s_out_of_range";
+      UpdateWarmStartProjectionDiagnostics(diagnostics, reason, path,
+                                           projection);
       continue;
     }
 
-    auto iter = std::find_if(
-        path.begin(), path.end(),
-        [&start_sl](const TL::common::PathPoint& path_point) {
-          return start_sl.s < path_point.s;
-        });
-    if (iter == path.end()) {
+    if (projection.next_point_index >= path.size()) {
+      UpdateWarmStartProjectionDiagnostics(diagnostics, "no_tail_after_start",
+                                           path, projection);
       continue;
     }
 
+    auto iter = path.begin() +
+                static_cast<std::ptrdiff_t>(projection.next_point_index);
     warm_start_path->assign(iter, path.end());
     if (warm_start_path->empty()) {
+      UpdateWarmStartProjectionDiagnostics(diagnostics,
+                                           "empty_tail_after_assign", path,
+                                           projection);
       continue;
     }
     RebaseWarmStartPath(start_point, warm_start_path);
     if (warm_start_path->back().s - warm_start_path->front().s <
         kMinWarmStartLength) {
       warm_start_path->clear();
+      UpdateWarmStartProjectionDiagnostics(diagnostics, "tail_too_short", path,
+                                           projection);
       continue;
     }
 
     *warm_start_gear = path_pair.second;
+    UpdateWarmStartProjectionDiagnostics(diagnostics, "accepted", path,
+                                         projection);
     return true;
+  }
+  if (diagnostics != nullptr &&
+      diagnostics->reject_reason == "not_attempted") {
+    UpdateWarmStartDiagnostics(diagnostics, "no_matching_history_path",
+                               nullptr, nullptr);
   }
   return false;
 }
@@ -969,6 +1109,12 @@ struct PathProviderStrategySummary {
   bool limit_init_steer_margin{false};
   bool disable_search{false};
   std::string warm_start_source{"none"};
+  std::string warm_start_reject_reason{"not_attempted"};
+  std::size_t warm_start_history_points{0U};
+  double warm_start_match_s{0.0};
+  double warm_start_match_l{0.0};
+  double warm_start_path_front_s{0.0};
+  double warm_start_path_back_s{0.0};
 };
 
 void ApplyPathProviderStrategy(
@@ -1101,11 +1247,25 @@ TL::planning::OpenSpacePathInput BuildPathProviderInput(
   input.dest_region_with_angle = roi_output.dest_region;
   TL::soc::GearPosition warm_start_gear =
       TL::soc::GearPosition::GEAR_NONE;
+  WarmStartBuildDiagnostics warm_start_diagnostics;
   BuildWarmStartPathFromHistory(provider_state, start_point, replan_status,
-                                &input.warm_start_path, &warm_start_gear);
+                                &input.warm_start_path, &warm_start_gear,
+                                &warm_start_diagnostics);
   ApplyPathProviderStrategy(roi_output, provider_state, warm_start_gear,
                             input.warm_start_path.size(),
                             &input.path_strategy, strategy_summary);
+  if (strategy_summary != nullptr) {
+    strategy_summary->warm_start_reject_reason =
+        warm_start_diagnostics.reject_reason;
+    strategy_summary->warm_start_history_points =
+        warm_start_diagnostics.history_points;
+    strategy_summary->warm_start_match_s = warm_start_diagnostics.start_s;
+    strategy_summary->warm_start_match_l = warm_start_diagnostics.start_l;
+    strategy_summary->warm_start_path_front_s =
+        warm_start_diagnostics.path_front_s;
+    strategy_summary->warm_start_path_back_s =
+        warm_start_diagnostics.path_back_s;
+  }
   (void)metadata;
   return input;
 }
@@ -1228,8 +1388,16 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << ", replan=" << replan_text
          << ", reason=" << decision.reason
          << ", warm_start=" << strategy_summary.warm_start_source
+         << ", warm_start_reject="
+         << strategy_summary.warm_start_reject_reason
          << ", warm_start_points=" << strategy_summary.warm_start_points
          << ", splice_points=" << strategy_summary.splice_path_points
+         << ", warm_start_history_points="
+         << strategy_summary.warm_start_history_points
+         << ", warm_start_s=" << strategy_summary.warm_start_match_s
+         << ", warm_start_l=" << strategy_summary.warm_start_match_l
+         << ", warm_start_path_s=[" << strategy_summary.warm_start_path_front_s
+         << "," << strategy_summary.warm_start_path_back_s << "]"
          << ", strategy_init_move="
          << strategy_summary.init_moving_direction
          << ", strategy_init_path="

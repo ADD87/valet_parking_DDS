@@ -16,7 +16,8 @@ Options:
   --with-aux-inputs   Publish localization/chassis/obstacle samples before SelectedSlot.
   --aux-mode MODE     Aux publisher mode. Default: all-valid.
                        all-valid|invalid-localization|nan-localization|
-                       chassis-only|invalid-obstacles|bad-obstacle-geometry
+                       chassis-only|invalid-obstacles|bad-obstacle-geometry|
+                       moving-localization
   --aux-count N       Aux sample group count. Default: 3.
   --aux-interval-ms N Aux sample group interval. Default: 200.
   --disable-aux-input-topics
@@ -119,6 +120,7 @@ runner_log="${log_dir}/runner.log"
 subscriber_log="${log_dir}/subscriber.log"
 publisher_log="${log_dir}/publisher.log"
 aux_publisher_log="${log_dir}/aux_publisher.log"
+aux_publisher_status=0
 : > "${runner_log}"
 : > "${subscriber_log}"
 : > "${publisher_log}"
@@ -126,7 +128,11 @@ aux_publisher_log="${log_dir}/aux_publisher.log"
 
 runner_pid=""
 subscriber_pid=""
+aux_publisher_pid=""
 cleanup() {
+  if [[ -n "${aux_publisher_pid:-}" ]]; then
+    kill "${aux_publisher_pid}" 2>/dev/null || true
+  fi
   if [[ -n "${subscriber_pid:-}" ]]; then
     kill "${subscriber_pid}" 2>/dev/null || true
   fi
@@ -136,11 +142,27 @@ cleanup() {
   if [[ -n "${subscriber_pid:-}" ]]; then
     wait "${subscriber_pid}" 2>/dev/null || true
   fi
+  if [[ -n "${aux_publisher_pid:-}" ]]; then
+    wait "${aux_publisher_pid}" 2>/dev/null || true
+  fi
   if [[ -n "${runner_pid:-}" ]]; then
     wait "${runner_pid}" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
+
+wait_for_runner_log() {
+  local pattern="$1"
+  local timeout_seconds="$2"
+  local deadline=$((SECONDS + timeout_seconds))
+  while ((SECONDS < deadline)); do
+    if grep -Eq "${pattern}" "${runner_log}"; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  return 1
+}
 
 runner_args=("--domain-id=${domain_id}")
 if [[ "${disable_aux_input_topics}" == "1" ]]; then
@@ -151,7 +173,12 @@ fi
 runner_pid=$!
 sleep 2
 
-if [[ "${with_aux_inputs}" == "1" ]]; then
+aux_runs_in_background=0
+if [[ "${with_aux_inputs}" == "1" && "${aux_mode}" == "moving-localization" && "${disable_aux_input_topics}" != "1" ]]; then
+  aux_runs_in_background=1
+fi
+
+if [[ "${with_aux_inputs}" == "1" && "${aux_runs_in_background}" != "1" ]]; then
   "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
     --count="${aux_count}" \
     --interval-ms="${aux_interval_ms}" >"${aux_publisher_log}" 2>&1
@@ -161,10 +188,38 @@ fi
 "${subscriber}" --domain-id="${domain_id}" --timeout-ms="${timeout_ms}" --strict \
   >"${subscriber_log}" 2>&1 &
 subscriber_pid=$!
-sleep 2
+if [[ "${aux_runs_in_background}" == "1" ]]; then
+  sleep 1
+  "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
+    --count="${aux_count}" \
+    --interval-ms="${aux_interval_ms}" >"${aux_publisher_log}" 2>&1 &
+  aux_publisher_pid=$!
+  sleep 0.15
+else
+  sleep 2
+fi
 
 "${publisher}" --domain-id="${domain_id}" --mode=valid --count="${count}" \
   --interval-ms="${interval_ms}" >"${publisher_log}" 2>&1
+
+if [[ -n "${aux_publisher_pid:-}" ]]; then
+  set +e
+  wait "${aux_publisher_pid}"
+  aux_publisher_status=$?
+  set -e
+  aux_publisher_pid=""
+  if [[ "${aux_publisher_status}" != "0" ]]; then
+    echo "[valet_parking_smoke] aux publisher exited with ${aux_publisher_status}" >&2
+  fi
+fi
+
+if [[ "${aux_runs_in_background}" == "1" ]]; then
+  runner_wait_seconds=$(((timeout_ms + 999) / 1000))
+  if ((runner_wait_seconds < 5)); then
+    runner_wait_seconds=5
+  fi
+  wait_for_runner_log "bridged sample #2" "${runner_wait_seconds}" || true
+fi
 
 set +e
 wait "${subscriber_pid}"
@@ -181,7 +236,7 @@ echo "[valet_parking_smoke] run_root=${run_root}"
 echo "[valet_parking_smoke] logs=${log_dir}"
 echo "[valet_parking_smoke] subscriber_status=${subscriber_status}"
 echo "[valet_parking_smoke] runner status lines:"
-grep -E "aux localization|aux chassis|aux obstacles|SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample" "${runner_log}" | tail -n 30 || true
+grep -E "aux localization|aux chassis|aux obstacles|SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample" "${runner_log}" | tail -n 80 || true
 if [[ "${with_aux_inputs}" == "1" ]]; then
   echo "[valet_parking_smoke] aux publisher:"
   cat "${aux_publisher_log}"
@@ -192,6 +247,9 @@ echo "[valet_parking_smoke] publisher:"
 cat "${publisher_log}"
 
 validation_status="${subscriber_status}"
+if [[ "${aux_publisher_status}" != "0" ]]; then
+  validation_status="${aux_publisher_status}"
+fi
 if [[ "${with_aux_inputs}" == "1" ]]; then
   require_log() {
     local pattern="$1"
@@ -279,6 +337,26 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing external_vehicle=true in bad-obstacle-geometry mode"
         require_log "external_obstacles=0" \
           "missing external_obstacles=0 after bad obstacle geometry"
+        ;;
+      moving-localization)
+        require_log "aux localization #[0-9]+ .*x=0" \
+          "missing initial moving localization sample"
+        require_log "aux localization #[0-9]+ .*y=0\\.38" \
+          "missing shifted moving localization sample"
+        require_log "external_vehicle=true" \
+          "missing external_vehicle=true in moving-localization mode"
+        require_log "external_obstacles=[1-9]" \
+          "missing retained external obstacles in moving-localization mode"
+        require_log "replan=TRACE_REPLAN" \
+          "missing TRACE_REPLAN in moving-localization mode"
+        require_log "warm_start=history_splice" \
+          "missing history_splice warm start in moving-localization mode"
+        require_log "warm_start_points=[1-9][0-9]*" \
+          "missing nonzero warm_start_points in moving-localization mode"
+        require_log "strategy_kappa_cost=true" \
+          "missing enabled kappa cost in moving-localization mode"
+        require_log "strategy_limit_steer=true" \
+          "missing enabled steer limit in moving-localization mode"
         ;;
       *)
         echo "[valet_parking_smoke] unknown aux mode for validation: ${aux_mode}" >&2

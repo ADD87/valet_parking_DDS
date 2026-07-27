@@ -14,7 +14,7 @@
 已接入内容：
 
 - `ROI_DECIDER`：从选中车位计算 ROI、目标位姿、目标区域。
-- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 进一步接入轻量 `warm_start`/`path_strategy` 切片，能在保守条件下从历史路径截取 warm start，并在日志里显示策略字段。
+- `PATH_PROVIDER`：使用 standalone 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 接入轻量 `warm_start`/`path_strategy` 切片；NEXT-020 改为基于历史路径几何累计距离截取 warm start，并用 `moving-localization` smoke 直接验证 `TRACE_REPLAN -> history_splice`。
 - `PATH_PARTITION`：使用 standalone 中已独立化的 `OpenSpacePathPartition::Execute` 做任务级路径仲裁，输出当前应执行的 `chosen_partitioned_path`。
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
@@ -158,6 +158,22 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 - `chassis-only`：只发布底盘，不发布定位和障碍物，期望 `external_vehicle=false`。
 - `invalid-obstacles`：最后一组障碍物数组 invalid，期望清空外部障碍物。
 - `bad-obstacle-geometry`：最后一组障碍物尺寸非法，期望拒绝并清空外部障碍物。
+- `moving-localization`：先发布原点定位，再发布小幅移动定位，期望触发 `TRACE_REPLAN` 并生成 `warm_start=history_splice`。
+
+如需直接验证 `TRACE_REPLAN/history_splice`：
+
+```bash
+bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
+  --run-root /mnt/e/APA/DDS/feature_integration/feature_integration_workspace/out/valet_parking_quick_build/valet_parking_mvp/x86 \
+  --with-aux-inputs \
+  --aux-mode moving-localization \
+  --count 4 \
+  --aux-count 5 \
+  --interval-ms 650 \
+  --aux-interval-ms 650
+```
+
+该模式会让辅助发布者和 `SelectedSlot` 发布者并发运行，并等待 runner 处理到第二帧；脚本会校验 `replan=TRACE_REPLAN`、`warm_start=history_splice`、`warm_start_points>0`、`strategy_kappa_cost=true`。
 
 如需验证 runner 完全不订阅辅助输入 Topic：
 
@@ -188,18 +204,21 @@ PATH_PROVIDER ok, ..., history=reused, replan=NONE, warm_start=not_applied
 - `replan=REPLAN_FOR_SPEED_WARN` 或 `DYNAMIC_REPLAN`：速度层或碰撞风险要求重新规划。
 - `warm_start=history_splice`：本帧重新搜索前，adapter 从上一帧历史路径截取了一段可用尾段作为 `OpenSpacePathGenerator` 的 warm start。
 - `warm_start=none`：本帧没有可用 warm start，或因为目标/障碍物/速度重规划/碰撞风险等原因不允许使用旧路径。
+- `warm_start_reject=...`：当 warm start 未被采用时记录拒绝原因；当采用成功时显示 `accepted`。
+- `warm_start_history_points`、`warm_start_s`、`warm_start_l`、`warm_start_path_s=[a,b]`：用于确认当前起点投影到历史路径的位置。NEXT-020 后这些值来自历史路径 x/y 的几何累计距离，不依赖 standalone 输出点里可能未填充的 `PathPoint.s`。
 - `strategy_init_move`、`strategy_kappa_cost`、`strategy_limit_steer`：对照完整 `SetPathStrategy` 提取的轻量策略字段，用于让当前简化 adapter 的搜索输入更接近原始 OpenSpacePathProvider 的语义。
 
-这仍只是完整 `OpenSpacePathProvider` 的轻量切片，不包含完整线程管理、NLP smoother、完整 `PreCheck` 或完整 `Frame/DependencyInjector`。当前 mock 工具没有移动定位模式，因此默认 smoke 不会直接触发 `warm_start=history_splice` 分支；该分支已完成编译接线和保守条件限制。
+这仍只是完整 `OpenSpacePathProvider` 的轻量切片，不包含完整线程管理、NLP smoother、完整 `PreCheck` 或完整 `Frame/DependencyInjector`。当前 `moving-localization` mock 已能直接触发并验证 `warm_start=history_splice` 分支，但真实车端定位/底盘/障碍物 Topic 仍未对齐。
 
 ## 最近验证
 
-NEXT-019 PATH_PROVIDER 轻量策略与 warm_start 切片后，已验证：
+NEXT-020 可控移动定位与 trace warm start smoke 后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
 - x86 DDS 冒烟：mock `SelectedSlot` 输入后，subscriber 收到 179 点 `PlanningTrajectory`，`is_estop=false`；runner 第一帧显示 `last_frame=false`，第二帧显示 `last_frame=true`，默认无辅助发布者时输入状态显示 `external_vehicle=false, external_obstacles=0`。
 - x86 PATH_PROVIDER 运行态与策略字段：默认 smoke 中第一帧显示 `history=generated, replan=NO_VALID_PATH, warm_start=none, strategy_init_move=0`，第二帧显示 `history=reused, replan=NONE`。
+- x86 trace warm start：`moving-localization` smoke 中第二帧显示 `replan=TRACE_REPLAN, warm_start=history_splice, warm_start_reject=accepted, warm_start_points=96, strategy_kappa_cost=true, strategy_limit_steer=true`。
 - x86 DDS 辅助输入冒烟：`aux_input_mock_publisher` 发布三类辅助样本后，runner 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态显示 `external_vehicle=true, external_obstacles=1`。
 - x86 DDS 辅助输入边界硬化：`all-valid`、`invalid-localization`、`nan-localization`、`chassis-only`、`invalid-obstacles`、`bad-obstacle-geometry`、`--disable-aux-input-topics` 场景已验证；关键复验中 `bad-obstacle-geometry` 显示 `aux obstacles rejected` 且 `external_obstacles=0`。
 - runner 启动日志已显示默认订阅 `/localization/estimate`、`/chassis/state`、`/perception/obstacles`。

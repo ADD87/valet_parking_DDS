@@ -21,6 +21,7 @@ enum class AuxPublishMode {
   kChassisOnly,
   kInvalidObstacles,
   kBadObstacleGeometry,
+  kMovingLocalization,
 };
 
 struct PublisherOptions {
@@ -88,6 +89,10 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
   }
   if (text == "bad-obstacle-geometry") {
     *out_mode = AuxPublishMode::kBadObstacleGeometry;
+    return true;
+  }
+  if (text == "moving-localization") {
+    *out_mode = AuxPublishMode::kMovingLocalization;
     return true;
   }
   return false;
@@ -163,6 +168,9 @@ std::string LocalizationStatusForLog(const PublisherOptions& options,
       options.mode == AuxPublishMode::kNanLocalization) {
     return "nan";
   }
+  if (options.mode == AuxPublishMode::kMovingLocalization) {
+    return "moving-valid";
+  }
   return sample.is_valid() ? "valid" : "invalid";
 }
 
@@ -188,6 +196,10 @@ LocalizationEstimate BuildLocalization(const PublisherOptions& options,
   sample.y(0.0);
   sample.z(0.0);
   sample.heading(0.0);
+  if (options.mode == AuxPublishMode::kMovingLocalization && index > 1U) {
+    sample.x(0.60 + 0.05 * static_cast<double>(index - 2U));
+    sample.y(0.38);
+  }
   if (IsLastSample(options, index) &&
       options.mode == AuxPublishMode::kInvalidLocalization) {
     sample.is_valid(false);
@@ -209,9 +221,11 @@ ChassisState BuildChassis(uint32_t index) {
   return sample;
 }
 
-Obstacle BuildObstacle(uint32_t index) {
+Obstacle BuildObstacle(const PublisherOptions& options, uint32_t index) {
   Obstacle obstacle;
-  obstacle.id(1000U + index);
+  obstacle.id(options.mode == AuxPublishMode::kMovingLocalization
+                  ? 1000U
+                  : 1000U + index);
   obstacle.type(ObstacleType::OBSTACLE_TYPE_UNKNOWN_UNMOVABLE);
   obstacle.is_dynamic(false);
   obstacle.center_x(30.0);
@@ -229,7 +243,7 @@ ObstacleArray BuildObstacleArray(const PublisherOptions& options,
   ObstacleArray sample;
   sample.header(BuildHeader("aux_input_mock_publisher/obstacles", index));
   sample.is_valid(true);
-  Obstacle obstacle = BuildObstacle(index);
+  Obstacle obstacle = BuildObstacle(options, index);
   if (IsLastSample(options, index) &&
       options.mode == AuxPublishMode::kInvalidObstacles) {
     sample.is_valid(false);
@@ -252,7 +266,8 @@ void PrintUsage() {
             << "  --chassis-topic=<name>        chassis topic (default /chassis/state)\n"
             << "  --obstacle-topic=<name>       obstacle topic (default /perception/obstacles)\n"
             << "  --mode=<name>                 all-valid|invalid-localization|nan-localization|\n"
-            << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry\n"
+            << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry|\n"
+            << "                                moving-localization\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";
