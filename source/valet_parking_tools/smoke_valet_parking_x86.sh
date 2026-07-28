@@ -532,6 +532,12 @@ reject_runner_log() {
 
 case "${slot_mode}" in
   valid)
+    if [[ "${command_mode}" == "none" ]]; then
+      require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
+        "missing threaded OpenSpacePathProvider target plan evidence"
+      reject_runner_log "provider_status=TARGET_TIMEOUT" \
+        "unexpected threaded OpenSpacePathProvider timeout"
+    fi
     ;;
   target-moves)
     require_publisher_log "published sample [1-3]/[0-9]+ .*target=base" \
@@ -564,8 +570,14 @@ case "${slot_mode}" in
       "missing switched multi-lot samples selecting parking_seq=2"
     require_runner_log "PATH_PROVIDER ok.*parking_seq=1.*history=generated" \
       "missing generated path for selected parking_seq=1"
+    require_runner_log "PATH_PROVIDER ok.*parking_seq=1.*preplan_candidates=1.*thread_path_ids=\\[[^]]*2" \
+      "missing threaded preplan candidate for non-selected parking_seq=2"
     require_runner_log "PATH_PROVIDER ok.*parking_seq=2.*history=generated, replan=TARGET_UPDATE.*reason=target_update" \
       "missing generated path after opt_parking_seq selects parking_seq=2"
+    require_runner_log "PATH_PROVIDER ok.*parking_seq=2.*preplan_candidates=1.*thread_path_ids=\\[[^]]*1" \
+      "missing threaded preplan candidate for non-selected parking_seq=1"
+    require_runner_log "PATH_PROVIDER ok.*parking_seq=2.*target_source=preplan_candidate" \
+      "missing target reuse of preplanned candidate for selected parking_seq=2"
     require_runner_log "PATH_PROVIDER ok.*parking_seq=2.*history=reused, replan=NONE.*generated_count=2" \
       "missing history reuse after selected parking_seq=2 becomes stable"
     require_subscriber_log "is_estop=false" \

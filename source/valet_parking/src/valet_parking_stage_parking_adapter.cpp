@@ -2,7 +2,7 @@
 
 #include "planning/open_space/vehicle_param.h"
 #include "planning/tasks/deciders/open_space_decider/open_space_roi_decider.h"
-#include "planning/tasks/optimizers/open_space_path_generation/open_space_path_generator.h"
+#include "planning/tasks/optimizers/open_space_path_generation/open_space_path_provider.h"
 #include "planning/tasks/optimizers/open_space_path_partition/open_space_path_partition.h"
 #include "planning/tasks/optimizers/open_space_speed_optimizer/open_space_speed_optimizer.h"
 #include "planning/tasks/optimizers/open_space_straight_path/open_space_straight_path_provider.h"
@@ -11,7 +11,6 @@
 #include "valet_parking_topics.h"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -67,6 +66,7 @@ struct PathProviderRuntimeState {
     end_pose = TL::common::PathPoint();
     obstacle_signature = 0U;
     last_output.Reset();
+    threaded_provider.reset();
     last_splice_gear = TL::soc::GearPosition::GEAR_NONE;
     last_warm_start_points = 0U;
     last_strategy_init_moving_direction = 0;
@@ -80,6 +80,7 @@ struct PathProviderRuntimeState {
   TL::common::PathPoint end_pose;
   uint64_t obstacle_signature{0U};
   TL::planning::OpenSpacePathOutput last_output;
+  std::unique_ptr<TL::planning::OpenSpacePathProvider> threaded_provider;
   TL::soc::GearPosition last_splice_gear{
       TL::soc::GearPosition::GEAR_NONE};
   std::size_t last_warm_start_points{0U};
@@ -1052,6 +1053,24 @@ TL::planning::HybridAStarConfig BuildPathProviderConfig() {
   return config;
 }
 
+TL::planning::OpenSpacePathProvider* EnsureThreadedPathProvider(
+    PathProviderRuntimeState* provider_state) {
+  if (provider_state == nullptr) {
+    return nullptr;
+  }
+  if (provider_state->threaded_provider == nullptr) {
+    TL::planning::OpenSpacePathProviderConfig provider_config;
+    provider_config.hybrid_config = BuildPathProviderConfig();
+    provider_config.vehicle_param = TL::planning::LoadEP30VehicleParam();
+    provider_config.search_thread_num = 4U;
+    provider_config.target_plan_timeout_s = 8.5;
+    provider_state->threaded_provider =
+        std::make_unique<TL::planning::OpenSpacePathProvider>(
+            provider_config);
+  }
+  return provider_state->threaded_provider.get();
+}
+
 constexpr uint32_t kReplanNoValidPath = 1U;
 constexpr uint32_t kReplanTargetUpdate = 2U;
 constexpr uint32_t kReplanBlockByStaticObstacle = 4U;
@@ -1697,6 +1716,62 @@ TL::planning::OpenSpacePathInput BuildPathProviderInput(
   return input;
 }
 
+std::vector<TL::planning::OpenSpacePathInput> BuildPathProviderPrePlanInputs(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const SelectedSlot& selected_slot,
+    uint32_t selected_parking_seq,
+    const TL::common::VehicleState& vehicle_state,
+    const RuntimeVehicleInput& vehicle_input,
+    const std::vector<RuntimeObstacleInput>& obstacles,
+    const PathProviderRuntimeState& provider_state) {
+  std::vector<TL::planning::OpenSpacePathInput> inputs;
+  const auto& lots = selected_slot.parking_lots();
+  if (lots.size() <= 1U) {
+    return inputs;
+  }
+
+  TL::planning::OpenSpaceRoiDecider roi_decider(
+      TL::planning::LoadEP30VehicleParam(),
+      TL::planning::RoiDeciderConfig::GetDefault());
+  inputs.reserve(lots.size() - 1U);
+  for (const ParkingLot& candidate_lot_sample : lots) {
+    if (candidate_lot_sample.parking_seq() == selected_parking_seq) {
+      continue;
+    }
+
+    TL::perception::ParkingLotOut candidate_lot;
+    std::string ignored_reason;
+    if (!ConvertParkingLot(candidate_lot_sample, &candidate_lot,
+                           &ignored_reason)) {
+      continue;
+    }
+
+    TL::planning::RoiDeciderOutput candidate_roi_output;
+    if (roi_decider.Process(candidate_lot, vehicle_state,
+                            &candidate_roi_output) != 0) {
+      continue;
+    }
+
+    const PathProviderPreCheckResult precheck_result =
+        RunPathProviderPreCheck(config, candidate_roi_output, vehicle_input,
+                                obstacles);
+    if (!precheck_result.ok) {
+      continue;
+    }
+
+    const PathProviderDecision decision = BuildPathProviderDecision(
+        config, candidate_lot_sample.parking_seq(), candidate_roi_output,
+        vehicle_input, obstacles, false, false, provider_state);
+    PathProviderStrategySummary ignored_strategy_summary;
+    inputs.push_back(BuildPathProviderInput(
+        metadata, candidate_lot_sample.parking_seq(), candidate_roi_output,
+        obstacles, provider_state, decision.replan_status,
+        decision.start_point, decision.end_pose, &ignored_strategy_summary));
+  }
+  return inputs;
+}
+
 std::size_t CountPathProviderPoints(
     const TL::planning::OpenSpacePathOutput& path_output) {
   std::size_t count = 0U;
@@ -1741,6 +1816,47 @@ void AppendPathProviderAttemptDiagnostics(
           << ", external_obstacles=" << obstacle_count;
 }
 
+std::string JoinThreadPathIds(const std::vector<int>& path_ids) {
+  if (path_ids.empty()) {
+    return "[]";
+  }
+  std::ostringstream stream;
+  stream << "[";
+  for (std::size_t i = 0U; i < path_ids.size(); ++i) {
+    if (i > 0U) {
+      stream << ",";
+    }
+    stream << path_ids[i];
+  }
+  stream << "]";
+  return stream.str();
+}
+
+void AppendThreadedProviderDiagnostics(
+    const TL::planning::OpenSpacePathProviderDiagnostics& diagnostics,
+    std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", threaded=" << (diagnostics.threaded ? "true" : "false")
+          << ", provider_status=" << diagnostics.provider_status
+          << ", target_plan="
+          << (diagnostics.target_plan_submitted ? "submitted" : "none")
+          << ", target_output="
+          << (diagnostics.target_output_ready ? "ready" : "pending")
+          << ", target_source="
+          << (diagnostics.target_used_candidate_result
+                  ? "preplan_candidate"
+                  : (diagnostics.target_generated_in_target_thread
+                         ? "target_thread"
+                         : "unknown"))
+          << ", target_timeout="
+          << (diagnostics.target_timed_out ? "true" : "false")
+          << ", wait_s=" << diagnostics.wait_time_s
+          << ", thread_path_ids="
+          << JoinThreadPathIds(diagnostics.thread_path_ids);
+}
+
 bool RunPathProvider(const valet_parking_config_t& config,
                      const InputMetadata& metadata,
                      uint32_t parking_seq,
@@ -1749,6 +1865,8 @@ bool RunPathProvider(const valet_parking_config_t& config,
                      const std::vector<RuntimeObstacleInput>& obstacles,
                      bool replan_triggered_by_speed_plan,
                      bool current_path_has_collision_risk,
+                     const std::vector<TL::planning::OpenSpacePathInput>&
+                         preplan_inputs,
                      PathProviderRuntimeState* provider_state,
                      TL::planning::OpenSpacePathOutput* path_output,
                      std::string* status_reason) {
@@ -1793,22 +1911,46 @@ bool RunPathProvider(const valet_parking_config_t& config,
   }
 
   PathProviderStrategySummary strategy_summary;
+  TL::planning::OpenSpacePathProviderDiagnostics provider_diagnostics;
   try {
     const TL::planning::OpenSpacePathInput input =
         BuildPathProviderInput(metadata, parking_seq, roi_output, obstacles,
                                *provider_state, decision.replan_status,
                                decision.start_point, decision.end_pose,
                                &strategy_summary);
-    std::atomic<bool> early_stop_flag(false);
-    TL::planning::OpenSpacePathGenerator generator(
-        BuildPathProviderConfig(), TL::planning::LoadEP30VehicleParam());
-    generator.Plan(early_stop_flag, input, path_output);
+    TL::planning::OpenSpacePathProvider* provider =
+        EnsureThreadedPathProvider(provider_state);
+    if (provider == nullptr) {
+      std::ostringstream stream;
+      stream << "PATH_PROVIDER failed: threaded provider unavailable";
+      AppendPathProviderAttemptDiagnostics(decision, replan_text,
+                                           strategy_summary, vehicle_input,
+                                           obstacles.size(), &stream);
+      *status_reason = stream.str();
+      return false;
+    }
+    provider->PrePlan(preplan_inputs);
+    const TL::common::Status provider_status =
+        provider->Plan(input, path_output, &provider_diagnostics);
+    if (!provider_status.ok()) {
+      std::ostringstream stream;
+      stream << "PATH_PROVIDER failed: " << provider_status.error_message();
+      AppendPathProviderAttemptDiagnostics(decision, replan_text,
+                                           strategy_summary, vehicle_input,
+                                           obstacles.size(), &stream);
+      stream << ", preplan_candidates=" << preplan_inputs.size();
+      AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
+      *status_reason = stream.str();
+      return false;
+    }
   } catch (const std::exception& ex) {
     std::ostringstream stream;
     stream << "PATH_PROVIDER failed: exception: " << ex.what();
     AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
                                          vehicle_input, obstacles.size(),
                                          &stream);
+    stream << ", preplan_candidates=" << preplan_inputs.size();
+    AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
     *status_reason = stream.str();
     return false;
   } catch (...) {
@@ -1817,6 +1959,8 @@ bool RunPathProvider(const valet_parking_config_t& config,
     AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
                                          vehicle_input, obstacles.size(),
                                          &stream);
+    stream << ", preplan_candidates=" << preplan_inputs.size();
+    AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
     *status_reason = stream.str();
     return false;
   }
@@ -1830,6 +1974,8 @@ bool RunPathProvider(const valet_parking_config_t& config,
     AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
                                          vehicle_input, obstacles.size(),
                                          &stream);
+    stream << ", preplan_candidates=" << preplan_inputs.size();
+    AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
     *status_reason = stream.str();
     return false;
   }
@@ -1841,6 +1987,8 @@ bool RunPathProvider(const valet_parking_config_t& config,
     AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
                                          vehicle_input, obstacles.size(),
                                          &stream);
+    stream << ", preplan_candidates=" << preplan_inputs.size();
+    AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
     *status_reason = stream.str();
     return false;
   }
@@ -1867,7 +2015,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << ", points=" << point_count
          << ", path_type=" << path_output->path_type
          << ", parking_seq=" << parking_seq
-         << ", smoothed=false"
+         << ", smoothed=" << (path_output->has_smoothed ? "true" : "false")
          << ", history=generated"
          << ", replan=" << replan_text
          << ", reason=" << decision.reason
@@ -1920,9 +2068,11 @@ bool RunPathProvider(const valet_parking_config_t& config,
   stream
          << ", generated_count=" << provider_state->generated_count
          << ", reused_count=" << provider_state->reused_count
+         << ", preplan_candidates=" << preplan_inputs.size()
          << ", external_vehicle="
          << (vehicle_input.has_vehicle_state ? "true" : "false")
          << ", external_obstacles=" << obstacles.size();
+  AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
   *status_reason = stream.str();
   return true;
 }
@@ -3237,11 +3387,18 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   TL::planning::OpenSpacePathOutput path_output;
   std::string path_provider_reason;
+  const std::vector<TL::planning::OpenSpacePathInput> preplan_inputs =
+      BuildPathProviderPrePlanInputs(config_, metadata, input_sample,
+                                     selected_lot->parking_seq(),
+                                     vehicle_state, runtime_->vehicle_input,
+                                     runtime_->obstacles,
+                                     runtime_->path_provider);
   if (RunPathProvider(config_, metadata, selected_lot->parking_seq(),
                       roi_output, runtime_->vehicle_input,
                       runtime_->obstacles,
                       runtime_->replan_triggered_by_speed_plan,
                       runtime_->current_path_has_collision_risk,
+                      preplan_inputs,
                       &runtime_->path_provider, &path_output,
                       &path_provider_reason)) {
     TL::planning::PartitionOutput partition_output;
