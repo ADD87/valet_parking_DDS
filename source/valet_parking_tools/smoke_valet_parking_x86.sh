@@ -43,6 +43,15 @@ Options:
   --aux-interval-ms N Aux sample group interval. Default: 200.
   --disable-aux-input-topics
                        Start runner without subscribing aux input topics.
+  --path-provider-timeout-s N
+                       Override OpenSpacePathProvider target timeout through
+                       VALET_PARKING_PATH_PROVIDER_TIMEOUT_S for smoke only.
+  --expect-path-provider-timeout
+                       Expect PATH_PROVIDER TARGET_TIMEOUT instead of normal
+                       TARGET_READY for valid/no-command smoke.
+  --expect-thread-provider-stop
+                       Require OpenSpaceThreadManager stop/destructor evidence
+                       in runner log after runner exits.
   --help              Show this help.
 EOF
 }
@@ -71,6 +80,9 @@ aux_chassis_speed_mps="0.0"
 aux_count=3
 aux_interval_ms=200
 disable_aux_input_topics=0
+path_provider_timeout_s=""
+expect_path_provider_timeout=0
+expect_thread_provider_stop=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -150,6 +162,18 @@ while [[ $# -gt 0 ]]; do
       disable_aux_input_topics=1
       shift
       ;;
+    --path-provider-timeout-s)
+      path_provider_timeout_s="${2:-}"
+      shift 2
+      ;;
+    --expect-path-provider-timeout)
+      expect_path_provider_timeout=1
+      shift
+      ;;
+    --expect-thread-provider-stop)
+      expect_thread_provider_stop=1
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -194,6 +218,10 @@ if [[ "${with_aux_inputs}" == "1" &&
   if ((effective_aux_count < 8)); then
     effective_aux_count=8
   fi
+fi
+if [[ "${expect_path_provider_timeout}" == "1" &&
+      -z "${path_provider_timeout_s}" ]]; then
+  path_provider_timeout_s="0.001"
 fi
 
 runner="${run_root}/app/valet_parking_runner"
@@ -295,7 +323,12 @@ if [[ "${disable_aux_input_topics}" == "1" ]]; then
   runner_args+=("--disable-aux-input-topics")
 fi
 
-"${runner}" "${runner_args[@]}" >"${runner_log}" 2>&1 &
+runner_env=()
+if [[ -n "${path_provider_timeout_s}" ]]; then
+  runner_env+=("VALET_PARKING_PATH_PROVIDER_TIMEOUT_S=${path_provider_timeout_s}")
+fi
+
+env "${runner_env[@]}" "${runner}" "${runner_args[@]}" >"${runner_log}" 2>&1 &
 runner_pid=$!
 sleep 2
 
@@ -533,10 +566,19 @@ reject_runner_log() {
 case "${slot_mode}" in
   valid)
     if [[ "${command_mode}" == "none" ]]; then
-      require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
-        "missing threaded OpenSpacePathProvider target plan evidence"
-      reject_runner_log "provider_status=TARGET_TIMEOUT" \
-        "unexpected threaded OpenSpacePathProvider timeout"
+      if [[ "${expect_path_provider_timeout}" == "1" ]]; then
+        require_runner_log "PATH_PROVIDER failed: OpenSpacePathProvider target plan timeout.*provider_status=TARGET_TIMEOUT.*target_timeout=true.*target_cancel=true" \
+          "missing expected threaded OpenSpacePathProvider timeout evidence"
+        require_runner_log "fallback to ROI seed" \
+          "missing controlled ROI-seed fallback after PATH_PROVIDER timeout"
+        require_subscriber_log "is_estop=false" \
+          "missing subscriber output after PATH_PROVIDER timeout fallback"
+      else
+        require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
+          "missing threaded OpenSpacePathProvider target plan evidence"
+        reject_runner_log "provider_status=TARGET_TIMEOUT" \
+          "unexpected threaded OpenSpacePathProvider timeout"
+      fi
     fi
     ;;
   target-moves)
@@ -957,6 +999,11 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
         ;;
     esac
   fi
+fi
+
+if [[ "${expect_thread_provider_stop}" == "1" ]]; then
+  require_runner_log "OpenSpaceThreadManager stopped, search_threads=[1-9][0-9]*, target_thread_joined=true" \
+    "missing OpenSpaceThreadManager stop/destructor evidence"
 fi
 
 exit "${validation_status}"

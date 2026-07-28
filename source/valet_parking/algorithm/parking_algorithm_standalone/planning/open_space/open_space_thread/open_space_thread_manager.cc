@@ -8,6 +8,15 @@ namespace planning {
 OpenSpaceThreadManager::OpenSpaceThreadManager(
     const OpenSpaceThreadManagerConfig& config)
     : config_(config), target_worker_() {
+  StartThreads();
+}
+
+OpenSpaceThreadManager::~OpenSpaceThreadManager() {
+  StopThreads();
+}
+
+void OpenSpaceThreadManager::StartThreads() {
+  target_worker_.stop.store(false);
   const std::size_t thread_num =
       std::max<std::size_t>(1U, config_.search_thread_num);
   search_workers_.reserve(thread_num);
@@ -21,10 +30,6 @@ OpenSpaceThreadManager::OpenSpaceThreadManager(
   }
   target_worker_.thread =
       std::thread(&OpenSpaceThreadManager::TargetLoop, this);
-}
-
-OpenSpaceThreadManager::~OpenSpaceThreadManager() {
-  StopThreads();
 }
 
 void OpenSpaceThreadManager::Reset() {
@@ -37,34 +42,27 @@ void OpenSpaceThreadManager::Reset() {
     target_worker_.running = false;
     target_worker_.finished = true;
     target_worker_.plan_id = 0U;
+    target_worker_.early_stop.reset();
     target_worker_.input = OpenSpacePathInput();
     target_worker_.output.Reset();
     target_worker_.debug = planning_internal::OpenSpaceDebug();
     target_worker_.used_candidate_result = false;
     target_worker_.generated_in_target_thread = false;
+    target_worker_.cancel_requested = false;
   }
-  next_target_plan_id_ = 0U;
-  search_plan_disabled_ = false;
+  {
+    std::lock_guard<std::mutex> manager_lock(manager_mutex_);
+    next_target_plan_id_ = 0U;
+    search_plan_disabled_.store(false);
+  }
 
-  const std::size_t thread_num =
-      std::max<std::size_t>(1U, config_.search_thread_num);
-  search_workers_.reserve(thread_num);
-  for (std::size_t i = 0U; i < thread_num; ++i) {
-    search_workers_.emplace_back(
-        std::make_unique<SearchWorker>(static_cast<int>(i)));
-  }
-  for (auto& worker : search_workers_) {
-    worker->thread = std::thread(&OpenSpaceThreadManager::SearchLoop, this,
-                                 worker.get());
-  }
-  target_worker_.thread =
-      std::thread(&OpenSpaceThreadManager::TargetLoop, this);
+  StartThreads();
 }
 
 void OpenSpaceThreadManager::PrePlan(
     const std::vector<OpenSpacePathInput>& candidate_inputs) {
   std::lock_guard<std::mutex> manager_lock(manager_mutex_);
-  if (search_plan_disabled_) {
+  if (search_plan_disabled_.load()) {
     return;
   }
 
@@ -107,6 +105,7 @@ void OpenSpaceThreadManager::PrePlan(
     std::lock_guard<std::mutex> lock(selected_worker->mutex);
     selected_worker->input = input;
     selected_worker->path_id = input.path_id;
+    selected_worker->early_stop = std::make_shared<std::atomic<bool>>(false);
     selected_worker->output.Reset();
     selected_worker->debug = planning_internal::OpenSpaceDebug();
     selected_worker->has_task = true;
@@ -119,20 +118,40 @@ uint64_t OpenSpaceThreadManager::TargetPlan(
     const OpenSpacePathInput& target_input) {
   {
     std::lock_guard<std::mutex> manager_lock(manager_mutex_);
-    search_plan_disabled_ = true;
+    search_plan_disabled_.store(true);
   }
   std::lock_guard<std::mutex> target_lock(target_worker_.mutex);
+  if (target_worker_.early_stop != nullptr) {
+    target_worker_.early_stop->store(true);
+  }
   ++next_target_plan_id_;
   target_worker_.plan_id = next_target_plan_id_;
   target_worker_.input = target_input;
+  target_worker_.early_stop = std::make_shared<std::atomic<bool>>(false);
   target_worker_.output.Reset();
   target_worker_.debug = planning_internal::OpenSpaceDebug();
   target_worker_.used_candidate_result = false;
   target_worker_.generated_in_target_thread = false;
+  target_worker_.cancel_requested = false;
   target_worker_.has_task = true;
   target_worker_.finished = false;
   target_worker_.cv.notify_all();
   return next_target_plan_id_;
+}
+
+bool OpenSpaceThreadManager::CancelTargetPlan(uint64_t target_plan_id) {
+  std::lock_guard<std::mutex> target_lock(target_worker_.mutex);
+  if (target_worker_.plan_id != target_plan_id || target_worker_.finished) {
+    return false;
+  }
+  target_worker_.cancel_requested = true;
+  target_worker_.has_task = false;
+  if (target_worker_.early_stop != nullptr) {
+    target_worker_.early_stop->store(true);
+  }
+  search_plan_disabled_.store(false);
+  target_worker_.cv.notify_all();
+  return true;
 }
 
 bool OpenSpaceThreadManager::PollTargetOutput(
@@ -153,7 +172,8 @@ bool OpenSpaceThreadManager::PollTargetOutput(
         target_worker_.used_candidate_result;
     diagnostics->target_generated_in_smooth_thread =
         target_worker_.generated_in_target_thread;
-    diagnostics->search_plan_disabled = search_plan_disabled_;
+    diagnostics->target_cancel_requested = target_worker_.cancel_requested;
+    diagnostics->search_plan_disabled = search_plan_disabled_.load();
     diagnostics->thread_path_ids = thread_path_ids;
   }
   if (target_worker_.plan_id != target_plan_id || !target_worker_.finished) {
@@ -177,19 +197,44 @@ std::vector<int> OpenSpaceThreadManager::GetThreadPathIds() const {
 }
 
 void OpenSpaceThreadManager::StopThreads() {
+  std::size_t joined_search_threads = 0U;
+  bool joined_target_thread = false;
   for (auto& worker : search_workers_) {
-    worker->stop.store(true);
+    {
+      std::lock_guard<std::mutex> lock(worker->mutex);
+      worker->stop.store(true);
+      worker->has_task = false;
+      if (worker->early_stop != nullptr) {
+        worker->early_stop->store(true);
+      }
+    }
     worker->cv.notify_all();
   }
-  target_worker_.stop.store(true);
+  {
+    std::lock_guard<std::mutex> lock(target_worker_.mutex);
+    target_worker_.stop.store(true);
+    target_worker_.has_task = false;
+    target_worker_.cancel_requested = true;
+    if (target_worker_.early_stop != nullptr) {
+      target_worker_.early_stop->store(true);
+    }
+  }
   target_worker_.cv.notify_all();
   for (auto& worker : search_workers_) {
     if (worker->thread.joinable()) {
       worker->thread.join();
+      ++joined_search_threads;
     }
   }
   if (target_worker_.thread.joinable()) {
     target_worker_.thread.join();
+    joined_target_thread = true;
+  }
+  search_plan_disabled_.store(false);
+  if (joined_search_threads > 0U || joined_target_thread) {
+    AINFO << "OpenSpaceThreadManager stopped, search_threads="
+          << joined_search_threads << ", target_thread_joined="
+          << (joined_target_thread ? "true" : "false");
   }
 }
 
@@ -199,6 +244,7 @@ void OpenSpaceThreadManager::SearchLoop(SearchWorker* worker) {
   }
   while (!worker->stop.load()) {
     OpenSpacePathInput input;
+    std::shared_ptr<std::atomic<bool>> early_stop;
     {
       std::unique_lock<std::mutex> lock(worker->mutex);
       worker->cv.wait(lock, [&]() {
@@ -208,16 +254,20 @@ void OpenSpaceThreadManager::SearchLoop(SearchWorker* worker) {
         break;
       }
       input = worker->input;
+      early_stop = worker->early_stop;
+      if (early_stop == nullptr) {
+        early_stop = std::make_shared<std::atomic<bool>>(false);
+        worker->early_stop = early_stop;
+      }
       worker->has_task = false;
       worker->running = true;
       worker->finished = false;
     }
 
     OpenSpacePathOutput output;
-    std::atomic<bool> early_stop(false);
     OpenSpacePathGenerator generator(config_.hybrid_config,
                                      config_.vehicle_param);
-    generator.Plan(early_stop, input, &output);
+    generator.Plan(*early_stop, input, &output);
 
     {
       std::lock_guard<std::mutex> lock(worker->mutex);
@@ -225,6 +275,9 @@ void OpenSpaceThreadManager::SearchLoop(SearchWorker* worker) {
       worker->debug = planning_internal::OpenSpaceDebug();
       worker->running = false;
       worker->finished = true;
+      if (worker->early_stop == early_stop) {
+        worker->early_stop.reset();
+      }
     }
     ADEBUG << "OpenSpaceThreadManager search thread " << worker->id
            << " finished path_id=" << input.path_id;
@@ -235,6 +288,7 @@ void OpenSpaceThreadManager::TargetLoop() {
   while (!target_worker_.stop.load()) {
     OpenSpacePathInput input;
     uint64_t plan_id = 0U;
+    std::shared_ptr<std::atomic<bool>> early_stop;
     {
       std::unique_lock<std::mutex> lock(target_worker_.mutex);
       target_worker_.cv.wait(lock, [&]() {
@@ -245,6 +299,11 @@ void OpenSpaceThreadManager::TargetLoop() {
       }
       input = target_worker_.input;
       plan_id = target_worker_.plan_id;
+      early_stop = target_worker_.early_stop;
+      if (early_stop == nullptr) {
+        early_stop = std::make_shared<std::atomic<bool>>(false);
+        target_worker_.early_stop = early_stop;
+      }
       target_worker_.has_task = false;
       target_worker_.running = true;
       target_worker_.finished = false;
@@ -260,32 +319,45 @@ void OpenSpaceThreadManager::TargetLoop() {
 
     bool generated_in_target = false;
     if (!used_candidate) {
-      std::atomic<bool> early_stop(false);
       OpenSpacePathGenerator generator(config_.hybrid_config,
                                        config_.vehicle_param);
-      generator.Plan(early_stop, input, &output);
+      generator.Plan(*early_stop, input, &output);
       debug = planning_internal::OpenSpaceDebug();
       generated_in_target = true;
     }
 
     {
       std::lock_guard<std::mutex> lock(target_worker_.mutex);
-      if (target_worker_.plan_id == plan_id) {
+      if (target_worker_.plan_id == plan_id && !early_stop->load()) {
         target_worker_.output = std::move(output);
         target_worker_.debug = std::move(debug);
         target_worker_.used_candidate_result = used_candidate;
         target_worker_.generated_in_target_thread = generated_in_target;
         target_worker_.running = false;
         target_worker_.finished = true;
+        target_worker_.cancel_requested = false;
+        if (target_worker_.early_stop == early_stop) {
+          target_worker_.early_stop.reset();
+        }
+      } else if (target_worker_.plan_id == plan_id) {
+        target_worker_.output.Reset();
+        target_worker_.output.error_msg = "target plan cancelled";
+        target_worker_.debug = planning_internal::OpenSpaceDebug();
+        target_worker_.used_candidate_result = used_candidate;
+        target_worker_.generated_in_target_thread = generated_in_target;
+        target_worker_.running = false;
+        target_worker_.finished = true;
+        target_worker_.cancel_requested = true;
+        if (target_worker_.early_stop == early_stop) {
+          target_worker_.early_stop.reset();
+        }
       }
     }
-    {
-      std::lock_guard<std::mutex> manager_lock(manager_mutex_);
-      search_plan_disabled_ = false;
-    }
+    search_plan_disabled_.store(false);
     ADEBUG << "OpenSpaceThreadManager target thread finished path_id="
            << input.path_id << ", used_candidate="
-           << (used_candidate ? "true" : "false");
+           << (used_candidate ? "true" : "false")
+           << ", cancelled=" << (early_stop->load() ? "true" : "false");
   }
 }
 

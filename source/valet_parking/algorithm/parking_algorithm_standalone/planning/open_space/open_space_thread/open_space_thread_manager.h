@@ -30,6 +30,7 @@ struct OpenSpaceThreadManagerDiagnostics {
   bool target_used_candidate_result{false};
   bool target_generated_in_smooth_thread{false};
   bool target_timed_out{false};
+  bool target_cancel_requested{false};
   bool search_plan_disabled{false};
   double wait_time_s{0.0};
   std::vector<int> thread_path_ids;
@@ -46,6 +47,7 @@ class OpenSpaceThreadManager {
   void Reset();
   void PrePlan(const std::vector<OpenSpacePathInput>& candidate_inputs);
   uint64_t TargetPlan(const OpenSpacePathInput& target_input);
+  bool CancelTargetPlan(uint64_t target_plan_id);
   bool PollTargetOutput(uint64_t target_plan_id,
                         OpenSpacePathOutput* output,
                         planning_internal::OpenSpaceDebug* debug,
@@ -65,6 +67,7 @@ class OpenSpaceThreadManager {
     bool running{false};
     bool finished{true};
     int path_id{-1};
+    std::shared_ptr<std::atomic<bool>> early_stop;
     OpenSpacePathInput input;
     OpenSpacePathOutput output;
     planning_internal::OpenSpaceDebug debug;
@@ -79,13 +82,16 @@ class OpenSpaceThreadManager {
     bool running{false};
     bool finished{true};
     uint64_t plan_id{0U};
+    std::shared_ptr<std::atomic<bool>> early_stop;
     OpenSpacePathInput input;
     OpenSpacePathOutput output;
     planning_internal::OpenSpaceDebug debug;
     bool used_candidate_result{false};
     bool generated_in_target_thread{false};
+    bool cancel_requested{false};
   };
 
+  void StartThreads();
   void StopThreads();
   void SearchLoop(SearchWorker* worker);
   void TargetLoop();
@@ -99,7 +105,7 @@ class OpenSpaceThreadManager {
   TargetWorker target_worker_;
   mutable std::mutex manager_mutex_;
   uint64_t next_target_plan_id_{0U};
-  bool search_plan_disabled_{false};
+  std::atomic<bool> search_plan_disabled_{false};
 };
 
 }  // namespace planning

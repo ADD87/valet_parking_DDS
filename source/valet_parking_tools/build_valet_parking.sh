@@ -86,6 +86,11 @@ if ! [[ "${jobs}" =~ ^[0-9]+$ ]] || [[ "${jobs}" -le 0 ]]; then
   exit 2
 fi
 
+if [[ "${out_dir}" != /* ]]; then
+  out_dir="${workspace_root}/${out_dir}"
+fi
+out_dir="$(realpath -m "${out_dir}")"
+
 build_script="${workspace_root}/compile/build.sh"
 bom_file="${applications_root}/config/valet_parking_mvp_bom.yaml"
 
@@ -145,4 +150,3 @@ done
 
 echo
 echo "[valet_parking] build completed."
-

@@ -29,6 +29,7 @@ struct OpenSpacePathProviderDiagnostics {
   bool target_used_candidate_result{false};
   bool target_generated_in_target_thread{false};
   bool target_timed_out{false};
+  bool target_cancel_requested{false};
   double wait_time_s{0.0};
   std::vector<int> thread_path_ids;
   std::string provider_status{"OFF"};

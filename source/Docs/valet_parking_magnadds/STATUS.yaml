@@ -25,24 +25,27 @@ local_git:
 current_phase:
   id: Fast-2
   name: .so + typed DDS + localized valet parking algorithm sources
-  status: PASS_PATH_PROVIDER_THREAD_MANAGER_X86_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathProvider + OpenSpaceThreadManager + OpenSpacePathGenerator + HybridAStar 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路。NEXT-039 已把 direct_speed_mps 映射到 direct 分支速度优化器 speed bound，新增 aux chassis signed speed 输入和速度方向冲突 smoke，并在 direct 输出原因中补 target_gear、direct_speed_bound_min/max、trajectory_type 和 parking_status 诊断。NEXT-040 已接入本地化 OpenSpacePathProvider / OpenSpaceThreadManager 线程骨架，普通主链经 TargetPlan 生成当前车位路径，多车位非选中 lot 经 PrePlan 进入 search threads；复验阶段补充了 PrePlan 队列硬化，避免覆盖 has_task=true 的候选输入；x86 valid、multi-lot PrePlan、direct 回归通过，m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过。当前仍使用临时 IDL 契约和简化 Topic，parking_status 仍只是 replan_reason/estop.reason 诊断文本，不是正式 DDS 字段；仍未接完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。m57 板端 runtime 尚未验证。
+  status: PASS_PATH_PROVIDER_THREAD_LIFECYCLE_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathProvider + OpenSpaceThreadManager + OpenSpacePathGenerator + HybridAStar 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路。NEXT-039 已把 direct_speed_mps 映射到 direct 分支速度优化器 speed bound，新增 aux chassis signed speed 输入和速度方向冲突 smoke，并在 direct 输出原因中补 target_gear、direct_speed_bound_min/max、trajectory_type 和 parking_status 诊断。NEXT-040 已接入本地化 OpenSpacePathProvider / OpenSpaceThreadManager 线程骨架，普通主链经 TargetPlan 生成当前车位路径，多车位非选中 lot 经 PrePlan 进入 search threads；复验阶段补充了 PrePlan 队列硬化，避免覆盖 has_task=true 的候选输入。NEXT-041 已补充线程生命周期硬化：search/target worker 持有 shared early_stop，StopThreads/CancelTargetPlan 可取消正在跑的 Hybrid A*；timeout 负向路径可观测 provider_status=TARGET_TIMEOUT、target_cancel=true 和 fallback to ROI seed；x86 valid、timeout、multi-lot PrePlan、direct 回归通过，m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过；NLP smoother 已评估，当前因 thirdparty/x86/m57 缺少随包 OSQP/IPOPT 等依赖，暂不接入产品链路。当前仍使用临时 IDL 契约和简化 Topic，parking_status 仍只是 replan_reason/estop.reason 诊断文本，不是正式 DDS 字段；仍未接完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。m57 板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '040'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/040_项目状态快照_OpenSpacePathProvider线程体系接入.md
+  id: '041'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/041_项目状态快照_OpenSpacePathProvider线程生命周期硬化.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-28
-  summary: 已完成 NEXT-040：普通泊车 PATH_PROVIDER 从 Adapter 同步调用 OpenSpacePathGenerator 升级为本地化 OpenSpacePathProvider + OpenSpaceThreadManager 线程体系。当前 TargetPlan 由 target thread 生成选中车位路径，多车位非选中 lot 会作为 PrePlan 候选进入 search threads，并已在 multi-lot 切换时复用为 target_source=preplan_candidate；修复了首次接入时 target 线程等待不存在候选导致 TARGET_TIMEOUT 的问题，修正锁顺序避免理论死锁，并补充 PrePlan 队列硬化以避免覆盖 has_task=true 的候选输入。x86 valid、multi-lot PrePlan 复用和 direct-forward 回归通过；m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过，板端运行未验证。
+  summary: 已完成 NEXT-041：在本地化 OpenSpacePathProvider + OpenSpaceThreadManager 上补线程生命周期硬化。search/target worker 改为持有 shared early_stop；StopThreads、CancelTargetPlan 和新 target plan 覆盖旧 plan 时可通知 Hybrid A* 提前停止；StartThreads 会在 Reset 后重建 target 线程前清回 stop=false；OpenSpacePathProvider timeout 后会 cancel target plan，并在诊断中输出 target_cancel=true；smoke 新增 expect-thread-provider-stop、expect-path-provider-timeout 和 path-provider-timeout-s；build_valet_parking.sh 修正相对 out-dir 归一化。x86 valid、timeout 负向、multi-lot PrePlan 复用、direct-forward 回归通过；m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过；NLP smoother 依赖已评估，当前因 m57/x86 thirdparty 缺少随包求解器依赖，暂不接入产品链路。
   evidence:
+    - applications/source/Docs/valet_parking_magnadds/11_OpenSpacePathProvider线程生命周期与NLP依赖评估.md
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/041_项目状态快照_OpenSpacePathProvider线程生命周期硬化.md
     - applications/source/Docs/valet_parking_magnadds/10_完整OpenSpacePathProvider线程体系接入说明.md
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/040_项目状态快照_OpenSpacePathProvider线程体系接入.md
     - applications/source/valet_parking/algorithm/parking_algorithm_standalone/planning/open_space/open_space_thread/open_space_thread_manager.h
     - applications/source/valet_parking/algorithm/parking_algorithm_standalone/planning/open_space/open_space_thread/open_space_thread_manager.cc
     - applications/source/valet_parking/algorithm/parking_algorithm_standalone/planning/tasks/optimizers/open_space_path_generation/open_space_path_provider.h
     - applications/source/valet_parking/algorithm/parking_algorithm_standalone/planning/tasks/optimizers/open_space_path_generation/open_space_path_provider.cc
+    - applications/source/valet_parking_tools/build_valet_parking.sh
     - out/valet_parking_thread_provider_040/valet_parking_mvp/x86/lib/libvalet_parking.so
     - out/valet_parking_thread_provider_040/valet_parking_mvp/x86/smoke_latest/domain_145_20260728_224300_1009
     - out/valet_parking_thread_provider_040/valet_parking_mvp/x86/smoke_latest/domain_150_20260728_225158_651
@@ -51,6 +54,12 @@ last_successful_action:
     - out/valet_parking_thread_provider_040/valet_parking_mvp/x86/smoke_latest/domain_152_20260728_225947_831
     - out/valet_parking_thread_provider_040/valet_parking_mvp/x86/smoke_latest/domain_153_20260728_230057_653
     - out/valet_parking_thread_provider_040/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_thread_lifecycle_041/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_thread_lifecycle_041/valet_parking_mvp/x86/smoke_latest/domain_160_20260728_232904_1307
+    - out/valet_parking_thread_lifecycle_041/valet_parking_mvp/x86/smoke_latest/domain_161_20260728_232928_1477
+    - out/valet_parking_thread_lifecycle_041/valet_parking_mvp/x86/smoke_latest/domain_162_20260728_232943_1607
+    - out/valet_parking_thread_lifecycle_041/valet_parking_mvp/x86/smoke_latest/domain_164_20260728_233018_1946
+    - out/valet_parking_thread_lifecycle_041/valet_parking_mvp/m57/lib/libvalet_parking.so
     - applications/source/Docs/valet_parking_magnadds/09_NEXT039到048后续任务预测与执行节奏.md
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/039_项目状态快照_Direct分支速度与方向冲突硬化.md
     - out/valet_parking_direct_hardening_039/valet_parking_mvp/x86/lib/libvalet_parking.so
@@ -137,6 +146,10 @@ blockers:
     status: RESOLVED
     description: x86 MagnaDDS 已补齐匹配 typed API 的实库，x86 typed DDS 构建和运行验证通过。
     owner: env/sdk
+  - id: B-005
+    status: OPEN
+    description: OpenSpacePathSmoother/NLP 当前不能进入产品链路；thirdparty/x86 与 thirdparty/m57 未发现随包 OSQP/IPOPT/ADOL-C/MUMPS 等求解器依赖，m57 不能依赖 WSL x86 系统库。
+    owner: env/algorithm
 
 runtime_status:
   x86_typed_dds_runtime_test: PASS
@@ -166,6 +179,9 @@ runtime_status:
   x86_selected_slot_multi_lot_select_smoke_test: PASS
   x86_open_space_path_provider_thread_manager_test: PASS
   x86_open_space_path_provider_preplan_candidate_smoke_test: PASS
+  x86_open_space_path_provider_thread_lifecycle_stop_smoke_test: PASS
+  x86_open_space_path_provider_timeout_cancel_smoke_test: PASS
+  nlp_smoother_dependency_assessment: PASS_BLOCKED_BY_M57_THIRDPARTY
   x86_parking_command_direct_forward_smoke_test: PASS
   x86_parking_command_direct_backward_smoke_test: PASS
   x86_open_space_straight_path_forward_stop_path_smoke_test: PASS
@@ -185,12 +201,12 @@ runtime_status:
   x86_vehicle_lot_precheck_far_localization_test: PASS
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
-  quick_build_script: PASS_X86_AND_M57
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-040 后，PATH_PROVIDER 已走本地化 OpenSpacePathProvider + OpenSpaceThreadManager，valid/domain_145 显示 threaded=true、provider_status=TARGET_READY、target_source=target_thread，multi-lot/domain_150 显示 preplan_candidates=1、thread_path_ids=[2,1,...] 且 target_source=preplan_candidate，direct-forward/domain_148 回归保持 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER。NEXT-039 后，direct-forward/domain_131 在 direct_speed=1.2 时输出 direct_speed_bound_max=1.200、parking_status=direct_moving，速度方向冲突 smoke 输出 velocity_direction_conflict 和 direct_stop_path。pause/brake/finish/invalid command 的 NEXT-037 历史 smoke 仍作为已验证边界。NEXT-033 到 NEXT-031/030/029/028/027/026/025/024 的历史边界 smoke 仍有效。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  quick_build_script: PASS_X86_AND_M57_ABSOLUTE_OUT_DIR
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-040 后，PATH_PROVIDER 已走本地化 OpenSpacePathProvider + OpenSpaceThreadManager，valid/domain_145 显示 threaded=true、provider_status=TARGET_READY、target_source=target_thread，multi-lot/domain_150 显示 preplan_candidates=1、thread_path_ids=[2,1,...] 且 target_source=preplan_candidate，direct-forward/domain_148 回归保持 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER。NEXT-041 后，valid/domain_160 显示 target_cancel=false 且 runner 退出时 OpenSpaceThreadManager stopped，timeout/domain_161 显示 provider_status=TARGET_TIMEOUT、target_timeout=true、target_cancel=true 和 fallback to ROI seed，multi-lot/domain_162 继续显示 target_source=preplan_candidate，direct-forward/domain_164 回归通过，且 direct 分支按设计跳过 threaded Provider，不要求线程停止日志；build_valet_parking.sh 已修正相对 out-dir 归一化。NLP smoother 评估结论是当前不接入：WSL x86 有 IPOPT 3.11.9，但 OSQP pkg-config 缺失，thirdparty/x86 与 thirdparty/m57 未发现随包 IPOPT/OSQP 实库。NEXT-039 后，direct-forward/domain_131 在 direct_speed=1.2 时输出 direct_speed_bound_max=1.200、parking_status=direct_moving，速度方向冲突 smoke 输出 velocity_direction_conflict 和 direct_stop_path。pause/brake/finish/invalid command 的 NEXT-037 历史 smoke 仍作为已验证边界。NEXT-033 到 NEXT-031/030/029/028/027/026/025/024 的历史边界 smoke 仍有效。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-041
-  description: 继续 OpenSpacePathProvider 线程生命周期硬化：验证 reset/stop/destructor 退出、target timeout 负向路径、PrePlan 候选缓存不被误覆盖；同时单独评估 OpenSpacePathSmoother/NLP 依赖，不把未验证 NLP 混入当前已通过链路。保持 x86 smoke 与 m57 交叉编译通过，仍不大搬完整 Stage/Frame/DependencyInjector。
+  id: NEXT-042
+  description: direct 分支输出契约补强：在临时 IDL 不扩字段的前提下，把 direct 输出诊断字段标准化，明确 target_gear、trajectory_type、parking_status 哪些只是 replan_reason/estop.reason 文本诊断、哪些未来需要正式 DDS 字段；保持 x86 direct smoke 与 m57 交叉编译通过。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -404,3 +420,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/040_项目状态快照_OpenSpacePathProvider线程体系接入.md
     phase: Fast-2
     status: PASS_PATH_PROVIDER_THREAD_MANAGER_X86_M57_STATIC_BLOCKED_BOARD
+  - id: '041'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/041_项目状态快照_OpenSpacePathProvider线程生命周期硬化.md
+    phase: Fast-2
+    status: PASS_PATH_PROVIDER_THREAD_LIFECYCLE_X86_M57_STATIC_BLOCKED_BOARD

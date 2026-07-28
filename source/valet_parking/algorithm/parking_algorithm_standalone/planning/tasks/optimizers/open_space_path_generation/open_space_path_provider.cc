@@ -33,6 +33,8 @@ void FillProviderDiagnostics(
   diagnostics->target_generated_in_target_thread =
       manager_diagnostics.target_generated_in_smooth_thread;
   diagnostics->target_timed_out = manager_diagnostics.target_timed_out;
+  diagnostics->target_cancel_requested =
+      manager_diagnostics.target_cancel_requested;
   diagnostics->wait_time_s = manager_diagnostics.wait_time_s;
   diagnostics->thread_path_ids = manager_diagnostics.thread_path_ids;
   diagnostics->provider_status = provider_status;
@@ -99,6 +101,9 @@ TL::common::Status OpenSpacePathProvider::Plan(
 
   manager_diagnostics.target_timed_out = true;
   manager_diagnostics.wait_time_s = NowSeconds() - start_time;
+  manager_diagnostics.target_cancel_requested =
+      thread_manager_->CancelTargetPlan(target_plan_id);
+  manager_diagnostics.thread_path_ids = thread_manager_->GetThreadPathIds();
   FillProviderDiagnostics(manager_diagnostics, "TARGET_TIMEOUT", diagnostics);
   return TL::common::Status(
       TL::common::ErrorCode::CORE_PLANNING_SOLVEFAIL_ERROR,

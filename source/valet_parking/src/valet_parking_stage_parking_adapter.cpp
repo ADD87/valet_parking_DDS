@@ -11,10 +11,12 @@
 #include "valet_parking_topics.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <iomanip>
 #include <limits>
@@ -31,6 +33,9 @@ namespace valet_parking {
 namespace {
 
 constexpr uint32_t kMaxExternalObstacleCount = 128U;
+constexpr double kDefaultPathProviderTimeoutS = 8.5;
+constexpr const char* kPathProviderTimeoutEnv =
+    "VALET_PARKING_PATH_PROVIDER_TIMEOUT_S";
 
 struct RuntimeVehicleInput {
   bool has_vehicle_state{false};
@@ -1053,6 +1058,22 @@ TL::planning::HybridAStarConfig BuildPathProviderConfig() {
   return config;
 }
 
+double ReadPathProviderTimeoutS() {
+  const char* env_value = std::getenv(kPathProviderTimeoutEnv);
+  if (env_value == nullptr || env_value[0] == '\0') {
+    return kDefaultPathProviderTimeoutS;
+  }
+
+  errno = 0;
+  char* end = nullptr;
+  const double parsed = std::strtod(env_value, &end);
+  if (errno != 0 || end == nullptr || *end != '\0' ||
+      !std::isfinite(parsed) || parsed <= 0.0 || parsed > 60.0) {
+    return kDefaultPathProviderTimeoutS;
+  }
+  return parsed;
+}
+
 TL::planning::OpenSpacePathProvider* EnsureThreadedPathProvider(
     PathProviderRuntimeState* provider_state) {
   if (provider_state == nullptr) {
@@ -1063,7 +1084,7 @@ TL::planning::OpenSpacePathProvider* EnsureThreadedPathProvider(
     provider_config.hybrid_config = BuildPathProviderConfig();
     provider_config.vehicle_param = TL::planning::LoadEP30VehicleParam();
     provider_config.search_thread_num = 4U;
-    provider_config.target_plan_timeout_s = 8.5;
+    provider_config.target_plan_timeout_s = ReadPathProviderTimeoutS();
     provider_state->threaded_provider =
         std::make_unique<TL::planning::OpenSpacePathProvider>(
             provider_config);
@@ -1852,6 +1873,8 @@ void AppendThreadedProviderDiagnostics(
                          : "unknown"))
           << ", target_timeout="
           << (diagnostics.target_timed_out ? "true" : "false")
+          << ", target_cancel="
+          << (diagnostics.target_cancel_requested ? "true" : "false")
           << ", wait_s=" << diagnostics.wait_time_s
           << ", thread_path_ids="
           << JoinThreadPathIds(diagnostics.thread_path_ids);
