@@ -34,6 +34,9 @@ Options:
                        moving-localization|moving-localization-large|
                        far-localization|far-obstacles|many-obstacles|
                        obstacle-appears|obstacle-disappears
+  --aux-chassis-gear GEAR
+                       Aux chassis gear. Default: parking.
+                       parking|drive|reverse|neutral
   --aux-count N       Aux sample group count. Default: 3.
   --aux-interval-ms N Aux sample group interval. Default: 200.
   --disable-aux-input-topics
@@ -61,6 +64,7 @@ direct_speed=0.8
 disable_command_topic=0
 with_aux_inputs=0
 aux_mode="all-valid"
+aux_chassis_gear="parking"
 aux_count=3
 aux_interval_ms=200
 disable_aux_input_topics=0
@@ -121,6 +125,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --aux-mode)
       aux_mode="${2:-}"
+      shift 2
+      ;;
+    --aux-chassis-gear)
+      aux_chassis_gear="${2:-}"
       shift 2
       ;;
     --aux-count)
@@ -289,6 +297,7 @@ fi
 
 if [[ "${with_aux_inputs}" == "1" && "${aux_runs_in_background}" != "1" ]]; then
   "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
+    --chassis-gear="${aux_chassis_gear}" \
     --count="${effective_aux_count}" \
     --interval-ms="${effective_aux_interval_ms}" >"${aux_publisher_log}" 2>&1
   sleep 1
@@ -300,6 +309,7 @@ subscriber_pid=$!
 if [[ "${aux_runs_in_background}" == "1" ]]; then
   sleep 1
   "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
+    --chassis-gear="${aux_chassis_gear}" \
     --count="${effective_aux_count}" \
     --interval-ms="${effective_aux_interval_ms}" >"${aux_publisher_log}" 2>&1 &
   aux_publisher_pid=$!
@@ -422,7 +432,7 @@ echo "[valet_parking_smoke] run_root=${run_root}"
 echo "[valet_parking_smoke] logs=${log_dir}"
 echo "[valet_parking_smoke] subscriber_status=${subscriber_status}"
 echo "[valet_parking_smoke] runner status lines:"
-grep -E "command #|command rejected|STAGE_CONTROL|SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample|aux localization|aux chassis|aux obstacles" "${runner_log}" | tail -n 100 || true
+grep -E "command #|command rejected|STAGE_CONTROL|OPEN_SPACE_STRAIGHT_PATH|SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample|aux localization|aux chassis|aux obstacles" "${runner_log}" | tail -n 100 || true
 if [[ "${command_mode}" != "none" ]]; then
   echo "[valet_parking_smoke] command publisher:"
   cat "${command_publisher_log}"
@@ -567,12 +577,16 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD command consumption in runner log"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_FORWARD stage-control trajectory reason"
+      require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
+        "missing DIRECT_FORWARD OPEN_SPACE_STRAIGHT_PATH execution evidence"
+      require_runner_log "SPEED_OPTIMIZER ok" \
+        "missing DIRECT_FORWARD speed optimizer handoff evidence"
       reject_runner_log "ROI_DECIDER ok" \
-        "DIRECT_FORWARD should not run ROI_DECIDER in this lightweight branch"
+        "DIRECT_FORWARD should not run ROI_DECIDER in the OPEN_SPACE_STRAIGHT_PATH branch"
       require_subscriber_log "is_estop=false" \
         "missing non-estop trajectory for DIRECT_FORWARD command mode"
-      require_subscriber_log "reason: replan=.*DIRECT_FORWARD" \
-        "missing DIRECT_FORWARD reason in subscriber output"
+      require_subscriber_log "reason: replan=.*DIRECT_FORWARD.*OPEN_SPACE_STRAIGHT_PATH" \
+        "missing DIRECT_FORWARD OPEN_SPACE_STRAIGHT_PATH reason in subscriber output"
       ;;
     direct-backward)
       require_command_log "enum=DIRECT_BACKWARD" \
@@ -581,14 +595,18 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD command consumption in runner log"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_BACKWARD stage-control trajectory reason"
+      require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
+        "missing DIRECT_BACKWARD OPEN_SPACE_STRAIGHT_PATH execution evidence"
+      require_runner_log "SPEED_OPTIMIZER ok" \
+        "missing DIRECT_BACKWARD speed optimizer handoff evidence"
       reject_runner_log "ROI_DECIDER ok" \
-        "DIRECT_BACKWARD should not run ROI_DECIDER in this lightweight branch"
+        "DIRECT_BACKWARD should not run ROI_DECIDER in the OPEN_SPACE_STRAIGHT_PATH branch"
       require_subscriber_log "gear=2" \
         "missing reverse gear in DIRECT_BACKWARD subscriber output"
       require_subscriber_log "is_estop=false" \
         "missing non-estop trajectory for DIRECT_BACKWARD command mode"
-      require_subscriber_log "reason: replan=.*DIRECT_BACKWARD" \
-        "missing DIRECT_BACKWARD reason in subscriber output"
+      require_subscriber_log "reason: replan=.*DIRECT_BACKWARD.*OPEN_SPACE_STRAIGHT_PATH" \
+        "missing DIRECT_BACKWARD OPEN_SPACE_STRAIGHT_PATH reason in subscriber output"
       ;;
     pause)
       require_command_log "enum=PAUSE" \

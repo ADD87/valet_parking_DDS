@@ -23,6 +23,7 @@
 - NEXT-032 后，泊车算法源码已本地化到 `source/valet_parking/algorithm/parking_algorithm_standalone`，当前 MVP 构建不再依赖外部 `E:\APA\DDS\parking_algorithm_standalone` 绝对路径。
 - NEXT-033 后，新增 SelectedSlot `multi-lot-seq-switch` smoke，验证同一条 DDS 输入中包含多个 `ParkingLot` 时，Adapter 会按 `opt_parking_seq` 选择对应车位；切到 `parking_seq=2` 后 PATH_PROVIDER 必须 `replan=TARGET_UPDATE`，稳定后回到 `history=reused`。
 - NEXT-034 到 NEXT-037 后，新增 `ParkingCommand` Stage 控制输入、`parking_command_mock_publisher` 和 command smoke；`DIRECT_FORWARD/DIRECT_BACKWARD` 会先走轻量直线分支并跳过 ROI/PATH_PROVIDER/PATH_PARTITION，`PAUSE/BRAKE/FINISH` 会输出非 estop 的单点停止轨迹。
+- NEXT-038 后，`DIRECT_FORWARD/DIRECT_BACKWARD` 已升级为 `OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory`：仍跳过 ROI/PATH_PROVIDER/PATH_PARTITION，但不再由 adapter 直接发布短直线 shortcut；默认 P 档会按原始 straight provider 语义输出 stop_path，喂入正确 D/R 挡位后输出 direct_moving。
 
 ## 当前算法状态
 
@@ -32,6 +33,7 @@
 - `PATH_PROVIDER`：使用本模块本地化的 `algorithm/parking_algorithm_standalone` 中已独立化的 `OpenSpacePathGenerator + HybridAStar + PathPartition` 生成粗路径；adapter 已新增轻量运行态，能在目标、障碍物、起点和速度重规划状态不变时复用上一帧有效路径；NEXT-019 接入轻量 `warm_start`/`path_strategy` 切片；NEXT-020 改为基于历史路径几何累计距离截取 warm start，并用 `moving-localization` smoke 直接验证 `TRACE_REPLAN -> history_splice`；NEXT-021 在 PATH_PROVIDER 前增加轻量 PreCheck，检查 ROI bounds、起点/终点、目标区域和障碍物线段几何；NEXT-022 在 `TRACE_REPLAN + history_splice` 的保守条件下接入轻量 `trace_adjust` 策略；NEXT-023 补齐 trace adjust 拒绝原因、路径长度和失败路径诊断；NEXT-024 新增可控大偏移负向样本，覆盖 warm start/trace adjust 拒绝原因；NEXT-026 将可进入路径搜索的障碍物线段上限收紧为 500，并新增 128 障碍物过载 smoke；NEXT-027 新增障碍物线段 ROI local bounds 检查，拦截明显错坐标的远障碍物；NEXT-028 新增障碍物从无到有 smoke；NEXT-029 新增障碍物从有到无 smoke；NEXT-030 新增 SelectedSlot 目标位姿变化 smoke；NEXT-031 新增 `parking_seq/path_id` 变化 smoke；NEXT-032 将当前 MVP 实际编译使用的算法源码本地化，确保 `applications` 仓库可独立携带当前算法基线；NEXT-033 新增同一 DDS 输入多车位 `opt_parking_seq` 选择验证，并在 PATH_PROVIDER 日志中输出 `parking_seq` 作为 runner 实际选中车位的证据。
 - `PATH_PARTITION`：使用 standalone 中已独立化的 `OpenSpacePathPartition::Execute` 做任务级路径仲裁，输出当前应执行的 `chosen_partitioned_path`。
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
+- `OPEN_SPACE_STRAIGHT_PATH`：NEXT-038 新增本地化 `OpenSpaceStraightPathProvider`，用于 `DIRECT_FORWARD/DIRECT_BACKWARD`；它会根据目标挡位、当前挡位和速度方向决定输出 stop_path 还是 direct_moving，并把结果交给 `SPEED_OPTIMIZER`。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
 - `PathProviderRuntimeState`：`RuntimeContext` 内部保存上一帧 PATH_PROVIDER 输出、目标点、路径 id、障碍物签名和复用计数；runner 状态日志会显示 `history=generated|reused` 与 `replan=...`。
 - `ParkingCommand` 轻量 Stage 控制输入：Component 默认订阅 `/parking/command`，缓存最新 command；Adapter 在普通主链路前处理 `DIRECT_FORWARD/DIRECT_BACKWARD/PAUSE/BRAKE/FINISH`，并在输出原因中写入 `STAGE_CONTROL ...`。
@@ -132,8 +134,8 @@ valet_parking_runner --disable-command-topic
 
 当前支持的轻量行为：
 
-- `PARKING_COMMAND_DIRECT_FORWARD`：生成前进直线短轨迹，输出原因包含 `STAGE_CONTROL DIRECT_FORWARD, skip=ROI_PATH_PROVIDER_PATH_PARTITION`。
-- `PARKING_COMMAND_DIRECT_BACKWARD`：生成倒车直线短轨迹，输出档位为 reverse，原因包含 `STAGE_CONTROL DIRECT_BACKWARD, skip=ROI_PATH_PROVIDER_PATH_PARTITION`。
+- `PARKING_COMMAND_DIRECT_FORWARD`：执行 `OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER`；默认 P 档时输出 stop_path，喂入 D 档时输出 direct_moving；原因包含 `STAGE_CONTROL DIRECT_FORWARD, skip=ROI_PATH_PROVIDER_PATH_PARTITION, task=OPEN_SPACE_STRAIGHT_PATH`。
+- `PARKING_COMMAND_DIRECT_BACKWARD`：执行 `OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER`；默认 P 档时输出 stop_path，喂入 R 档时输出 direct_moving；原因包含 `STAGE_CONTROL DIRECT_BACKWARD, skip=ROI_PATH_PROVIDER_PATH_PARTITION, task=OPEN_SPACE_STRAIGHT_PATH`。
 - `PARKING_COMMAND_PAUSE`：输出非 estop 的单点停止轨迹。
 - `PARKING_COMMAND_BRAKE`：输出非 estop 的单点停止轨迹。
 - `PARKING_COMMAND_FINISH`：输出非 estop 的单点停止轨迹，原因包含 `MISSIONFINISHED`。
@@ -161,7 +163,7 @@ bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
 重要边界：
 
 - 当前 command Topic 仍是 MVP 临时契约，不代表真实车端协议已经对齐。
-- direct 分支是轻量直线轨迹，不是完整原车 `OpenSpaceStraightPathProvider`。
+- direct 分支已接入本地化 `OpenSpaceStraightPathProvider` 语义，但仍不是完整原车 `Frame/DependencyInjector/PlanningContext/OpenSpaceInfo` 框架。
 - parking-out 模式当前只做安全停止并标记 `unsupported_in_mvp`。
 
 ## WSL 快捷编译
@@ -390,14 +392,16 @@ PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[0] local_start
 
 ## 最近验证
 
-NEXT-037 轻量 Stage 控制输入验证后，已验证：
+NEXT-038 `OPEN_SPACE_STRAIGHT_PATH` 接入后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
 - x86 valid 回归：domain_229 默认 mock `SelectedSlot` 输入后仍输出非 estop `PlanningTrajectory`，并保持 `PATH_PROVIDER_PRECHECK ok`、`history=generated` 后 `history=reused`。
 - x86 all-valid 辅助输入回归：domain_222 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态保持 `external_vehicle=true`、`external_obstacles=1`，并输出非 estop 轨迹。
-- x86 `direct-forward` command smoke：domain_223 runner 先收到 `mode=DIRECT_FORWARD`，随后输出 21 点短轨迹，subscriber 显示 `gear=1`、`trajectory_type=5`、`is_estop=false`，日志中不出现 `ROI_DECIDER ok`。
-- x86 `direct-backward` command smoke：domain_224 runner 先收到 `mode=DIRECT_BACKWARD`，随后输出 21 点短轨迹，subscriber 显示 `gear=2`、`trajectory_type=5`、`is_estop=false`，日志中不出现 `ROI_DECIDER ok`。
+- x86 `direct-forward` command smoke：domain_221 默认 P 档触发 `OPEN_SPACE_STRAIGHT_PATH stop_path`，再进入 `SPEED_OPTIMIZER`，subscriber 显示 `gear=1`、`is_estop=false`，日志中不出现 `ROI_DECIDER ok`。
+- x86 `direct-backward` command smoke：domain_222 默认 P 档触发 `OPEN_SPACE_STRAIGHT_PATH stop_path`，再进入 `SPEED_OPTIMIZER`，subscriber 显示 `gear=2`、`is_estop=false`，日志中不出现 `ROI_DECIDER ok`。
+- x86 `direct-forward` + DRIVE 辅助挡位 smoke：domain_223 输出 `OPEN_SPACE_STRAIGHT_PATH direct_moving`、31 个 straight path 点，`SPEED_OPTIMIZER` 发布 87 点、3m、D 档轨迹。
+- x86 `direct-backward` + REVERSE 辅助挡位 smoke：domain_224 输出 `OPEN_SPACE_STRAIGHT_PATH direct_moving`、31 个 straight path 点，`SPEED_OPTIMIZER` 发布 87 点、3m、R 档轨迹。
 - x86 `pause`/`brake`/`finish` command smoke：domain_225/226/227 均输出 1 点非 estop 停止轨迹；`finish` 原因包含 `MISSIONFINISHED`。
 - x86 invalid command smoke：domain_228 runner 显示 `mode=NONE (cleared_command)`，随后回到普通 ROI/PATH_PROVIDER 链路并输出非 estop 轨迹。
 - 调试边界：当前环境 `domain-id >= 231` 会 `failed to create DomainParticipant`；本机 smoke 应串行执行，command publisher 需要持续发布并等待 runner 收到命令后再发 `SelectedSlot`。

@@ -5,6 +5,7 @@
 #include "planning/tasks/optimizers/open_space_path_generation/open_space_path_generator.h"
 #include "planning/tasks/optimizers/open_space_path_partition/open_space_path_partition.h"
 #include "planning/tasks/optimizers/open_space_speed_optimizer/open_space_speed_optimizer.h"
+#include "planning/tasks/optimizers/open_space_straight_path/open_space_straight_path_provider.h"
 #include "proto_convert/parking_lot_convert.h"
 #include "proto_convert/vehicle_state_convert.h"
 #include "valet_parking_topics.h"
@@ -149,6 +150,8 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
         path_partition_config(
             TL::planning::OpenSpacePathPartitionConfig::GetDefault()),
         path_partition(path_partition_config, vehicle_param),
+        straight_path_provider(
+            TL::planning::OpenSpaceStraightPathConfig::GetDefault()),
         speed_config(
             TL::planning::OpenSpaceSpeedOptimizerConfig::GetDefault()),
         speed_optimizer(speed_config) {
@@ -169,6 +172,7 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
     current_path_has_collision_risk = false;
     last_published_gear = TL::soc::GearPosition::GEAR_PARKING;
     path_provider.Reset();
+    straight_path_provider.Reset();
     return path_partition_ready;
   }
 
@@ -265,6 +269,7 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
   TL::planning::VehicleParam vehicle_param;
   TL::planning::OpenSpacePathPartitionConfig path_partition_config;
   TL::planning::OpenSpacePathPartition path_partition;
+  TL::planning::OpenSpaceStraightPathProvider straight_path_provider;
   TL::planning::OpenSpaceSpeedOptimizerConfig speed_config;
   TL::planning::OpenSpaceSpeedOptimizer speed_optimizer;
   PathProviderRuntimeState path_provider;
@@ -2430,6 +2435,124 @@ double SelectDirectSpeed(double speed_mps) {
   return std::min(speed_mps, kMaxDirectSpeedMps);
 }
 
+TL::planning::OpenSpaceStraightPathInput BuildOpenSpaceStraightPathInput(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const RuntimeVehicleInput& vehicle_input,
+    const ParkingCommand& command,
+    bool forward) {
+  TL::planning::OpenSpaceStraightPathInput input;
+  input.mode = forward
+      ? TL::planning::OpenSpaceStraightPathMode::DIRECT_FORWARD
+      : TL::planning::OpenSpaceStraightPathMode::DIRECT_BACKWARD;
+  input.vehicle_state =
+      BuildVehicleState(config, metadata.data_stamp_ms, vehicle_input);
+  input.planning_start_point.path_point =
+      BuildStartPathPoint(config, vehicle_input);
+  input.planning_start_point.v =
+      vehicle_input.has_vehicle_state ? vehicle_input.linear_velocity : 0.0;
+  input.planning_start_point.a = vehicle_input.has_vehicle_state
+      ? vehicle_input.linear_acceleration
+      : 0.0;
+  input.planning_start_point.relative_time = 0.0;
+  input.is_vehicle_stand_still =
+      std::fabs(input.vehicle_state.linear_velocity) < 1.0e-3;
+  input.direct_move_length_override =
+      SelectDirectDistance(command.direct_distance_m());
+  return input;
+}
+
+void BuildPartitionOutputFromStraightPath(
+    const TL::planning::OpenSpaceStraightPathOutput& straight_output,
+    TL::planning::PartitionOutput* partition_output) {
+  if (partition_output == nullptr) {
+    return;
+  }
+  *partition_output = TL::planning::PartitionOutput();
+  partition_output->chosen_partitioned_path =
+      straight_output.chosen_partitioned_path;
+  partition_output->partitioned_paths.path_set.clear();
+  partition_output->partitioned_paths.path_set.push_back(
+      straight_output.chosen_partitioned_path);
+  partition_output->partitioned_paths.path_idx = 0U;
+  partition_output->partitioned_paths.point_idx = 0U;
+  partition_output->partitioned_paths.path_shift = false;
+  partition_output->partitioned_paths.path_type =
+      TL::planning_internal::PathType::DEFAULT;
+  partition_output->partitioned_paths.replan_status = 0U;
+  partition_output->chosen_path_idx = {0U, 0U};
+  partition_output->path_decision =
+      TL::planning::OpenSpacePathDecision::CHOOSE_NEW_PATH;
+  partition_output->path_decision_debug = straight_output.diagnostic;
+  partition_output->is_stop_path = straight_output.is_stop_path;
+  partition_output->is_gear_changed = straight_output.is_gear_changed;
+  partition_output->destination_reached = false;
+  partition_output->finish_status =
+      TL::planning_internal::OpenSpaceDebug::UNKNOWN;
+  partition_output->is_mirror_fold = false;
+}
+
+bool RunOpenSpaceStraightPath(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const RuntimeVehicleInput& vehicle_input,
+    const ParkingCommand& command,
+    bool forward,
+    TL::planning::OpenSpaceStraightPathProvider* provider,
+    TL::planning::PartitionOutput* partition_output,
+    std::string* status_reason) {
+  if (provider == nullptr || partition_output == nullptr ||
+      status_reason == nullptr) {
+    return false;
+  }
+
+  TL::planning::OpenSpaceStraightPathOutput straight_output;
+  try {
+    const TL::planning::OpenSpaceStraightPathInput input =
+        BuildOpenSpaceStraightPathInput(config, metadata, vehicle_input,
+                                        command, forward);
+    const TL::common::Status status =
+        provider->Process(input, &straight_output);
+    if (!status.ok()) {
+      *status_reason =
+          "OPEN_SPACE_STRAIGHT_PATH failed: " + status.error_message();
+      return false;
+    }
+  } catch (const std::exception& ex) {
+    *status_reason =
+        std::string("OPEN_SPACE_STRAIGHT_PATH failed: exception: ") +
+        ex.what();
+    return false;
+  } catch (...) {
+    *status_reason =
+        "OPEN_SPACE_STRAIGHT_PATH failed: unknown exception";
+    return false;
+  }
+
+  BuildPartitionOutputFromStraightPath(straight_output, partition_output);
+
+  const std::size_t path_points =
+      partition_output->chosen_partitioned_path.first.size();
+  if (path_points < 2U) {
+    std::ostringstream stream;
+    stream << "OPEN_SPACE_STRAIGHT_PATH failed: insufficient path points"
+           << ", points=" << path_points
+           << ", diagnostic=" << straight_output.diagnostic;
+    *status_reason = stream.str();
+    return false;
+  }
+
+  std::ostringstream stream;
+  stream << straight_output.diagnostic
+         << ", gear_changed="
+         << (straight_output.is_gear_changed ? "true" : "false")
+         << ", external_vehicle="
+         << (vehicle_input.has_vehicle_state ? "true" : "false")
+         << ", direct_speed=" << SelectDirectSpeed(command.direct_speed_mps());
+  *status_reason = stream.str();
+  return true;
+}
+
 PlanningTrajectory BuildStageControlStopTrajectory(
     const valet_parking_config_t& config,
     const InputMetadata& metadata,
@@ -2495,99 +2618,6 @@ PlanningTrajectory BuildStageControlStopTrajectory(
   output.longitudinal_diff(0.0);
   output.lateral_diff(0.0);
   output.gear(gear);
-  output.estop(std::move(estop));
-  output.trajectory_type(PlanningTrajectoryType::TRAJECTORY_TYPE_SHORT_PATH);
-  return output;
-}
-
-PlanningTrajectory BuildDirectTrajectory(
-    const valet_parking_config_t& config,
-    const InputMetadata& metadata,
-    const RuntimeVehicleInput& vehicle_input,
-    const ParkingCommand& command,
-    bool forward,
-    const std::string& reason) {
-  const TL::common::PathPoint start_point =
-      BuildStartPathPoint(config, vehicle_input);
-  const double distance_m = SelectDirectDistance(command.direct_distance_m());
-  const double speed_mps = SelectDirectSpeed(command.direct_speed_mps());
-  const double direction = forward ? 1.0 : -1.0;
-  const double total_path_time = distance_m / speed_mps;
-  const int point_count =
-      std::max(2, std::min(kTrajectoryPointCount,
-                           static_cast<int>(config.max_trajectory_points)));
-
-  std::vector<TrajectoryPoint> points;
-  points.reserve(static_cast<std::size_t>(point_count));
-
-  const double heading = NormalizeAngle(start_point.theta);
-  const double cos_heading = std::cos(heading);
-  const double sin_heading = std::sin(heading);
-  for (int i = 0; i < point_count; ++i) {
-    const double ratio = static_cast<double>(i) /
-                         static_cast<double>(point_count - 1);
-    const double signed_s = direction * distance_m * ratio;
-
-    PathPoint path_point;
-    path_point.x(start_point.x + signed_s * cos_heading);
-    path_point.y(start_point.y + signed_s * sin_heading);
-    path_point.z(start_point.z);
-    path_point.theta(heading);
-    path_point.kappa(0.0);
-    path_point.s(distance_m * ratio);
-    path_point.l(0.0);
-    path_point.dkappa(0.0);
-    path_point.ddkappa(0.0);
-    path_point.lane_id("valet_parking_direct_branch");
-    path_point.x_derivative(cos_heading);
-    path_point.y_derivative(sin_heading);
-
-    GaussianInfo gaussian_info;
-    gaussian_info.sigma_x(0.3);
-    gaussian_info.sigma_y(0.25);
-    gaussian_info.correlation(0.0);
-    gaussian_info.area_probability(0.95);
-    gaussian_info.ellipse_a(0.5);
-    gaussian_info.ellipse_b(0.25);
-    gaussian_info.theta_a(heading);
-
-    TrajectoryPoint trajectory_point;
-    trajectory_point.path_point(std::move(path_point));
-    trajectory_point.v(speed_mps);
-    trajectory_point.a(0.0);
-    trajectory_point.relative_time(total_path_time * ratio);
-    trajectory_point.da(0.0);
-    trajectory_point.steer(0.0);
-    trajectory_point.gaussian_info(std::move(gaussian_info));
-    points.push_back(std::move(trajectory_point));
-  }
-
-  const uint64_t publish_stamp_ms = NowMilliseconds();
-  const uint64_t data_stamp_ms = metadata.data_stamp_ms == 0U
-      ? publish_stamp_ms
-      : metadata.data_stamp_ms;
-  const TrajectoryPoint& first = points.front();
-  const TrajectoryPoint& last = points.back();
-  const double dx = last.path_point().x() - first.path_point().x();
-  const double dy = last.path_point().y() - first.path_point().y();
-
-  EStop estop;
-  estop.is_estop(false);
-  estop.reason(reason);
-
-  PlanningTrajectory output;
-  output.header(MakeHeader(metadata.seq, metadata.frame_id, publish_stamp_ms,
-                           data_stamp_ms));
-  output.total_path_length(distance_m);
-  output.total_path_time(total_path_time);
-  output.trajectory_point(std::move(points));
-  output.is_replan(false);
-  output.replan_type(0U);
-  output.replan_reason(reason);
-  output.longitudinal_diff(dx);
-  output.lateral_diff(dy);
-  output.gear(forward ? ::GearPosition::GEAR_DRIVE
-                      : ::GearPosition::GEAR_REVERSE);
   output.estop(std::move(estop));
   output.trajectory_type(PlanningTrajectoryType::TRAJECTORY_TYPE_SHORT_PATH);
   return output;
@@ -2955,16 +2985,63 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       std::ostringstream stream;
       stream << BuildStageControlReason(*command_sample, command_mode_text)
              << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
+             << ", task=OPEN_SPACE_STRAIGHT_PATH"
              << ", direct_distance="
              << std::fixed << std::setprecision(3)
              << SelectDirectDistance(command_sample->direct_distance_m())
              << ", direct_speed="
              << SelectDirectSpeed(command_sample->direct_speed_mps());
-      metadata.status_reason = stream.str();
+      const std::string stage_control_reason = stream.str();
+
+      TL::planning::PartitionOutput straight_partition_output;
+      std::string straight_path_reason;
+      if (RunOpenSpaceStraightPath(config_, metadata, runtime_->vehicle_input,
+                                   *command_sample, forward,
+                                   &runtime_->straight_path_provider,
+                                   &straight_partition_output,
+                                   &straight_path_reason)) {
+        TL::planning::RoiDeciderOutput direct_roi_output;
+        TL::planning::SpeedOptimizerOutput speed_output;
+        std::string speed_optimizer_reason;
+        if (RunSpeedOptimizer(config_, metadata, direct_roi_output,
+                              straight_partition_output,
+                              runtime_->vehicle_input, runtime_->obstacles,
+                              runtime_->speed_config,
+                              runtime_->has_last_speed_frame,
+                              runtime_->last_frame_timestamp,
+                              runtime_->last_planning_start_relative_time,
+                              &runtime_->speed_optimizer, &speed_output,
+                              &speed_optimizer_reason)) {
+          runtime_->UpdateAfterSpeedOptimizer(metadata.data_stamp_ms,
+                                              speed_output);
+          metadata.status_reason = speed_optimizer_reason + "; " +
+                                   stage_control_reason + "; " +
+                                   straight_path_reason;
+          *status_reason = metadata.status_reason;
+          *output_sample = BuildTrajectoryFromSpeedOptimizer(
+              config_, metadata, speed_output, metadata.status_reason);
+          return true;
+        }
+
+        runtime_->UpdateAfterPartitionFallback(straight_partition_output);
+        metadata.status_reason =
+            speed_optimizer_reason +
+            "; fallback to OPEN_SPACE_STRAIGHT_PATH; " +
+            stage_control_reason + "; " + straight_path_reason;
+        *status_reason = metadata.status_reason;
+        *output_sample = BuildTrajectoryFromPathPartition(
+            config_, metadata, straight_partition_output,
+            metadata.status_reason);
+        return true;
+      }
+
+      runtime_->ResetPlanningState();
+      metadata.status_reason =
+          stage_control_reason + "; " + straight_path_reason;
       *status_reason = metadata.status_reason;
-      *output_sample = BuildDirectTrajectory(
-          config_, metadata, runtime_->vehicle_input, *command_sample,
-          forward, metadata.status_reason);
+      *output_sample = BuildStageControlStopTrajectory(
+          config_, metadata, runtime_->vehicle_input, metadata.status_reason,
+          ::GearPosition::GEAR_PARKING);
       return true;
     }
 

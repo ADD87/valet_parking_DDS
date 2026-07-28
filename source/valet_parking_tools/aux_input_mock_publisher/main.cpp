@@ -42,6 +42,8 @@ struct PublisherOptions {
   std::string obstacle_topic{"/perception/obstacles"};
   AuxPublishMode mode{AuxPublishMode::kAllValid};
   std::string mode_name{"all-valid"};
+  GearPosition chassis_gear{GearPosition::GEAR_PARKING};
+  std::string chassis_gear_name{"parking"};
   uint32_t count{3U};
   uint32_t interval_ms{100U};
 };
@@ -128,6 +130,29 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
   }
   if (text == "obstacle-disappears") {
     *out_mode = AuxPublishMode::kObstacleDisappears;
+    return true;
+  }
+  return false;
+}
+
+bool ParseGear(const std::string& text, GearPosition* out_gear) {
+  if (out_gear == nullptr) {
+    return false;
+  }
+  if (text == "parking") {
+    *out_gear = GearPosition::GEAR_PARKING;
+    return true;
+  }
+  if (text == "drive") {
+    *out_gear = GearPosition::GEAR_DRIVE;
+    return true;
+  }
+  if (text == "reverse") {
+    *out_gear = GearPosition::GEAR_REVERSE;
+    return true;
+  }
+  if (text == "neutral") {
+    *out_gear = GearPosition::GEAR_NEUTRAL;
     return true;
   }
   return false;
@@ -279,13 +304,13 @@ LocalizationEstimate BuildLocalization(const PublisherOptions& options,
   return sample;
 }
 
-ChassisState BuildChassis(uint32_t index) {
+ChassisState BuildChassis(const PublisherOptions& options, uint32_t index) {
   ChassisState sample;
   sample.header(BuildHeader("aux_input_mock_publisher/chassis", index));
   sample.is_valid(true);
   sample.speed_mps(0.0);
   sample.acceleration_mps2(0.0);
-  sample.gear(GearPosition::GEAR_PARKING);
+  sample.gear(options.chassis_gear);
   return sample;
 }
 
@@ -376,6 +401,7 @@ void PrintUsage() {
             << "                                moving-localization|moving-localization-large|\n"
             << "                                far-localization|far-obstacles|many-obstacles|\n"
             << "                                obstacle-appears|obstacle-disappears\n"
+            << "  --chassis-gear=<name>         parking|drive|reverse|neutral (default parking)\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";
@@ -399,6 +425,7 @@ int main(int argc, char* argv[]) {
     const std::string chassis_prefix = "--chassis-topic=";
     const std::string obstacle_prefix = "--obstacle-topic=";
     const std::string mode_prefix = "--mode=";
+    const std::string chassis_gear_prefix = "--chassis-gear=";
     const std::string count_prefix = "--count=";
     const std::string interval_prefix = "--interval-ms=";
 
@@ -437,6 +464,16 @@ int main(int argc, char* argv[]) {
       continue;
     }
 
+    if (arg.rfind(chassis_gear_prefix, 0) == 0) {
+      options.chassis_gear_name = arg.substr(chassis_gear_prefix.size());
+      if (!ParseGear(options.chassis_gear_name, &options.chassis_gear)) {
+        std::cerr << "[aux_input_mock_publisher] invalid --chassis-gear: "
+                  << options.chassis_gear_name << std::endl;
+        return 2;
+      }
+      continue;
+    }
+
     if (arg.rfind(count_prefix, 0) == 0) {
       const std::string value = arg.substr(count_prefix.size());
       if (!ParseUint32(value, &options.count) || options.count == 0U) {
@@ -468,6 +505,7 @@ int main(int argc, char* argv[]) {
             << ", chassis_topic=" << options.chassis_topic
             << ", obstacle_topic=" << options.obstacle_topic
             << ", mode=" << options.mode_name
+            << ", chassis_gear=" << options.chassis_gear_name
             << ", count=" << options.count
             << ", interval_ms=" << options.interval_ms << std::endl;
 
@@ -574,7 +612,7 @@ int main(int argc, char* argv[]) {
 
   for (uint32_t i = 0U; i < options.count; ++i) {
     LocalizationEstimate localization = BuildLocalization(options, i);
-    ChassisState chassis = BuildChassis(i);
+    ChassisState chassis = BuildChassis(options, i);
     ObstacleArray obstacles = BuildObstacleArray(options, i);
 
     if (ShouldPublishLocalization(options)) {
@@ -613,6 +651,7 @@ int main(int argc, char* argv[]) {
               << LocalizationStatusForLog(options, localization, i)
               << " chassis="
               << (ShouldPublishChassis(options) ? "valid" : "skipped")
+              << " gear=" << options.chassis_gear_name
               << " obstacles="
               << ObstacleStatusForLog(options, obstacles, i)
               << " obstacle_count="
