@@ -3,6 +3,7 @@
 #include "valet_parking_topicsTopicDataType.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <errno.h>
@@ -44,6 +45,7 @@ struct PublisherOptions {
   std::string mode_name{"all-valid"};
   GearPosition chassis_gear{GearPosition::GEAR_PARKING};
   std::string chassis_gear_name{"parking"};
+  double chassis_speed_mps{0.0};
   uint32_t count{3U};
   uint32_t interval_ms{100U};
 };
@@ -73,6 +75,23 @@ bool ParseUint32(const std::string& text, uint32_t* out_value) {
   }
 
   *out_value = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+bool ParseDouble(const std::string& text, double* out_value) {
+  if (out_value == nullptr || text.empty()) {
+    return false;
+  }
+
+  errno = 0;
+  char* end = nullptr;
+  const double parsed = std::strtod(text.c_str(), &end);
+  if (errno != 0 || end == nullptr || *end != '\0' ||
+      !std::isfinite(parsed)) {
+    return false;
+  }
+
+  *out_value = parsed;
   return true;
 }
 
@@ -308,7 +327,7 @@ ChassisState BuildChassis(const PublisherOptions& options, uint32_t index) {
   ChassisState sample;
   sample.header(BuildHeader("aux_input_mock_publisher/chassis", index));
   sample.is_valid(true);
-  sample.speed_mps(0.0);
+  sample.speed_mps(options.chassis_speed_mps);
   sample.acceleration_mps2(0.0);
   sample.gear(options.chassis_gear);
   return sample;
@@ -402,6 +421,7 @@ void PrintUsage() {
             << "                                far-localization|far-obstacles|many-obstacles|\n"
             << "                                obstacle-appears|obstacle-disappears\n"
             << "  --chassis-gear=<name>         parking|drive|reverse|neutral (default parking)\n"
+            << "  --chassis-speed-mps=<value>   signed chassis speed in m/s (default 0.0)\n"
             << "  --count=<uint32>              number of sample groups to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between sample groups (default 100)\n"
             << "  --help                        show this message\n";
@@ -426,6 +446,7 @@ int main(int argc, char* argv[]) {
     const std::string obstacle_prefix = "--obstacle-topic=";
     const std::string mode_prefix = "--mode=";
     const std::string chassis_gear_prefix = "--chassis-gear=";
+    const std::string chassis_speed_prefix = "--chassis-speed-mps=";
     const std::string count_prefix = "--count=";
     const std::string interval_prefix = "--interval-ms=";
 
@@ -474,6 +495,16 @@ int main(int argc, char* argv[]) {
       continue;
     }
 
+    if (arg.rfind(chassis_speed_prefix, 0) == 0) {
+      const std::string value = arg.substr(chassis_speed_prefix.size());
+      if (!ParseDouble(value, &options.chassis_speed_mps)) {
+        std::cerr << "[aux_input_mock_publisher] invalid --chassis-speed-mps: "
+                  << value << std::endl;
+        return 2;
+      }
+      continue;
+    }
+
     if (arg.rfind(count_prefix, 0) == 0) {
       const std::string value = arg.substr(count_prefix.size());
       if (!ParseUint32(value, &options.count) || options.count == 0U) {
@@ -506,6 +537,7 @@ int main(int argc, char* argv[]) {
             << ", obstacle_topic=" << options.obstacle_topic
             << ", mode=" << options.mode_name
             << ", chassis_gear=" << options.chassis_gear_name
+            << ", chassis_speed_mps=" << options.chassis_speed_mps
             << ", count=" << options.count
             << ", interval_ms=" << options.interval_ms << std::endl;
 
@@ -652,6 +684,7 @@ int main(int argc, char* argv[]) {
               << " chassis="
               << (ShouldPublishChassis(options) ? "valid" : "skipped")
               << " gear=" << options.chassis_gear_name
+              << " speed_mps=" << options.chassis_speed_mps
               << " obstacles="
               << ObstacleStatusForLog(options, obstacles, i)
               << " obstacle_count="

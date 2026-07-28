@@ -120,7 +120,7 @@ SPEED_OPTIMIZER ok
 - `Frame::vehicle_state()` 由 DDS 辅助输入或 fake vehicle 构造。
 - `OpenSpaceInfo` 没有整类接入，而是映射到 `PartitionOutput` 和 `SpeedOptimizerInput`。
 - `direct_distance_m` 已映射为 straight path 长度。
-- `direct_speed_mps` 当前只进入日志诊断；最终速度仍由 `OpenSpaceSpeedOptimizerConfig` 决定，后续等真实车端 command 协议明确后再决定是否覆盖速度优化器配置。
+- NEXT-038 完成时，`direct_speed_mps` 只进入日志诊断；NEXT-039 已把它映射到 direct 分支的速度优化器 speed bound。正式车端 command 协议明确前，这仍属于临时 Topic 下的本地化行为。
 - m57 只完成交叉编译、ELF 和依赖检查，没有板端运行验证。
 
 ## 新增验证能力
@@ -178,7 +178,7 @@ NEEDED: libmagna-dds-impl.so
 
 下一阶段优先做 direct 分支的细节硬化，而不是立刻扩大到完整 Stage 框架：
 
-- 明确 `direct_speed_mps` 是否要映射到速度优化器配置。
-- 增加速度方向冲突的 smoke，用非零反向速度验证 `velocity_direction_conflict`。
+- 已进入 NEXT-039：把 `direct_speed_mps` 映射到速度优化器配置。
+- 已进入 NEXT-039：增加速度方向冲突的 smoke，用非零反向速度验证 `velocity_direction_conflict`。
 - 评估是否把 `OPEN_SPACE_STRAIGHT_PATH` 的输出接入更完整的 Stage 输出字段，例如 trajectory_type、target gear、parking status。
 - 继续保持普通主链路和 direct 分支的 x86 smoke + m57 交叉编译双验证。

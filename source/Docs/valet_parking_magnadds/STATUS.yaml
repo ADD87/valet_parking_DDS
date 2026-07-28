@@ -25,18 +25,27 @@ local_git:
 current_phase:
   id: Fast-2
   name: .so + typed DDS + localized valet parking algorithm sources
-  status: PASS_OPEN_SPACE_STRAIGHT_PATH_X86_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路；默认 P 档会按原始 straight provider 语义输出 stop_path，喂入正确 D/R 挡位后输出 direct_moving。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
+  status: PASS_DIRECT_HARDENING_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路。NEXT-039 已把 direct_speed_mps 映射到 direct 分支速度优化器 speed bound，新增 aux chassis signed speed 输入和速度方向冲突 smoke，并在 direct 输出原因中补 target_gear、direct_speed_bound_min/max、trajectory_type 和 parking_status 诊断。当前仍使用临时 IDL 契约和简化 Topic，parking_status 仍只是 replan_reason/estop.reason 诊断文本，不是正式 DDS 字段；仍未接完整 OpenSpacePathProvider 大类线程、完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '038'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/038_项目状态快照_完整OpenSpaceStraightPathProvider接入.md
+  id: '039'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/039_项目状态快照_Direct分支速度与方向冲突硬化.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-28
-  summary: 已完成 NEXT-038：新增本地化 OpenSpaceStraightPathProvider，DIRECT_FORWARD/DIRECT_BACKWARD 现在跳过 ROI/PATH_PROVIDER/PATH_PARTITION 后进入 OPEN_SPACE_STRAIGHT_PATH，再交给 SPEED_OPTIMIZER 输出 PlanningTrajectory；旧的 adapter 直发短直线 shortcut 已移除。默认 P 档 direct-forward/direct-backward 会按目标挡位不匹配输出 stop_path；通过 aux_input_mock_publisher 新增的 --chassis-gear drive/reverse 可验证 direct_moving 分支。x86 valid、direct stop_path、direct_moving 均通过；m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过，板端运行未验证。
+  summary: 已完成 NEXT-039：后续 10 个 NEXT 任务已记录到 09_NEXT039到048后续任务预测与执行节奏.md，并固定先修订、再调试排查的节奏。Direct 分支已把 direct_speed_mps 映射到本次速度优化器 speed bound，SpeedOptimizerInput.is_rpa_direct_mode 在 direct 分支置为 true；aux_input_mock_publisher 和 smoke_valet_parking_x86.sh 新增 signed chassis speed 输入，可验证 velocity_direction_conflict。x86 valid、direct speed bound、direct moving、forward/backward velocity conflict smoke 均通过；m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过，板端运行未验证。
   evidence:
+    - applications/source/Docs/valet_parking_magnadds/09_NEXT039到048后续任务预测与执行节奏.md
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/039_项目状态快照_Direct分支速度与方向冲突硬化.md
+    - out/valet_parking_direct_hardening_039/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_direct_hardening_039/valet_parking_mvp/x86/smoke_latest/domain_130_20260728_212316_2588
+    - out/valet_parking_direct_hardening_039/valet_parking_mvp/x86/smoke_latest/domain_131_20260728_212336_2729
+    - out/valet_parking_direct_hardening_039/valet_parking_mvp/x86/smoke_latest/domain_132_20260728_212407_647
+    - out/valet_parking_direct_hardening_039/valet_parking_mvp/x86/smoke_latest/domain_133_20260728_212423_875
+    - out/valet_parking_direct_hardening_039/valet_parking_mvp/x86/smoke_latest/domain_134_20260728_212439_1049
+    - out/valet_parking_direct_hardening_039/valet_parking_mvp/m57/lib/libvalet_parking.so
     - applications/source/Docs/valet_parking_magnadds/08_完整OpenSpaceStraightPathProvider与038接入说明.md
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/038_项目状态快照_完整OpenSpaceStraightPathProvider接入.md
     - applications/source/valet_parking/algorithm/parking_algorithm_standalone/planning/tasks/optimizers/open_space_straight_path/open_space_straight_path_provider.h
@@ -147,6 +156,9 @@ runtime_status:
   x86_open_space_straight_path_backward_stop_path_smoke_test: PASS
   x86_open_space_straight_path_forward_direct_moving_smoke_test: PASS
   x86_open_space_straight_path_backward_direct_moving_smoke_test: PASS
+  x86_open_space_straight_path_direct_speed_bound_smoke_test: PASS
+  x86_open_space_straight_path_forward_velocity_conflict_smoke_test: PASS
+  x86_open_space_straight_path_backward_velocity_conflict_smoke_test: PASS
   x86_parking_command_pause_smoke_test: PASS
   x86_parking_command_brake_smoke_test: PASS
   x86_parking_command_finish_smoke_test: PASS
@@ -158,11 +170,11 @@ runtime_status:
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-038 后，direct-forward/domain_221 默认 P 档输出 OPEN_SPACE_STRAIGHT_PATH stop_path 并进入 SPEED_OPTIMIZER，direct-backward/domain_222 默认 P 档输出 OPEN_SPACE_STRAIGHT_PATH stop_path 并进入 SPEED_OPTIMIZER，direct-forward/domain_223 在 aux chassis gear=drive 时输出 OPEN_SPACE_STRAIGHT_PATH direct_moving、31 个 straight path 点并由 SPEED_OPTIMIZER 发布 87 点 3m D 档轨迹，direct-backward/domain_224 在 aux chassis gear=reverse 时输出 OPEN_SPACE_STRAIGHT_PATH direct_moving、31 个 straight path 点并由 SPEED_OPTIMIZER 发布 87 点 3m R 档轨迹；所有 direct 分支均不跑 ROI_DECIDER。pause/brake/finish/invalid command 的 NEXT-037 历史 smoke 仍作为已验证边界。NEXT-033 的 multi-lot-seq-switch、NEXT-031 的 parking-seq-changes、NEXT-030 的 target-moves、NEXT-029 的 obstacle-disappears、NEXT-028 的 obstacle-appears、NEXT-027 的 far-obstacles、NEXT-026 的 many-obstacles、NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-038 后，direct-forward/domain_221 默认 P 档输出 OPEN_SPACE_STRAIGHT_PATH stop_path 并进入 SPEED_OPTIMIZER，direct-backward/domain_222 默认 P 档输出 OPEN_SPACE_STRAIGHT_PATH stop_path 并进入 SPEED_OPTIMIZER，direct-forward/domain_223 在 aux chassis gear=drive 时输出 OPEN_SPACE_STRAIGHT_PATH direct_moving、31 个 straight path 点并由 SPEED_OPTIMIZER 发布 87 点 3m D 档轨迹，direct-backward/domain_224 在 aux chassis gear=reverse 时输出 OPEN_SPACE_STRAIGHT_PATH direct_moving、31 个 straight path 点并由 SPEED_OPTIMIZER 发布 87 点 3m R 档轨迹；所有 direct 分支均不跑 ROI_DECIDER。NEXT-039 后，direct-forward/domain_131 在 direct_speed=1.2 时输出 direct_speed_bound_max=1.200、parking_status=direct_moving，SPEED_OPTIMIZER 发布 79 点 3m D 档轨迹；direct-forward/domain_132 在 D 档但 speed_mps=-0.2 时输出 velocity_direction_conflict 和 parking_status=direct_stop_path，subscriber 收到 length=0 非 estop 轨迹；direct-backward/domain_133 在 R 档但 speed_mps=0.2 时输出 velocity_direction_conflict 和 parking_status=direct_stop_path，subscriber 收到 length=0 非 estop 轨迹；direct-backward/domain_134 在 direct_speed=1.2 时输出 79 点 3m R 档 direct_moving 轨迹。pause/brake/finish/invalid command 的 NEXT-037 历史 smoke 仍作为已验证边界。NEXT-033 的 multi-lot-seq-switch、NEXT-031 的 parking-seq-changes、NEXT-030 的 target-moves、NEXT-029 的 obstacle-disappears、NEXT-028 的 obstacle-appears、NEXT-027 的 far-obstacles、NEXT-026 的 many-obstacles、NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-039
-  description: 继续硬化 OPEN_SPACE_STRAIGHT_PATH direct 分支：评估 direct_speed_mps 是否需要映射到速度优化器配置，增加速度方向冲突 smoke，补 direct 分支 target gear / trajectory_type / parking status 输出差距表，并保持 x86 smoke 与 m57 交叉编译通过；仍不大搬完整 Stage/Frame/DependencyInjector。
+  id: NEXT-040
+  description: 继续 direct 分支输出契约补强：稳定 target_gear / trajectory_type / parking_status / direct speed bound / stop reason 的诊断格式，区分 replan_reason 文本字段和正式 DDS 字段；保持 x86 smoke 与 m57 交叉编译通过，仍不大搬完整 Stage/Frame/DependencyInjector。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -368,3 +380,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/038_项目状态快照_完整OpenSpaceStraightPathProvider接入.md
     phase: Fast-2
     status: PASS_OPEN_SPACE_STRAIGHT_PATH_X86_M57_STATIC_BLOCKED_BOARD
+  - id: '039'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/039_项目状态快照_Direct分支速度与方向冲突硬化.md
+    phase: Fast-2
+    status: PASS_DIRECT_HARDENING_X86_M57_STATIC_BLOCKED_BOARD

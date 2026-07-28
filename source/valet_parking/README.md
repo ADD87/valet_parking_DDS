@@ -117,7 +117,7 @@ valet_parking_runner --disable-aux-input-topics
 
 当前 IDL 新增了临时控制输入类型：
 
-- `ParkingCommand`：表达 Stage 控制命令，字段包含 `mode`、`parking_seq`、`direct_distance_m`、`direct_speed_mps`、`reset_history` 和 `reason`。
+- `ParkingCommand`：表达 Stage 控制命令，字段包含 `mode`、`parking_seq`、`direct_distance_m`、`direct_speed_mps`、`reset_history` 和 `reason`；NEXT-039 后，direct 分支会把 `direct_speed_mps` 映射到本次速度优化器 speed bound，并在原因文本中输出 `direct_speed_bound_min/max`。
 
 runner 默认订阅：
 
@@ -391,6 +391,15 @@ PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[0] local_start
 这仍只是完整 `OpenSpacePathProvider` 的轻量切片，不包含完整线程管理、NLP smoother、完整 `PreCheck` 或完整 `Frame/DependencyInjector`。当前 `target-moves` mock 已能验证 SelectedSlot 目标位姿变化会触发 `TARGET_UPDATE`；`parking-seq-changes` mock 已能验证 `parking_seq/path_id` 变化会触发 `TARGET_UPDATE`；`multi-lot-seq-switch` mock 已能验证同一 DDS 输入内多车位选择；`moving-localization` mock 已能直接触发并验证 `TRACE_REPLAN -> history_splice -> trace_adjust=true` 分支；`far-localization` mock 已能验证错 frame/远定位会被前置 estop；`many-obstacles` mock 已能验证障碍物线段过载会在 PATH_PROVIDER 前被 estop；`far-obstacles` mock 已能验证远障碍物会在 PATH_PROVIDER 前被 estop；但真实车端定位/底盘/障碍物 Topic 仍未对齐。
 
 ## 最近验证
+
+NEXT-039 direct 分支硬化后，已验证：
+
+- x86/m57：`out/valet_parking_direct_hardening_039` 下 x86 与 m57 构建通过；m57 产物为 ARM aarch64，依赖 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
+- x86 valid 回归：domain_130 普通 `SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER` 主链路输出非 estop 轨迹。
+- x86 `direct-forward + DRIVE + direct_speed=1.2`：domain_131 输出 `direct_speed_bound_max=1.200`、`parking_status=direct_moving`，`SPEED_OPTIMIZER` 发布 79 点、3m、D 档轨迹。
+- x86 `direct-forward + DRIVE + speed_mps=-0.2`：domain_132 输出 `velocity_direction_conflict`、`parking_status=direct_stop_path`，subscriber 收到 0 长度非 estop 轨迹。
+- x86 `direct-backward + REVERSE + speed_mps=0.2`：domain_133 输出 `velocity_direction_conflict`、`parking_status=direct_stop_path`，subscriber 收到 0 长度非 estop 轨迹。
+- x86 `direct-backward + REVERSE + direct_speed=1.2`：domain_134 输出 `direct_speed_bound_max=1.200`、`parking_status=direct_moving`，`SPEED_OPTIMIZER` 发布 79 点、3m、R 档轨迹。
 
 NEXT-038 `OPEN_SPACE_STRAIGHT_PATH` 接入后，已验证：
 

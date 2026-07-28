@@ -37,6 +37,8 @@ Options:
   --aux-chassis-gear GEAR
                        Aux chassis gear. Default: parking.
                        parking|drive|reverse|neutral
+  --aux-chassis-speed-mps VALUE
+                       Signed aux chassis speed in m/s. Default: 0.0.
   --aux-count N       Aux sample group count. Default: 3.
   --aux-interval-ms N Aux sample group interval. Default: 200.
   --disable-aux-input-topics
@@ -65,6 +67,7 @@ disable_command_topic=0
 with_aux_inputs=0
 aux_mode="all-valid"
 aux_chassis_gear="parking"
+aux_chassis_speed_mps="0.0"
 aux_count=3
 aux_interval_ms=200
 disable_aux_input_topics=0
@@ -129,6 +132,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --aux-chassis-gear)
       aux_chassis_gear="${2:-}"
+      shift 2
+      ;;
+    --aux-chassis-speed-mps)
+      aux_chassis_speed_mps="${2:-}"
       shift 2
       ;;
     --aux-count)
@@ -272,6 +279,14 @@ wait_for_runner_log() {
   return 1
 }
 
+is_less_than_zero() {
+  awk -v v="$1" 'BEGIN { exit !((v + 0) < 0) }'
+}
+
+is_greater_than_zero() {
+  awk -v v="$1" 'BEGIN { exit !((v + 0) > 0) }'
+}
+
 runner_args=("--domain-id=${domain_id}")
 if [[ "${disable_command_topic}" == "1" ]]; then
   runner_args+=("--disable-command-topic")
@@ -298,6 +313,7 @@ fi
 if [[ "${with_aux_inputs}" == "1" && "${aux_runs_in_background}" != "1" ]]; then
   "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
     --chassis-gear="${aux_chassis_gear}" \
+    --chassis-speed-mps="${aux_chassis_speed_mps}" \
     --count="${effective_aux_count}" \
     --interval-ms="${effective_aux_interval_ms}" >"${aux_publisher_log}" 2>&1
   sleep 1
@@ -310,6 +326,7 @@ if [[ "${aux_runs_in_background}" == "1" ]]; then
   sleep 1
   "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
     --chassis-gear="${aux_chassis_gear}" \
+    --chassis-speed-mps="${aux_chassis_speed_mps}" \
     --count="${effective_aux_count}" \
     --interval-ms="${effective_aux_interval_ms}" >"${aux_publisher_log}" 2>&1 &
   aux_publisher_pid=$!
@@ -454,6 +471,20 @@ if [[ "${aux_publisher_status}" != "0" ]]; then
   validation_status="${aux_publisher_status}"
 fi
 
+direct_velocity_conflict_expected=0
+if [[ "${with_aux_inputs}" == "1" && "${disable_aux_input_topics}" != "1" ]]; then
+  if [[ "${command_mode}" == "direct-forward" &&
+        "${aux_chassis_gear}" == "drive" ]] &&
+     is_less_than_zero "${aux_chassis_speed_mps}"; then
+    direct_velocity_conflict_expected=1
+  fi
+  if [[ "${command_mode}" == "direct-backward" &&
+        "${aux_chassis_gear}" == "reverse" ]] &&
+     is_greater_than_zero "${aux_chassis_speed_mps}"; then
+    direct_velocity_conflict_expected=1
+  fi
+fi
+
 require_runner_log() {
   local pattern="$1"
   local message="$2"
@@ -581,8 +612,16 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD OPEN_SPACE_STRAIGHT_PATH execution evidence"
       require_runner_log "SPEED_OPTIMIZER ok" \
         "missing DIRECT_FORWARD speed optimizer handoff evidence"
+      require_runner_log "direct_speed_bound_max=${direct_speed}" \
+        "missing DIRECT_FORWARD direct speed bound mapping evidence"
       reject_runner_log "ROI_DECIDER ok" \
         "DIRECT_FORWARD should not run ROI_DECIDER in the OPEN_SPACE_STRAIGHT_PATH branch"
+      if [[ "${direct_velocity_conflict_expected}" == "1" ]]; then
+        require_runner_log "OPEN_SPACE_STRAIGHT_PATH stop_path.*velocity_direction_conflict" \
+          "missing DIRECT_FORWARD velocity direction conflict stop_path evidence"
+        require_subscriber_log "length=0" \
+          "DIRECT_FORWARD velocity conflict should publish a zero-length stop path"
+      fi
       require_subscriber_log "is_estop=false" \
         "missing non-estop trajectory for DIRECT_FORWARD command mode"
       require_subscriber_log "reason: replan=.*DIRECT_FORWARD.*OPEN_SPACE_STRAIGHT_PATH" \
@@ -599,8 +638,16 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD OPEN_SPACE_STRAIGHT_PATH execution evidence"
       require_runner_log "SPEED_OPTIMIZER ok" \
         "missing DIRECT_BACKWARD speed optimizer handoff evidence"
+      require_runner_log "direct_speed_bound_max=${direct_speed}" \
+        "missing DIRECT_BACKWARD direct speed bound mapping evidence"
       reject_runner_log "ROI_DECIDER ok" \
         "DIRECT_BACKWARD should not run ROI_DECIDER in the OPEN_SPACE_STRAIGHT_PATH branch"
+      if [[ "${direct_velocity_conflict_expected}" == "1" ]]; then
+        require_runner_log "OPEN_SPACE_STRAIGHT_PATH stop_path.*velocity_direction_conflict" \
+          "missing DIRECT_BACKWARD velocity direction conflict stop_path evidence"
+        require_subscriber_log "length=0" \
+          "DIRECT_BACKWARD velocity conflict should publish a zero-length stop path"
+      fi
       require_subscriber_log "gear=2" \
         "missing reverse gear in DIRECT_BACKWARD subscriber output"
       require_subscriber_log "is_estop=false" \

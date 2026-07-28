@@ -17,6 +17,7 @@
 | `06_两版PathProvider复用价值评估与接入切口.md` | 评估 `parking_algorithm_standalone` 与 `Repair_ValetParkingStageParking_260430-main` 两版已修代码节省的工作量，以及为什么仍要做 DDS Adapter 验证 | 判断 PathProvider 后续是否从参考代码复用、复制或继续轻量切片时 |
 | `07_轻量Stage控制输入与034到037接入说明.md` | 解释 `ParkingCommand` Topic、direct/pause/brake/finish 分支和新增 mock/smoke 的作用 | 理解 NEXT-034 到 NEXT-037 的 Stage 控制输入接入时 |
 | `08_完整OpenSpaceStraightPathProvider与038接入说明.md` | 解释 NEXT-038 如何把 direct 分支升级为 `OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory`，以及仍未恢复完整 Frame/DependencyInjector 的边界 | 理解 DIRECT_FORWARD/DIRECT_BACKWARD 当前真实链路时 |
+| `09_NEXT039到048后续任务预测与执行节奏.md` | 预测 NEXT-039 到 NEXT-048 的连续任务，并固定“先修订、再调试排查”的执行节奏 | 判断后续 10 个阶段怎么推进、避免一上来陷入调试细节时 |
 | `STATUS.yaml` | 当前唯一状态入口，记录当前阶段、下一步、阻塞项 | 每次接手第一眼先看 |
 | `status_snapshots/` | 每个阶段完成后输出一份带序号的项目状态快照 | 阶段完成、暂停、恢复前 |
 | `decision_records/` | 所有偏离原计划或关键架构选择的决策留痕 | 方案争议、后续追溯 |

@@ -2118,7 +2118,8 @@ TL::planning::SpeedOptimizerInput BuildSpeedOptimizerInput(
     const TL::planning::OpenSpaceSpeedOptimizerConfig& speed_config,
     bool has_last_frame,
     double last_frame_timestamp,
-    double last_planning_start_relative_time) {
+    double last_planning_start_relative_time,
+    bool is_rpa_direct_mode) {
   TL::planning::SpeedOptimizerInput input;
   input.discretized_path =
       NormalizeDiscretizedPath(partition_output.chosen_partitioned_path.first);
@@ -2141,6 +2142,7 @@ TL::planning::SpeedOptimizerInput BuildSpeedOptimizerInput(
   input.env_structured_info.parking_scenario_type = roi_output.scenario_type;
   input.is_forward = input.gear == TL::soc::GearPosition::GEAR_DRIVE;
   input.is_mirror_fold = partition_output.is_mirror_fold;
+  input.is_rpa_direct_mode = is_rpa_direct_mode;
   input.static_obstacles = BuildStaticObstacles(obstacles);
   input.moving_obstacles = BuildMovingObstacles(obstacles);
   input.config = speed_config;
@@ -2162,6 +2164,7 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
                        bool has_last_frame,
                        double last_frame_timestamp,
                        double last_planning_start_relative_time,
+                       bool is_rpa_direct_mode,
                        TL::planning::OpenSpaceSpeedOptimizer* optimizer,
                        TL::planning::SpeedOptimizerOutput* speed_output,
                        std::string* status_reason) {
@@ -2176,7 +2179,8 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
                                  partition_output, vehicle_input, obstacles,
                                  speed_config,
                                  has_last_frame, last_frame_timestamp,
-                                 last_planning_start_relative_time);
+                                 last_planning_start_relative_time,
+                                 is_rpa_direct_mode);
     const bool ok = optimizer->Execute(input, speed_output);
     if (!ok || !speed_output->success) {
       *status_reason =
@@ -2433,6 +2437,54 @@ double SelectDirectSpeed(double speed_mps) {
     return kDefaultDirectSpeedMps;
   }
   return std::min(speed_mps, kMaxDirectSpeedMps);
+}
+
+struct DirectSpeedOptimizerProfile {
+  double selected_speed_mps{0.8};
+  double min_sample_speed{0.3};
+  double max_sample_speed{0.8};
+};
+
+DirectSpeedOptimizerProfile BuildDirectSpeedOptimizerProfile(double speed_mps) {
+  DirectSpeedOptimizerProfile profile;
+  profile.selected_speed_mps = SelectDirectSpeed(speed_mps);
+  profile.max_sample_speed = profile.selected_speed_mps;
+  profile.min_sample_speed =
+      std::max(0.05, profile.selected_speed_mps * 0.6);
+  if (profile.min_sample_speed >= profile.max_sample_speed) {
+    profile.min_sample_speed = profile.max_sample_speed * 0.5;
+  }
+  return profile;
+}
+
+void ApplyDirectSpeedBound(
+    const DirectSpeedOptimizerProfile& profile,
+    TL::planning::OpenSpaceSpeedOptimizerConfig::SpeedBoundInfo* bound) {
+  if (bound == nullptr) {
+    return;
+  }
+  bound->min_sample_speed = profile.min_sample_speed;
+  bound->max_sample_speed = profile.max_sample_speed;
+}
+
+TL::planning::OpenSpaceSpeedOptimizerConfig BuildDirectSpeedOptimizerConfig(
+    const TL::planning::OpenSpaceSpeedOptimizerConfig& base_config,
+    const DirectSpeedOptimizerProfile& profile) {
+  TL::planning::OpenSpaceSpeedOptimizerConfig config = base_config;
+  ApplyDirectSpeedBound(profile, &config.apa_speed_bound_info.forward_info);
+  ApplyDirectSpeedBound(profile, &config.apa_speed_bound_info.reverse_info);
+  ApplyDirectSpeedBound(profile,
+                        &config.rpa_direct_speed_bound_info.forward_info);
+  ApplyDirectSpeedBound(profile,
+                        &config.rpa_direct_speed_bound_info.reverse_info);
+  config.speed_upper_bound =
+      std::max(config.speed_upper_bound, profile.max_sample_speed);
+  return config;
+}
+
+TL::soc::GearPosition TargetGearForDirectCommand(bool forward) {
+  return forward ? TL::soc::GearPosition::GEAR_DRIVE
+                 : TL::soc::GearPosition::GEAR_REVERSE;
 }
 
 TL::planning::OpenSpaceStraightPathInput BuildOpenSpaceStraightPathInput(
@@ -2982,15 +3034,27 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD) {
       const bool forward =
           command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD;
+      const DirectSpeedOptimizerProfile direct_speed_profile =
+          BuildDirectSpeedOptimizerProfile(command_sample->direct_speed_mps());
+      const TL::planning::OpenSpaceSpeedOptimizerConfig direct_speed_config =
+          BuildDirectSpeedOptimizerConfig(runtime_->speed_config,
+                                          direct_speed_profile);
       std::ostringstream stream;
       stream << BuildStageControlReason(*command_sample, command_mode_text)
              << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
              << ", task=OPEN_SPACE_STRAIGHT_PATH"
+             << ", target_gear="
+             << static_cast<int>(TargetGearForDirectCommand(forward))
              << ", direct_distance="
              << std::fixed << std::setprecision(3)
              << SelectDirectDistance(command_sample->direct_distance_m())
              << ", direct_speed="
-             << SelectDirectSpeed(command_sample->direct_speed_mps());
+             << direct_speed_profile.selected_speed_mps
+             << ", direct_speed_bound_min="
+             << direct_speed_profile.min_sample_speed
+             << ", direct_speed_bound_max="
+             << direct_speed_profile.max_sample_speed
+             << ", trajectory_type=NORMAL";
       const std::string stage_control_reason = stream.str();
 
       TL::planning::PartitionOutput straight_partition_output;
@@ -3006,16 +3070,22 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         if (RunSpeedOptimizer(config_, metadata, direct_roi_output,
                               straight_partition_output,
                               runtime_->vehicle_input, runtime_->obstacles,
-                              runtime_->speed_config,
+                              direct_speed_config,
                               runtime_->has_last_speed_frame,
                               runtime_->last_frame_timestamp,
                               runtime_->last_planning_start_relative_time,
+                              true,
                               &runtime_->speed_optimizer, &speed_output,
                               &speed_optimizer_reason)) {
           runtime_->UpdateAfterSpeedOptimizer(metadata.data_stamp_ms,
                                               speed_output);
+          const std::string direct_parking_status =
+              straight_partition_output.is_stop_path ? "direct_stop_path"
+                                                     : "direct_moving";
           metadata.status_reason = speed_optimizer_reason + "; " +
-                                   stage_control_reason + "; " +
+                                   stage_control_reason +
+                                   ", parking_status=" +
+                                   direct_parking_status + "; " +
                                    straight_path_reason;
           *status_reason = metadata.status_reason;
           *output_sample = BuildTrajectoryFromSpeedOptimizer(
@@ -3024,10 +3094,14 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         }
 
         runtime_->UpdateAfterPartitionFallback(straight_partition_output);
+        const std::string direct_parking_status =
+            straight_partition_output.is_stop_path ? "direct_stop_path"
+                                                   : "direct_moving";
         metadata.status_reason =
             speed_optimizer_reason +
             "; fallback to OPEN_SPACE_STRAIGHT_PATH; " +
-            stage_control_reason + "; " + straight_path_reason;
+            stage_control_reason + ", parking_status=" +
+            direct_parking_status + "; " + straight_path_reason;
         *status_reason = metadata.status_reason;
         *output_sample = BuildTrajectoryFromPathPartition(
             config_, metadata, straight_partition_output,
@@ -3187,6 +3261,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
                             runtime_->has_last_speed_frame,
                             runtime_->last_frame_timestamp,
                             runtime_->last_planning_start_relative_time,
+                            false,
                             &runtime_->speed_optimizer,
                             &speed_output, &speed_optimizer_reason)) {
         runtime_->UpdateAfterSpeedOptimizer(metadata.data_stamp_ms,
