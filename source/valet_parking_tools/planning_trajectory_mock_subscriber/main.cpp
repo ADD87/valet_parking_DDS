@@ -305,7 +305,14 @@ int main(int argc, char* argv[]) {
     std::cout << "[planning_trajectory_mock_subscriber] received sample points="
               << sample.trajectory_point().size()
               << ", length=" << sample.total_path_length()
+              << ", gear=" << static_cast<int>(sample.gear())
+              << ", trajectory_type="
+              << static_cast<int>(sample.trajectory_type())
               << ", is_estop=" << (is_estop ? "true" : "false")
+              << std::endl;
+    std::cout << "[planning_trajectory_mock_subscriber] reason: replan=\""
+              << sample.replan_reason()
+              << "\", estop=\"" << sample.estop().reason() << "\""
               << std::endl;
     std::cout << "[planning_trajectory_mock_subscriber] validation: "
               << validation_message << std::endl;

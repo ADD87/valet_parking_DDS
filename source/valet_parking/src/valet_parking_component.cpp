@@ -25,10 +25,12 @@ namespace {
 constexpr const char* kModuleTag = "[valet_parking]";
 constexpr const char* kSelectedSlotTopicDefault = "/selected_slot";
 constexpr const char* kPlanningTrajectoryTopicDefault = "/planning/trajectory";
+constexpr const char* kParkingCommandTopicDefault = "/parking/command";
 constexpr const char* kLocalizationTopicDefault = "/localization/estimate";
 constexpr const char* kChassisTopicDefault = "/chassis/state";
 constexpr const char* kObstacleTopicDefault = "/perception/obstacles";
 constexpr int kTrajectoryPointCount = 21;
+constexpr int kMaxCommandDrainRoundsPerCycle = 64;
 constexpr int kMaxAuxDrainRoundsPerCycle = 64;
 
 struct SelectedSlotInput {
@@ -441,6 +443,57 @@ valet_parking_obstacle_type_t MapDdsObstacleType(::ObstacleType type) {
   return VALET_PARKING_OBSTACLE_UNKNOWN;
 }
 
+std::string ParkingCommandModeToString(ParkingCommandMode mode) {
+  switch (mode) {
+    case ParkingCommandMode::PARKING_COMMAND_NONE:
+      return "NONE";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_IN:
+      return "PARKING_IN";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_LEFT:
+      return "PARKING_OUT_LEFT";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_RIGHT:
+      return "PARKING_OUT_RIGHT";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_FRONT:
+      return "PARKING_OUT_FRONT";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_BACK:
+      return "PARKING_OUT_BACK";
+    case ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD:
+      return "DIRECT_FORWARD";
+    case ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD:
+      return "DIRECT_BACKWARD";
+    case ParkingCommandMode::PARKING_COMMAND_PAUSE:
+      return "PAUSE";
+    case ParkingCommandMode::PARKING_COMMAND_BRAKE:
+      return "BRAKE";
+    case ParkingCommandMode::PARKING_COMMAND_FINISH:
+      return "FINISH";
+  }
+  return "UNKNOWN";
+}
+
+bool IsKnownParkingCommandMode(ParkingCommandMode mode) {
+  switch (mode) {
+    case ParkingCommandMode::PARKING_COMMAND_NONE:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_IN:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_LEFT:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_RIGHT:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_FRONT:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_BACK:
+    case ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD:
+    case ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD:
+    case ParkingCommandMode::PARKING_COMMAND_PAUSE:
+    case ParkingCommandMode::PARKING_COMMAND_BRAKE:
+    case ParkingCommandMode::PARKING_COMMAND_FINISH:
+      return true;
+  }
+  return false;
+}
+
+bool IsFiniteParkingCommandSample(const ParkingCommand& sample) {
+  return std::isfinite(sample.direct_distance_m()) &&
+         std::isfinite(sample.direct_speed_mps());
+}
+
 uint64_t SelectSampleStampMs(const Header& header) {
   if (header.data_stamp_ms() != 0U) {
     return header.data_stamp_ms();
@@ -687,6 +740,9 @@ ValetParkingComponent::ValetParkingComponent(const valet_parking_config_t& confi
                                                             : kSelectedSlotTopicDefault),
       output_topic_name_(config.output_topic_name != nullptr ? config.output_topic_name
                                                               : kPlanningTrajectoryTopicDefault),
+      command_topic_name_(config.command_topic_name != nullptr
+                              ? config.command_topic_name
+                              : kParkingCommandTopicDefault),
       localization_topic_name_(config.localization_topic_name != nullptr
                                    ? config.localization_topic_name
                                    : kLocalizationTopicDefault),
@@ -696,12 +752,16 @@ ValetParkingComponent::ValetParkingComponent(const valet_parking_config_t& confi
       obstacle_topic_name_(config.obstacle_topic_name != nullptr
                                ? config.obstacle_topic_name
                                : kObstacleTopicDefault),
+      command_topic_enabled_(config.enable_command_topic != 0U),
       aux_input_topics_enabled_(config.enable_aux_input_topics != 0U) {
   if (input_topic_name_.empty()) {
     input_topic_name_ = kSelectedSlotTopicDefault;
   }
   if (output_topic_name_.empty()) {
     output_topic_name_ = kPlanningTrajectoryTopicDefault;
+  }
+  if (command_topic_name_.empty()) {
+    command_topic_name_ = kParkingCommandTopicDefault;
   }
   if (localization_topic_name_.empty()) {
     localization_topic_name_ = kLocalizationTopicDefault;
@@ -789,6 +849,17 @@ bool ValetParkingComponent::InitDds() {
     return false;
   }
 
+  if (command_topic_enabled_) {
+    command_topic_type_ = std::make_unique<ParkingCommandTopicDataType>();
+    rc = participant_->register_type(command_topic_type_.get());
+    if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+      SetLastError(std::string("register parking_command type failed: ") +
+                   ReturnCodeToString(rc));
+      CleanupDds();
+      return false;
+    }
+  }
+
   if (aux_input_topics_enabled_) {
     localization_topic_type_ = std::make_unique<LocalizationEstimateTopicDataType>();
     rc = participant_->register_type(localization_topic_type_.get());
@@ -829,6 +900,18 @@ bool ValetParkingComponent::InitDds() {
     SetLastError("failed to create output topic: " + output_topic_name_);
     CleanupDds();
     return false;
+  }
+
+  if (command_topic_enabled_) {
+    command_topic_ = participant_->create_topic(
+        command_topic_name_, command_topic_type_->get_name(),
+        magna::dds::TOPIC_QOS_DEFAULT);
+    if (command_topic_ == nullptr) {
+      SetLastError("failed to create parking command topic: " +
+                   command_topic_name_);
+      CleanupDds();
+      return false;
+    }
   }
 
   if (aux_input_topics_enabled_) {
@@ -891,6 +974,16 @@ bool ValetParkingComponent::InitDds() {
     return false;
   }
 
+  if (command_topic_enabled_) {
+    command_reader_ = subscriber_->create_datareader(
+        command_topic_, reader_qos, nullptr, magna::dds::STATUS_MASK_NONE);
+    if (command_reader_ == nullptr) {
+      SetLastError("failed to create datareader for parking command topic");
+      CleanupDds();
+      return false;
+    }
+  }
+
   if (aux_input_topics_enabled_) {
     localization_reader_ = subscriber_->create_datareader(
         localization_topic_, reader_qos, nullptr, magna::dds::STATUS_MASK_NONE);
@@ -939,12 +1032,14 @@ void ValetParkingComponent::CleanupDds() noexcept {
   obstacle_reader_ = nullptr;
   chassis_reader_ = nullptr;
   localization_reader_ = nullptr;
+  command_reader_ = nullptr;
   input_reader_ = nullptr;
   publisher_ = nullptr;
   subscriber_ = nullptr;
   obstacle_topic_ = nullptr;
   chassis_topic_ = nullptr;
   localization_topic_ = nullptr;
+  command_topic_ = nullptr;
   output_topic_ = nullptr;
   input_topic_ = nullptr;
 
@@ -960,8 +1055,84 @@ void ValetParkingComponent::CleanupDds() noexcept {
   obstacle_topic_type_.reset();
   chassis_topic_type_.reset();
   localization_topic_type_.reset();
+  command_topic_type_.reset();
   planning_trajectory_topic_type_.reset();
   selected_slot_topic_type_.reset();
+}
+
+bool ValetParkingComponent::HandleCommandSample() {
+  if (!command_topic_enabled_ || command_reader_ == nullptr) {
+    return false;
+  }
+
+  ParkingCommand sample;
+  magna::dds::SampleInfo sample_info;
+  const magna::dds::ReturnCode_t read_rc =
+      command_reader_->take_next_sample(&sample, sample_info);
+  if (read_rc == magna::dds::ReturnCode_t::RETCODE_NO_DATA) {
+    return false;
+  }
+  if (read_rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+    SetLastError(std::string("take parking command sample failed: ") +
+                 ReturnCodeToString(read_rc));
+    return false;
+  }
+  if (!sample_info.valid_data) {
+    return true;
+  }
+
+  ++handled_command_samples_;
+  const std::string mode_text = ParkingCommandModeToString(sample.mode());
+  if (!sample.is_valid() ||
+      sample.mode() == ParkingCommandMode::PARKING_COMMAND_NONE) {
+    latest_parking_command_.reset();
+    std::cout << kModuleTag
+              << " command #" << handled_command_samples_
+              << " mode=" << mode_text
+              << " (cleared_command)" << std::endl;
+    return true;
+  }
+
+  if (!IsKnownParkingCommandMode(sample.mode()) ||
+      !IsFiniteParkingCommandSample(sample)) {
+    latest_parking_command_.reset();
+    SetLastError("rejected invalid parking command sample");
+    std::cout << kModuleTag
+              << " command rejected #" << handled_command_samples_
+              << " mode=" << mode_text
+              << " (cleared_command)" << std::endl;
+    return true;
+  }
+
+  latest_parking_command_ = std::make_unique<ParkingCommand>(sample);
+  std::cout << kModuleTag
+            << " command #" << handled_command_samples_
+            << " mode=" << mode_text
+            << " parking_seq=" << sample.parking_seq()
+            << " direct_distance_m=" << sample.direct_distance_m()
+            << " direct_speed_mps=" << sample.direct_speed_mps()
+            << " reset_history="
+            << (sample.reset_history() ? "true" : "false")
+            << " reason=\"" << sample.reason() << "\""
+            << std::endl;
+  return true;
+}
+
+bool ValetParkingComponent::DrainCommandSamples() {
+  if (!command_topic_enabled_) {
+    return false;
+  }
+
+  bool handled_any = false;
+  for (int i = 0; i < kMaxCommandDrainRoundsPerCycle && running_.load(); ++i) {
+    const bool handled_one = HandleCommandSample();
+    handled_any = handled_one || handled_any;
+    if (!handled_one) {
+      break;
+    }
+  }
+
+  return handled_any;
 }
 
 void ValetParkingComponent::ApplyAuxVehicleInput() {
@@ -1182,7 +1353,14 @@ bool ValetParkingComponent::BuildTrajectoryFromInput(const SelectedSlot& input_s
     return false;
   }
 
-  return stage_parking_adapter_.Process(input_sample, output_sample, status_reason);
+  const bool ok = stage_parking_adapter_.Process(
+      input_sample, latest_parking_command_.get(), output_sample,
+      status_reason);
+  if (latest_parking_command_ != nullptr &&
+      latest_parking_command_->reset_history()) {
+    latest_parking_command_->reset_history(false);
+  }
+  return ok;
 }
 
 bool ValetParkingComponent::HandleOneSample() {
@@ -1261,6 +1439,11 @@ int ValetParkingComponent::Start() {
   std::cout << kModuleTag << " started (domain=" << config_.domain_id
             << ", in_topic=" << input_topic_name_
             << ", out_topic=" << output_topic_name_;
+  if (command_topic_enabled_) {
+    std::cout << ", command_topic=" << command_topic_name_;
+  } else {
+    std::cout << ", command_topic=disabled";
+  }
   if (aux_input_topics_enabled_) {
     std::cout << ", localization_topic=" << localization_topic_name_
               << ", chassis_topic=" << chassis_topic_name_
@@ -1324,7 +1507,8 @@ void ValetParkingComponent::WorkerLoop() {
   while (running_.load()) {
     bool handled = false;
     try {
-      handled = DrainAuxInputSamples();
+      handled = DrainCommandSamples();
+      handled = DrainAuxInputSamples() || handled;
       handled = HandleOneSample() || handled;
     } catch (const std::exception& e) {
       SetLastError(std::string("worker exception: ") + e.what());

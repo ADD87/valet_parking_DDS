@@ -470,6 +470,64 @@ bool ObstacleArrayTopicDataType::is_key_defined()
 {
 	return ObstacleArray::is_key_defined();
 }
+ParkingCommandTopicDataType::ParkingCommandTopicDataType() : TopicDataType()
+{
+	set_name("ParkingCommand");
+}
+ParkingCommandTopicDataType::~ParkingCommandTopicDataType()
+{
+
+}
+bool ParkingCommandTopicDataType::serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	ParkingCommand* pData = static_cast<ParkingCommand*>(data);
+	pData->serialize(cdr);
+	return true;
+}
+bool ParkingCommandTopicDataType::deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, void *data)
+{
+	if (data == nullptr)
+	{
+		return false;
+	}
+	ParkingCommand* pData = static_cast<ParkingCommand*>(data);
+	pData->deserialize(cdr);
+	return true;
+}
+uint32_t ParkingCommandTopicDataType::get_serialized_size_bound()
+{
+	return static_cast<uint32_t>(ParkingCommand::DATA_SIZE + 8U);
+}
+void* ParkingCommandTopicDataType::create_data()
+{
+	return new ParkingCommand;
+}
+void ParkingCommandTopicDataType::delete_data(void *data)
+{
+	if (data == nullptr)
+	{
+		return;
+	}
+	ParkingCommand* pData = static_cast<ParkingCommand*>(data);
+	delete pData;
+}
+bool ParkingCommandTopicDataType::get_key(std::shared_ptr<magna::dds::SerializedPayload_t> /*data_value*/, InstanceHandle_t* /*ihandle*/) noexcept
+{
+	if (!ParkingCommand::is_key_defined())
+	{
+		return false;
+	}
+	/* magnadds adapter mode: key extraction from serialized payload is not generated yet. */
+	return false;
+}
+bool ParkingCommandTopicDataType::is_key_defined()
+{
+	return ParkingCommand::is_key_defined();
+}
 ParkingLotTopicDataType::ParkingLotTopicDataType() : TopicDataType()
 {
 	set_name("ParkingLot");

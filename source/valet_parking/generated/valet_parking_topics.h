@@ -4,8 +4,8 @@
 * All rights reserved
 **************************************************************/
 
-#ifndef VALET_PARKING_TOPICS_00ddae822629258306247f3b3b5f9ac8_H
-#define VALET_PARKING_TOPICS_00ddae822629258306247f3b3b5f9ac8_H
+#ifndef VALET_PARKING_TOPICS_35e2de1fdefcdc5c0930a3f5d111d289_H
+#define VALET_PARKING_TOPICS_35e2de1fdefcdc5c0930a3f5d111d289_H
 
 #include <stdint.h>
 #include <vector>
@@ -149,6 +149,27 @@ enum class PlanningTrajectoryType : uint32_t
 	TRAJECTORY_TYPE_PATH_LANE_KEEP,
 	TRAJECTORY_TYPE_PATH_LANE_CHANGE,
 	TRAJECTORY_TYPE_PATH_PULL_OVER
+};
+
+/**
+* @enum class ParkingCommandMode
+* @brief A enum class as the datatype for data exchange.
+* @note
+*/
+
+enum class ParkingCommandMode : uint32_t
+{
+	PARKING_COMMAND_NONE,
+	PARKING_COMMAND_PARKING_IN,
+	PARKING_COMMAND_PARKING_OUT_LEFT,
+	PARKING_COMMAND_PARKING_OUT_RIGHT,
+	PARKING_COMMAND_PARKING_OUT_FRONT,
+	PARKING_COMMAND_PARKING_OUT_BACK,
+	PARKING_COMMAND_DIRECT_FORWARD,
+	PARKING_COMMAND_DIRECT_BACKWARD,
+	PARKING_COMMAND_PAUSE,
+	PARKING_COMMAND_BRAKE,
+	PARKING_COMMAND_FINISH
 };
 
 /**
@@ -721,6 +742,94 @@ private:
 	Header m_header;
 	bool m_is_valid;
 	std::vector<Obstacle> m_obstacles;
+
+};
+
+
+/**
+* @class ParkingCommand
+* @brief A class as the datatype for data exchange.
+* @note
+*/
+
+class ParkingCommand
+{
+public:
+	static constexpr bool IS_KEY_DEFINED = false;
+	static constexpr uint32_t DATA_SIZE = 0U;
+	static constexpr bool IS_DATA_PADDING = true;
+	static constexpr bool IS_ID_DEFINED = false;
+
+	ParkingCommand();
+	~ParkingCommand() = default;
+	ParkingCommand(ParkingCommand const &x) = default;
+	ParkingCommand(ParkingCommand &&x) = default;
+	ParkingCommand& operator=(ParkingCommand const &x) = default;
+	ParkingCommand& operator=(ParkingCommand &&x) = default;
+
+	magna::dds::DdsCdr& serialize(magna::dds::DdsCdr &cdr) const;
+	static uint32_t serialize(void *const data, char *const payload_buf, uint32_t const payload_len);
+
+	magna::dds::DdsCdr& deserialize(magna::dds::DdsCdr &cdr);
+	static bool deserialize(char *const payload_buf, uint32_t const payload_len, void *const data);
+
+	static bool is_key_defined();
+	void serialize_key(magna::dds::DdsCdr &cdr) const;
+	void serialize_key(char **buf,unsigned int *len);
+	bool is_key_serialize_by_cdr();
+	static bool is_plain_types();
+	uint32_t max_align_size(uint32_t const _cur_al) const;
+	void set_key_val(ParkingCommand const* const _data) noexcept;
+
+
+
+	void header(Header const &_header);
+	void header(Header &&_header);
+	Header const& header() const;
+	Header& header();
+
+	void is_valid(bool const _is_valid);
+	bool is_valid() const;
+	bool& is_valid();
+
+	void mode(ParkingCommandMode const _mode);
+	ParkingCommandMode mode() const;
+	ParkingCommandMode& mode();
+
+	void parking_seq(uint32_t const _parking_seq);
+	uint32_t parking_seq() const;
+	uint32_t& parking_seq();
+
+	void direct_distance_m(double const _direct_distance_m);
+	double direct_distance_m() const;
+	double& direct_distance_m();
+
+	void direct_speed_mps(double const _direct_speed_mps);
+	double direct_speed_mps() const;
+	double& direct_speed_mps();
+
+	void reset_history(bool const _reset_history);
+	bool reset_history() const;
+	bool& reset_history();
+
+	void reason(std::string const &_reason);
+	void reason(std::string &&_reason);
+	std::string const& reason() const;
+	std::string& reason();
+
+
+
+
+
+private:
+	Header m_header;
+	bool m_is_valid;
+	ParkingCommandMode m_mode;
+	uint32_t m_parking_seq;
+	double m_direct_distance_m;
+	double m_direct_speed_mps;
+	bool m_reset_history;
+	std::string m_reason;
 
 };
 
@@ -1385,5 +1494,5 @@ private:
 };
 
 
-#endif	// VALET_PARKING_TOPICS_00ddae822629258306247f3b3b5f9ac8_H
+#endif	// VALET_PARKING_TOPICS_35e2de1fdefcdc5c0930a3f5d111d289_H
 

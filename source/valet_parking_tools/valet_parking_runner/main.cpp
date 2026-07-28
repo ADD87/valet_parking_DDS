@@ -46,6 +46,8 @@ void PrintUsage() {
             << "  --domain-id=<uint32>          DDS domain id (default 0)\n"
             << "  --in-topic=<name>             input topic name (default /selected_slot)\n"
             << "  --out-topic=<name>            output topic name (default /planning/trajectory)\n"
+            << "  --command-topic=<name>        parking command input topic (default /parking/command)\n"
+            << "  --disable-command-topic       do not subscribe parking command topic\n"
             << "  --localization-topic=<name>   localization input topic (default /localization/estimate)\n"
             << "  --chassis-topic=<name>        chassis input topic (default /chassis/state)\n"
             << "  --obstacle-topic=<name>       obstacle input topic (default /perception/obstacles)\n"
@@ -58,9 +60,11 @@ void PrintUsage() {
 int main(int argc, char* argv[]) {
   std::string in_topic = "/selected_slot";
   std::string out_topic = "/planning/trajectory";
+  std::string command_topic = "/parking/command";
   std::string localization_topic = "/localization/estimate";
   std::string chassis_topic = "/chassis/state";
   std::string obstacle_topic = "/perception/obstacles";
+  bool enable_command_topic = true;
   bool enable_aux_input_topics = true;
   uint32_t domain_id = 0U;
 
@@ -74,6 +78,7 @@ int main(int argc, char* argv[]) {
     const std::string domain_prefix = "--domain-id=";
     const std::string in_prefix = "--in-topic=";
     const std::string out_prefix = "--out-topic=";
+    const std::string command_prefix = "--command-topic=";
     const std::string localization_prefix = "--localization-topic=";
     const std::string chassis_prefix = "--chassis-topic=";
     const std::string obstacle_prefix = "--obstacle-topic=";
@@ -97,6 +102,11 @@ int main(int argc, char* argv[]) {
       continue;
     }
 
+    if (arg.rfind(command_prefix, 0) == 0) {
+      command_topic = arg.substr(command_prefix.size());
+      continue;
+    }
+
     if (arg.rfind(localization_prefix, 0) == 0) {
       localization_topic = arg.substr(localization_prefix.size());
       continue;
@@ -109,6 +119,11 @@ int main(int argc, char* argv[]) {
 
     if (arg.rfind(obstacle_prefix, 0) == 0) {
       obstacle_topic = arg.substr(obstacle_prefix.size());
+      continue;
+    }
+
+    if (arg == "--disable-command-topic") {
+      enable_command_topic = false;
       continue;
     }
 
@@ -126,9 +141,11 @@ int main(int argc, char* argv[]) {
   config.domain_id = domain_id;
   config.input_topic_name = in_topic.c_str();
   config.output_topic_name = out_topic.c_str();
+  config.command_topic_name = command_topic.c_str();
   config.localization_topic_name = localization_topic.c_str();
   config.chassis_topic_name = chassis_topic.c_str();
   config.obstacle_topic_name = obstacle_topic.c_str();
+  config.enable_command_topic = enable_command_topic ? 1U : 0U;
   config.enable_aux_input_topics = enable_aux_input_topics ? 1U : 0U;
   config.qos_depth = 10U;
   config.max_parking_lots = 20U;

@@ -78,6 +78,21 @@ enum PlanningTrajectoryType
     TRAJECTORY_TYPE_PATH_PULL_OVER
 };
 
+enum ParkingCommandMode
+{
+    PARKING_COMMAND_NONE,
+    PARKING_COMMAND_PARKING_IN,
+    PARKING_COMMAND_PARKING_OUT_LEFT,
+    PARKING_COMMAND_PARKING_OUT_RIGHT,
+    PARKING_COMMAND_PARKING_OUT_FRONT,
+    PARKING_COMMAND_PARKING_OUT_BACK,
+    PARKING_COMMAND_DIRECT_FORWARD,
+    PARKING_COMMAND_DIRECT_BACKWARD,
+    PARKING_COMMAND_PAUSE,
+    PARKING_COMMAND_BRAKE,
+    PARKING_COMMAND_FINISH
+};
+
 struct Header
 {
     uint64 seq;
@@ -148,6 +163,18 @@ struct ObstacleArray
     Header header;
     boolean is_valid;
     sequence<Obstacle> obstacles;
+};
+
+struct ParkingCommand
+{
+    Header header;
+    boolean is_valid;
+    ParkingCommandMode mode;
+    uint32 parking_seq;
+    double direct_distance_m;
+    double direct_speed_mps;
+    boolean reset_history;
+    string reason;
 };
 
 struct ParkingLot

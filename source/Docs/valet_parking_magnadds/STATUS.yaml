@@ -25,18 +25,20 @@ local_git:
 current_phase:
   id: Fast-2
   name: .so + typed DDS + localized valet parking algorithm sources
-  status: PASS_SELECTED_SLOT_MULTI_LOT_SELECT_X86_M57_STATIC_BLOCKED_BOARD
-  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-031 已完成轻量运行态复用、warm_start/trace_adjust 诊断、vehicle_lot_precheck、moving-localization-large、SelectedSlot degenerate-corners、many-obstacles 过载、far-obstacles 局部边界、obstacle-appears/obstacle-disappears 障碍物变化重规划、target-moves 目标位姿变化重规划和 parking-seq-changes path_id 变化重规划 smoke。NEXT-032 已复制当前 CMake 实际编译使用的 91 个最小 standalone 源码/头文件依赖到本地 algorithm 目录。NEXT-033 已完成两版 PathProvider 复用价值评估，并新增 multi-lot-seq-switch DDS smoke，验证同一条 SelectedSlot 内多个 ParkingLot 时 Adapter 会按 opt_parking_seq 选择对应车位，切换到 parking_seq=2 后触发 TARGET_UPDATE，稳定后回到 history=reused。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
+  status: PASS_STAGE_COMMAND_CONTROL_X86_M57_STATIC_BLOCKED_BOARD
+  description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、Adapter direct-forward/direct-backward/pause/brake/finish 轻量 Stage 控制分支、parking_command_mock_publisher 和 command smoke。当前仍使用临时 IDL 契约和简化 Topic，direct 分支仍是轻量直线轨迹，不是完整 OpenSpaceStraightPathProvider；仍未接完整 OpenSpacePathProvider 大类线程、完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '033'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/033_项目状态快照_SelectedSlot多车位选择DDS验证.md
+  id: '037'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/037_项目状态快照_轻量Stage控制输入DirectPauseFinish闭环.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-28
-  summary: 已完成 NEXT-033 SelectedSlot 多车位选择 DDS 验证：新增 DOC-006 评估两版已修 PathProvider 代码节省的算法剥离/类型替换/独立编译工作量，并说明 DDS Adapter、RuntimeContext、mock 输入输出和 smoke 验证仍必须在当前工程完成；selected_slot_mock_publisher 新增 multi-lot-seq-switch，每帧发布两个 ParkingLot 并按 opt_parking_seq 从 1 切到 2；Adapter PATH_PROVIDER 日志新增 parking_seq 证据字段；smoke 脚本新增多车位选择断言。x86 新场景、默认 valid、all-valid 辅助输入回归均通过；m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过，板端运行未验证。
+  summary: 已完成 NEXT-034 至 NEXT-037：新增 ParkingCommand IDL 与 generated typed API，Component 默认订阅 /parking/command 并缓存最新命令，Adapter 在普通泊车链路前接入 DIRECT_FORWARD/DIRECT_BACKWARD 轻量直线轨迹分支和 PAUSE/BRAKE/FINISH 非 estop 单点停止分支；新增 parking_command_mock_publisher，smoke 脚本支持 --command-mode 并等待 runner 收到 command 后再发布 SelectedSlot。x86 valid、all-valid 辅助输入、direct-forward、direct-backward、pause、brake、finish、invalid command 均通过；m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过，板端运行未验证。
   evidence:
+    - applications/source/Docs/valet_parking_magnadds/07_轻量Stage控制输入与034到037接入说明.md
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/037_项目状态快照_轻量Stage控制输入DirectPauseFinish闭环.md
     - applications/source/Docs/valet_parking_magnadds/06_两版PathProvider复用价值评估与接入切口.md
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/033_项目状态快照_SelectedSlot多车位选择DDS验证.md
     - applications/config/valet_parking_mvp_bom.yaml
@@ -54,9 +56,21 @@ last_successful_action:
     - applications/source/valet_parking/algorithm/parking_algorithm_standalone
     - applications/source/valet_parking_tools/aux_input_mock_publisher/main.cpp
     - applications/source/valet_parking_tools/aux_input_mock_publisher/CMakeLists.txt
+    - applications/source/valet_parking_tools/parking_command_mock_publisher/main.cpp
+    - applications/source/valet_parking_tools/parking_command_mock_publisher/CMakeLists.txt
     - applications/source/valet_parking_tools/selected_slot_mock_publisher/main.cpp
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
     - applications/source/valet_parking_tools/valet_parking_runner/main.cpp
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/smoke_latest/domain_222_20260728_190610_1179
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/smoke_latest/domain_223_20260728_190436_767
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/smoke_latest/domain_224_20260728_190450_909
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/smoke_latest/domain_225_20260728_190524_743
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/smoke_latest/domain_226_20260728_190537_870
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/smoke_latest/domain_227_20260728_190551_1012
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/smoke_latest/domain_228_20260728_190629_1338
+    - out/valet_parking_stage_command_037/valet_parking_mvp/x86/smoke_latest/domain_229_20260728_190647_1500
+    - out/valet_parking_stage_command_037/valet_parking_mvp/m57/lib/libvalet_parking.so
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/032_项目状态快照_泊车算法源码本地化.md
     - applications/source/Docs/valet_parking_magnadds/05_TempAPA原始流程复现差距对照表.md
     - applications/source/Docs/valet_parking_magnadds/decision_records/DR-005_原始流程复现策略_行为等价优先.md
@@ -116,6 +130,12 @@ runtime_status:
   x86_path_provider_target_update_smoke_test: PASS
   x86_path_provider_path_id_update_smoke_test: PASS
   x86_selected_slot_multi_lot_select_smoke_test: PASS
+  x86_parking_command_direct_forward_smoke_test: PASS
+  x86_parking_command_direct_backward_smoke_test: PASS
+  x86_parking_command_pause_smoke_test: PASS
+  x86_parking_command_brake_smoke_test: PASS
+  x86_parking_command_finish_smoke_test: PASS
+  x86_parking_command_invalid_clear_smoke_test: PASS
   algorithm_source_localization: PASS
   original_flow_gap_map: PASS
   path_provider_reuse_value_assessment: PASS
@@ -123,11 +143,11 @@ runtime_status:
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-033 新增 multi-lot-seq-switch 验证，同一条 SelectedSlot 内含两个 ParkingLot，前 3 组 opt_parking_seq=1，后 3 组 opt_parking_seq=2，runner 显示 input_count=2，PATH_PROVIDER 实际使用 parking_seq=1 后切到 parking_seq=2，并在切换时 history=generated、replan=TARGET_UPDATE、reason=target_update、generated_count=2，稳定后 history=reused、replan=NONE；默认 valid 回归在 domain_226 仍显示非 estop PlanningTrajectory、PATH_PROVIDER_PRECHECK ok、history=generated 后 history=reused；all-valid 辅助输入回归在 domain_227 显示 aux localization/chassis/obstacles 与 external_vehicle=true/external_obstacles=1、PATH_PROVIDER_PRECHECK ok、obstacle_segments=4。NEXT-032 已把当前 MVP 实际编译使用的 91 个 standalone 最小源码/头文件依赖本地化到 applications/source/valet_parking/algorithm/parking_algorithm_standalone。NEXT-031 的 parking-seq-changes、NEXT-030 的 target-moves、NEXT-029 的 obstacle-disappears、NEXT-028 的 obstacle-appears、NEXT-027 的 far-obstacles、NEXT-026 的 many-obstacles、NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-034 至 NEXT-037 新增 ParkingCommand 控制输入后，direct-forward/domain_223 输出 21 点 drive 短轨迹且不跑 ROI，direct-backward/domain_224 输出 21 点 reverse 短轨迹且不跑 ROI，pause/domain_225、brake/domain_226、finish/domain_227 输出非 estop 单点停止轨迹，finish 原因包含 MISSIONFINISHED，invalid/domain_228 清 command 后回到普通 ROI/PATH_PROVIDER 链路；默认 valid/domain_229 和 all-valid 辅助输入/domain_222 回归通过。NEXT-033 的 multi-lot-seq-switch、NEXT-031 的 parking-seq-changes、NEXT-030 的 target-moves、NEXT-029 的 obstacle-disappears、NEXT-028 的 obstacle-appears、NEXT-027 的 far-obstacles、NEXT-026 的 many-obstacles、NEXT-025 的 degenerate-corners 和 NEXT-024 的 moving-localization-large 负向 smoke 仍作为历史已验证边界。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: NEXT-034
-  description: 设计轻量 Stage 控制输入契约，先写字段映射与 IDL 草案，不立刻接完整 FunctionManager。目标是表达 PARKING_IN、PARKING_OUT、DIRECT_FORWARD、DIRECT_BACKWARD、PAUSE、BRAKE、FINISH 等原始 Stage 可观察语义，为 NEXT-035 接入 DIRECT_FORWARD/DIRECT_BACKWARD 直行分支做输入准备。仍不引入完整 Frame/DependencyInjector、线程管理、NLP smoother 或真实车端 Topic 协议，并保持 x86 smoke 与 m57 交叉编译通过。
+  id: NEXT-038
+  description: 评估当前轻量 direct branch 是否升级为完整 OpenSpaceStraightPathProvider/OPEN_SPACE_STRAIGHT_PATH 本地化接入；先做差距评估、输入输出契约表和可复用源码清单，不直接大搬完整 Stage/Frame/DependencyInjector。继续保持 ParkingCommand 临时 Topic 与真实车端 command 协议未对齐的边界说明，并保持 x86 smoke 与 m57 交叉编译通过。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -325,3 +345,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/033_项目状态快照_SelectedSlot多车位选择DDS验证.md
     phase: Fast-2
     status: PASS_SELECTED_SLOT_MULTI_LOT_SELECT_X86_M57_STATIC_BLOCKED_BOARD
+  - id: '037'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/037_项目状态快照_轻量Stage控制输入DirectPauseFinish闭环.md
+    phase: Fast-2
+    status: PASS_STAGE_COMMAND_CONTROL_X86_M57_STATIC_BLOCKED_BOARD

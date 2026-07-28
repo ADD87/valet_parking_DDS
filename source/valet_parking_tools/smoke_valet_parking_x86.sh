@@ -17,6 +17,16 @@ Options:
                        valid|empty|overflow|nan|degenerate-corners|
                        target-moves|parking-seq-changes|
                        multi-lot-seq-switch
+  --command-mode MODE ParkingCommand publisher mode. Default: none.
+                       none|parking-in|direct-forward|direct-backward|
+                       pause|brake|finish|invalid
+  --command-count N   ParkingCommand publish count. Default: 1.
+  --command-interval-ms N
+                       ParkingCommand publish interval. Default: 100.
+  --direct-distance M Direct branch distance in meters. Default: 3.0.
+  --direct-speed M    Direct branch speed in m/s. Default: 0.8.
+  --disable-command-topic
+                       Start runner without subscribing command topic.
   --with-aux-inputs   Publish localization/chassis/obstacle samples before SelectedSlot.
   --aux-mode MODE     Aux publisher mode. Default: all-valid.
                        all-valid|invalid-localization|nan-localization|
@@ -43,6 +53,12 @@ timeout_ms=20000
 count=3
 interval_ms=500
 slot_mode="valid"
+command_mode="none"
+command_count=1
+command_interval_ms=100
+direct_distance=3.0
+direct_speed=0.8
+disable_command_topic=0
 with_aux_inputs=0
 aux_mode="all-valid"
 aux_count=3
@@ -74,6 +90,30 @@ while [[ $# -gt 0 ]]; do
     --slot-mode)
       slot_mode="${2:-}"
       shift 2
+      ;;
+    --command-mode)
+      command_mode="${2:-}"
+      shift 2
+      ;;
+    --command-count)
+      command_count="${2:-}"
+      shift 2
+      ;;
+    --command-interval-ms)
+      command_interval_ms="${2:-}"
+      shift 2
+      ;;
+    --direct-distance)
+      direct_distance="${2:-}"
+      shift 2
+      ;;
+    --direct-speed)
+      direct_speed="${2:-}"
+      shift 2
+      ;;
+    --disable-command-topic)
+      disable_command_topic=1
+      shift
       ;;
     --with-aux-inputs)
       with_aux_inputs=1
@@ -108,8 +148,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 effective_count="${count}"
+effective_command_count="${command_count}"
+effective_command_interval_ms="${command_interval_ms}"
 effective_aux_count="${aux_count}"
 effective_aux_interval_ms="${aux_interval_ms}"
+if [[ "${command_mode}" != "none" ]]; then
+  if ((effective_command_count < 8)); then
+    effective_command_count=8
+  fi
+  if ((effective_command_interval_ms < 200)); then
+    effective_command_interval_ms=200
+  fi
+fi
 if [[ "${slot_mode}" == "target-moves" ||
       "${slot_mode}" == "parking-seq-changes" ||
       "${slot_mode}" == "multi-lot-seq-switch" ]]; then
@@ -134,6 +184,7 @@ fi
 runner="${run_root}/app/valet_parking_runner"
 subscriber="${run_root}/app/planning_trajectory_mock_subscriber"
 publisher="${run_root}/app/selected_slot_mock_publisher"
+command_publisher="${run_root}/app/parking_command_mock_publisher"
 aux_publisher="${run_root}/app/aux_input_mock_publisher"
 
 for binary in "${runner}" "${subscriber}" "${publisher}"; do
@@ -146,6 +197,10 @@ if [[ "${with_aux_inputs}" == "1" && ! -x "${aux_publisher}" ]]; then
   echo "Runtime binary is missing or not executable: ${aux_publisher}" >&2
   exit 1
 fi
+if [[ "${command_mode}" != "none" && ! -x "${command_publisher}" ]]; then
+  echo "Runtime binary is missing or not executable: ${command_publisher}" >&2
+  exit 1
+fi
 
 export LD_LIBRARY_PATH="${run_root}/lib:${LD_LIBRARY_PATH:-}"
 
@@ -154,17 +209,24 @@ mkdir -p "${log_dir}"
 runner_log="${log_dir}/runner.log"
 subscriber_log="${log_dir}/subscriber.log"
 publisher_log="${log_dir}/publisher.log"
+command_publisher_log="${log_dir}/command_publisher.log"
 aux_publisher_log="${log_dir}/aux_publisher.log"
+command_publisher_status=0
 aux_publisher_status=0
 : > "${runner_log}"
 : > "${subscriber_log}"
 : > "${publisher_log}"
+: > "${command_publisher_log}"
 : > "${aux_publisher_log}"
 
 runner_pid=""
 subscriber_pid=""
 aux_publisher_pid=""
+command_publisher_pid=""
 cleanup() {
+  if [[ -n "${command_publisher_pid:-}" ]]; then
+    kill "${command_publisher_pid}" 2>/dev/null || true
+  fi
   if [[ -n "${aux_publisher_pid:-}" ]]; then
     kill "${aux_publisher_pid}" 2>/dev/null || true
   fi
@@ -179,6 +241,9 @@ cleanup() {
   fi
   if [[ -n "${aux_publisher_pid:-}" ]]; then
     wait "${aux_publisher_pid}" 2>/dev/null || true
+  fi
+  if [[ -n "${command_publisher_pid:-}" ]]; then
+    wait "${command_publisher_pid}" 2>/dev/null || true
   fi
   if [[ -n "${runner_pid:-}" ]]; then
     wait "${runner_pid}" 2>/dev/null || true
@@ -200,6 +265,9 @@ wait_for_runner_log() {
 }
 
 runner_args=("--domain-id=${domain_id}")
+if [[ "${disable_command_topic}" == "1" ]]; then
+  runner_args+=("--disable-command-topic")
+fi
 if [[ "${disable_aux_input_topics}" == "1" ]]; then
   runner_args+=("--disable-aux-input-topics")
 fi
@@ -240,8 +308,55 @@ else
   sleep 2
 fi
 
+if [[ "${command_mode}" != "none" ]]; then
+  "${command_publisher}" --domain-id="${domain_id}" --mode="${command_mode}" \
+    --count="${effective_command_count}" \
+    --interval-ms="${effective_command_interval_ms}" \
+    --direct-distance="${direct_distance}" \
+    --direct-speed="${direct_speed}" \
+    --reason="smoke-${command_mode}" >"${command_publisher_log}" 2>&1 &
+  command_publisher_pid=$!
+
+  command_wait_pattern="command #[0-9]+ mode="
+  case "${command_mode}" in
+    direct-forward)
+      command_wait_pattern="command #[0-9]+ mode=DIRECT_FORWARD"
+      ;;
+    direct-backward)
+      command_wait_pattern="command #[0-9]+ mode=DIRECT_BACKWARD"
+      ;;
+    parking-in)
+      command_wait_pattern="command #[0-9]+ mode=PARKING_IN"
+      ;;
+    pause)
+      command_wait_pattern="command #[0-9]+ mode=PAUSE"
+      ;;
+    brake)
+      command_wait_pattern="command #[0-9]+ mode=BRAKE"
+      ;;
+    finish)
+      command_wait_pattern="command #[0-9]+ mode=FINISH"
+      ;;
+    invalid)
+      command_wait_pattern="command #[0-9]+ mode=NONE \\(cleared_command\\)"
+      ;;
+  esac
+  wait_for_runner_log "${command_wait_pattern}" 8 || true
+fi
+
 "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" --count="${effective_count}" \
   --interval-ms="${interval_ms}" >"${publisher_log}" 2>&1
+
+if [[ -n "${command_publisher_pid:-}" ]]; then
+  set +e
+  wait "${command_publisher_pid}"
+  command_publisher_status=$?
+  set -e
+  command_publisher_pid=""
+  if [[ "${command_publisher_status}" != "0" ]]; then
+    echo "[valet_parking_smoke] command publisher exited with ${command_publisher_status}" >&2
+  fi
+fi
 
 if [[ -n "${aux_publisher_pid:-}" ]]; then
   set +e
@@ -307,7 +422,11 @@ echo "[valet_parking_smoke] run_root=${run_root}"
 echo "[valet_parking_smoke] logs=${log_dir}"
 echo "[valet_parking_smoke] subscriber_status=${subscriber_status}"
 echo "[valet_parking_smoke] runner status lines:"
-grep -E "aux localization|aux chassis|aux obstacles|SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample" "${runner_log}" | tail -n 80 || true
+grep -E "command #|command rejected|STAGE_CONTROL|SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample|aux localization|aux chassis|aux obstacles" "${runner_log}" | tail -n 100 || true
+if [[ "${command_mode}" != "none" ]]; then
+  echo "[valet_parking_smoke] command publisher:"
+  cat "${command_publisher_log}"
+fi
 if [[ "${with_aux_inputs}" == "1" ]]; then
   echo "[valet_parking_smoke] aux publisher:"
   cat "${aux_publisher_log}"
@@ -318,6 +437,9 @@ echo "[valet_parking_smoke] publisher:"
 cat "${publisher_log}"
 
 validation_status="${subscriber_status}"
+if [[ "${command_publisher_status}" != "0" ]]; then
+  validation_status="${command_publisher_status}"
+fi
 if [[ "${aux_publisher_status}" != "0" ]]; then
   validation_status="${aux_publisher_status}"
 fi
@@ -344,6 +466,24 @@ require_publisher_log() {
   local pattern="$1"
   local message="$2"
   if ! grep -Eq "${pattern}" "${publisher_log}"; then
+    echo "[valet_parking_smoke] ${message}" >&2
+    validation_status=8
+  fi
+}
+
+require_command_log() {
+  local pattern="$1"
+  local message="$2"
+  if ! grep -Eq "${pattern}" "${command_publisher_log}"; then
+    echo "[valet_parking_smoke] ${message}" >&2
+    validation_status=8
+  fi
+}
+
+reject_runner_log() {
+  local pattern="$1"
+  local message="$2"
+  if grep -Eq "${pattern}" "${runner_log}"; then
     echo "[valet_parking_smoke] ${message}" >&2
     validation_status=8
   fi
@@ -409,6 +549,105 @@ case "${slot_mode}" in
     validation_status=8
     ;;
 esac
+
+if [[ "${command_mode}" != "none" ]]; then
+  case "${command_mode}" in
+    parking-in)
+      require_command_log "enum=PARKING_IN" \
+        "missing PARKING_IN command publisher evidence"
+      require_runner_log "command #[0-9]+ mode=PARKING_IN" \
+        "missing PARKING_IN command consumption in runner log"
+      require_subscriber_log "is_estop=false" \
+        "missing non-estop trajectory with PARKING_IN command mode"
+      ;;
+    direct-forward)
+      require_command_log "enum=DIRECT_FORWARD" \
+        "missing DIRECT_FORWARD command publisher evidence"
+      require_runner_log "command #[0-9]+ mode=DIRECT_FORWARD" \
+        "missing DIRECT_FORWARD command consumption in runner log"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
+        "missing DIRECT_FORWARD stage-control trajectory reason"
+      reject_runner_log "ROI_DECIDER ok" \
+        "DIRECT_FORWARD should not run ROI_DECIDER in this lightweight branch"
+      require_subscriber_log "is_estop=false" \
+        "missing non-estop trajectory for DIRECT_FORWARD command mode"
+      require_subscriber_log "reason: replan=.*DIRECT_FORWARD" \
+        "missing DIRECT_FORWARD reason in subscriber output"
+      ;;
+    direct-backward)
+      require_command_log "enum=DIRECT_BACKWARD" \
+        "missing DIRECT_BACKWARD command publisher evidence"
+      require_runner_log "command #[0-9]+ mode=DIRECT_BACKWARD" \
+        "missing DIRECT_BACKWARD command consumption in runner log"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
+        "missing DIRECT_BACKWARD stage-control trajectory reason"
+      reject_runner_log "ROI_DECIDER ok" \
+        "DIRECT_BACKWARD should not run ROI_DECIDER in this lightweight branch"
+      require_subscriber_log "gear=2" \
+        "missing reverse gear in DIRECT_BACKWARD subscriber output"
+      require_subscriber_log "is_estop=false" \
+        "missing non-estop trajectory for DIRECT_BACKWARD command mode"
+      require_subscriber_log "reason: replan=.*DIRECT_BACKWARD" \
+        "missing DIRECT_BACKWARD reason in subscriber output"
+      ;;
+    pause)
+      require_command_log "enum=PAUSE" \
+        "missing PAUSE command publisher evidence"
+      require_runner_log "command #[0-9]+ mode=PAUSE" \
+        "missing PAUSE command consumption in runner log"
+      require_runner_log "STAGE_CONTROL PAUSE.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
+        "missing PAUSE stage-control reason"
+      reject_runner_log "ROI_DECIDER ok" \
+        "PAUSE should not run ROI_DECIDER"
+      require_subscriber_log "points=1" \
+        "missing one-point stop trajectory for PAUSE command mode"
+      require_subscriber_log "is_estop=false" \
+        "missing non-estop stop trajectory for PAUSE command mode"
+      ;;
+    brake)
+      require_command_log "enum=BRAKE" \
+        "missing BRAKE command publisher evidence"
+      require_runner_log "command #[0-9]+ mode=BRAKE" \
+        "missing BRAKE command consumption in runner log"
+      require_runner_log "STAGE_CONTROL BRAKE.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
+        "missing BRAKE stage-control reason"
+      reject_runner_log "ROI_DECIDER ok" \
+        "BRAKE should not run ROI_DECIDER"
+      require_subscriber_log "points=1" \
+        "missing one-point stop trajectory for BRAKE command mode"
+      require_subscriber_log "is_estop=false" \
+        "missing non-estop stop trajectory for BRAKE command mode"
+      ;;
+    finish)
+      require_command_log "enum=FINISH" \
+        "missing FINISH command publisher evidence"
+      require_runner_log "command #[0-9]+ mode=FINISH" \
+        "missing FINISH command consumption in runner log"
+      require_runner_log "STAGE_CONTROL FINISH.*MISSIONFINISHED.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
+        "missing FINISH/MISSIONFINISHED stage-control reason"
+      reject_runner_log "ROI_DECIDER ok" \
+        "FINISH should not run ROI_DECIDER"
+      require_subscriber_log "points=1" \
+        "missing one-point stop trajectory for FINISH command mode"
+      require_subscriber_log "is_estop=false" \
+        "missing non-estop stop trajectory for FINISH command mode"
+      require_subscriber_log "reason: replan=.*MISSIONFINISHED" \
+        "missing MISSIONFINISHED reason in subscriber output"
+      ;;
+    invalid)
+      require_command_log "is_valid=false" \
+        "missing invalid command publisher evidence"
+      require_runner_log "command #[0-9]+ mode=NONE \\(cleared_command\\)" \
+        "missing invalid command clearing in runner log"
+      require_subscriber_log "is_estop=false" \
+        "missing normal non-estop trajectory after invalid command is cleared"
+      ;;
+    *)
+      echo "[valet_parking_smoke] unknown command mode for validation: ${command_mode}" >&2
+      validation_status=8
+      ;;
+  esac
+fi
 
 if [[ "${with_aux_inputs}" == "1" ]]; then
   require_log() {

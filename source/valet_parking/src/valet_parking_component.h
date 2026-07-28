@@ -14,6 +14,8 @@
 
 class PlanningTrajectory;
 class PlanningTrajectoryTopicDataType;
+class ParkingCommand;
+class ParkingCommandTopicDataType;
 class SelectedSlot;
 class SelectedSlotTopicDataType;
 class LocalizationEstimateTopicDataType;
@@ -43,6 +45,8 @@ class ValetParkingComponent final {
  private:
     bool InitDds();
     void CleanupDds() noexcept;
+    bool DrainCommandSamples();
+    bool HandleCommandSample();
     bool DrainAuxInputSamples();
     bool HandleLocalizationSample();
     bool HandleChassisSample();
@@ -61,9 +65,11 @@ class ValetParkingComponent final {
   ValetParkingStageParkingAdapter stage_parking_adapter_;
     std::string input_topic_name_;
     std::string output_topic_name_;
+    std::string command_topic_name_;
     std::string localization_topic_name_;
     std::string chassis_topic_name_;
     std::string obstacle_topic_name_;
+    bool command_topic_enabled_{false};
     bool aux_input_topics_enabled_{false};
   std::atomic<bool> running_{false};
   std::mutex mutex_;
@@ -71,6 +77,7 @@ class ValetParkingComponent final {
   std::thread worker_;
     std::string last_error_;
     uint64_t handled_samples_{0U};
+    uint64_t handled_command_samples_{0U};
     uint64_t handled_localization_samples_{0U};
     uint64_t handled_chassis_samples_{0U};
     uint64_t handled_obstacle_samples_{0U};
@@ -81,9 +88,11 @@ class ValetParkingComponent final {
       valet_parking_vehicle_state_t state{};
     };
     AuxVehicleInputCache aux_vehicle_input_{};
+    std::unique_ptr<ParkingCommand> latest_parking_command_;
 
     std::unique_ptr<SelectedSlotTopicDataType> selected_slot_topic_type_;
     std::unique_ptr<PlanningTrajectoryTopicDataType> planning_trajectory_topic_type_;
+    std::unique_ptr<ParkingCommandTopicDataType> command_topic_type_;
     std::unique_ptr<LocalizationEstimateTopicDataType> localization_topic_type_;
     std::unique_ptr<ChassisStateTopicDataType> chassis_topic_type_;
     std::unique_ptr<ObstacleArrayTopicDataType> obstacle_topic_type_;
@@ -91,12 +100,14 @@ class ValetParkingComponent final {
     magna::dds::DomainParticipant* participant_{nullptr};
     magna::dds::Topic* input_topic_{nullptr};
     magna::dds::Topic* output_topic_{nullptr};
+    magna::dds::Topic* command_topic_{nullptr};
     magna::dds::Topic* localization_topic_{nullptr};
     magna::dds::Topic* chassis_topic_{nullptr};
     magna::dds::Topic* obstacle_topic_{nullptr};
     magna::dds::Subscriber* subscriber_{nullptr};
     magna::dds::Publisher* publisher_{nullptr};
     magna::dds::DataReader* input_reader_{nullptr};
+    magna::dds::DataReader* command_reader_{nullptr};
     magna::dds::DataReader* localization_reader_{nullptr};
     magna::dds::DataReader* chassis_reader_{nullptr};
     magna::dds::DataReader* obstacle_reader_{nullptr};

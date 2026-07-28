@@ -7,6 +7,7 @@
 #include <string>
 
 class PlanningTrajectory;
+class ParkingCommand;
 class SelectedSlot;
 
 namespace valet_parking {
@@ -17,6 +18,7 @@ class ValetParkingStageParkingAdapter final {
   ~ValetParkingStageParkingAdapter();
 
   bool Process(const SelectedSlot& input_sample,
+               const ParkingCommand* command_sample,
                PlanningTrajectory* output_sample,
                std::string* status_reason);
 

@@ -2371,6 +2371,228 @@ PlanningTrajectory BuildEstopTrajectory(const valet_parking_config_t& config,
   return BuildTrajectoryToTarget(config, metadata, stop_pose, true, reason);
 }
 
+std::string ParkingCommandModeToString(ParkingCommandMode mode) {
+  switch (mode) {
+    case ParkingCommandMode::PARKING_COMMAND_NONE:
+      return "NONE";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_IN:
+      return "PARKING_IN";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_LEFT:
+      return "PARKING_OUT_LEFT";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_RIGHT:
+      return "PARKING_OUT_RIGHT";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_FRONT:
+      return "PARKING_OUT_FRONT";
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_BACK:
+      return "PARKING_OUT_BACK";
+    case ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD:
+      return "DIRECT_FORWARD";
+    case ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD:
+      return "DIRECT_BACKWARD";
+    case ParkingCommandMode::PARKING_COMMAND_PAUSE:
+      return "PAUSE";
+    case ParkingCommandMode::PARKING_COMMAND_BRAKE:
+      return "BRAKE";
+    case ParkingCommandMode::PARKING_COMMAND_FINISH:
+      return "FINISH";
+  }
+  return "UNKNOWN";
+}
+
+std::string BuildStageControlReason(const ParkingCommand& command,
+                                    const std::string& action) {
+  std::ostringstream stream;
+  stream << "STAGE_CONTROL " << action;
+  if (command.parking_seq() != 0U) {
+    stream << ", parking_seq=" << command.parking_seq();
+  }
+  if (!command.reason().empty()) {
+    stream << ", command_reason=" << command.reason();
+  }
+  return stream.str();
+}
+
+double SelectDirectDistance(double distance_m) {
+  constexpr double kDefaultDirectDistanceM = 3.0;
+  constexpr double kMaxDirectDistanceM = 20.0;
+  if (!std::isfinite(distance_m) || distance_m <= 0.0) {
+    return kDefaultDirectDistanceM;
+  }
+  return std::min(distance_m, kMaxDirectDistanceM);
+}
+
+double SelectDirectSpeed(double speed_mps) {
+  constexpr double kDefaultDirectSpeedMps = 0.8;
+  constexpr double kMaxDirectSpeedMps = 3.0;
+  if (!std::isfinite(speed_mps) || speed_mps <= 0.0) {
+    return kDefaultDirectSpeedMps;
+  }
+  return std::min(speed_mps, kMaxDirectSpeedMps);
+}
+
+PlanningTrajectory BuildStageControlStopTrajectory(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const RuntimeVehicleInput& vehicle_input,
+    const std::string& reason,
+    ::GearPosition gear) {
+  const TL::common::PathPoint start_point =
+      BuildStartPathPoint(config, vehicle_input);
+
+  PathPoint path_point;
+  path_point.x(start_point.x);
+  path_point.y(start_point.y);
+  path_point.z(start_point.z);
+  path_point.theta(NormalizeAngle(start_point.theta));
+  path_point.kappa(0.0);
+  path_point.s(0.0);
+  path_point.l(0.0);
+  path_point.dkappa(0.0);
+  path_point.ddkappa(0.0);
+  path_point.lane_id("valet_parking_stage_control_stop");
+  path_point.x_derivative(std::cos(start_point.theta));
+  path_point.y_derivative(std::sin(start_point.theta));
+
+  GaussianInfo gaussian_info;
+  gaussian_info.sigma_x(0.3);
+  gaussian_info.sigma_y(0.25);
+  gaussian_info.correlation(0.0);
+  gaussian_info.area_probability(0.95);
+  gaussian_info.ellipse_a(0.5);
+  gaussian_info.ellipse_b(0.25);
+  gaussian_info.theta_a(start_point.theta);
+
+  TrajectoryPoint trajectory_point;
+  trajectory_point.path_point(std::move(path_point));
+  trajectory_point.v(0.0);
+  trajectory_point.a(0.0);
+  trajectory_point.relative_time(0.0);
+  trajectory_point.da(0.0);
+  trajectory_point.steer(0.0);
+  trajectory_point.gaussian_info(std::move(gaussian_info));
+
+  std::vector<TrajectoryPoint> points;
+  points.push_back(std::move(trajectory_point));
+
+  const uint64_t publish_stamp_ms = NowMilliseconds();
+  const uint64_t data_stamp_ms = metadata.data_stamp_ms == 0U
+      ? publish_stamp_ms
+      : metadata.data_stamp_ms;
+
+  EStop estop;
+  estop.is_estop(false);
+  estop.reason(reason);
+
+  PlanningTrajectory output;
+  output.header(MakeHeader(metadata.seq, metadata.frame_id, publish_stamp_ms,
+                           data_stamp_ms));
+  output.total_path_length(0.0);
+  output.total_path_time(0.0);
+  output.trajectory_point(std::move(points));
+  output.is_replan(false);
+  output.replan_type(0U);
+  output.replan_reason(reason);
+  output.longitudinal_diff(0.0);
+  output.lateral_diff(0.0);
+  output.gear(gear);
+  output.estop(std::move(estop));
+  output.trajectory_type(PlanningTrajectoryType::TRAJECTORY_TYPE_SHORT_PATH);
+  return output;
+}
+
+PlanningTrajectory BuildDirectTrajectory(
+    const valet_parking_config_t& config,
+    const InputMetadata& metadata,
+    const RuntimeVehicleInput& vehicle_input,
+    const ParkingCommand& command,
+    bool forward,
+    const std::string& reason) {
+  const TL::common::PathPoint start_point =
+      BuildStartPathPoint(config, vehicle_input);
+  const double distance_m = SelectDirectDistance(command.direct_distance_m());
+  const double speed_mps = SelectDirectSpeed(command.direct_speed_mps());
+  const double direction = forward ? 1.0 : -1.0;
+  const double total_path_time = distance_m / speed_mps;
+  const int point_count =
+      std::max(2, std::min(kTrajectoryPointCount,
+                           static_cast<int>(config.max_trajectory_points)));
+
+  std::vector<TrajectoryPoint> points;
+  points.reserve(static_cast<std::size_t>(point_count));
+
+  const double heading = NormalizeAngle(start_point.theta);
+  const double cos_heading = std::cos(heading);
+  const double sin_heading = std::sin(heading);
+  for (int i = 0; i < point_count; ++i) {
+    const double ratio = static_cast<double>(i) /
+                         static_cast<double>(point_count - 1);
+    const double signed_s = direction * distance_m * ratio;
+
+    PathPoint path_point;
+    path_point.x(start_point.x + signed_s * cos_heading);
+    path_point.y(start_point.y + signed_s * sin_heading);
+    path_point.z(start_point.z);
+    path_point.theta(heading);
+    path_point.kappa(0.0);
+    path_point.s(distance_m * ratio);
+    path_point.l(0.0);
+    path_point.dkappa(0.0);
+    path_point.ddkappa(0.0);
+    path_point.lane_id("valet_parking_direct_branch");
+    path_point.x_derivative(cos_heading);
+    path_point.y_derivative(sin_heading);
+
+    GaussianInfo gaussian_info;
+    gaussian_info.sigma_x(0.3);
+    gaussian_info.sigma_y(0.25);
+    gaussian_info.correlation(0.0);
+    gaussian_info.area_probability(0.95);
+    gaussian_info.ellipse_a(0.5);
+    gaussian_info.ellipse_b(0.25);
+    gaussian_info.theta_a(heading);
+
+    TrajectoryPoint trajectory_point;
+    trajectory_point.path_point(std::move(path_point));
+    trajectory_point.v(speed_mps);
+    trajectory_point.a(0.0);
+    trajectory_point.relative_time(total_path_time * ratio);
+    trajectory_point.da(0.0);
+    trajectory_point.steer(0.0);
+    trajectory_point.gaussian_info(std::move(gaussian_info));
+    points.push_back(std::move(trajectory_point));
+  }
+
+  const uint64_t publish_stamp_ms = NowMilliseconds();
+  const uint64_t data_stamp_ms = metadata.data_stamp_ms == 0U
+      ? publish_stamp_ms
+      : metadata.data_stamp_ms;
+  const TrajectoryPoint& first = points.front();
+  const TrajectoryPoint& last = points.back();
+  const double dx = last.path_point().x() - first.path_point().x();
+  const double dy = last.path_point().y() - first.path_point().y();
+
+  EStop estop;
+  estop.is_estop(false);
+  estop.reason(reason);
+
+  PlanningTrajectory output;
+  output.header(MakeHeader(metadata.seq, metadata.frame_id, publish_stamp_ms,
+                           data_stamp_ms));
+  output.total_path_length(distance_m);
+  output.total_path_time(total_path_time);
+  output.trajectory_point(std::move(points));
+  output.is_replan(false);
+  output.replan_type(0U);
+  output.replan_reason(reason);
+  output.longitudinal_diff(dx);
+  output.lateral_diff(dy);
+  output.gear(forward ? ::GearPosition::GEAR_DRIVE
+                      : ::GearPosition::GEAR_REVERSE);
+  output.estop(std::move(estop));
+  output.trajectory_type(PlanningTrajectoryType::TRAJECTORY_TYPE_SHORT_PATH);
+  return output;
+}
+
 PlanningTrajectory BuildTrajectoryFromPathProvider(
     const valet_parking_config_t& config,
     const InputMetadata& metadata,
@@ -2705,6 +2927,7 @@ int ValetParkingStageParkingAdapter::ClearObstacles() {
 }
 
 bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
+                                               const ParkingCommand* command_sample,
                                                PlanningTrajectory* output_sample,
                                                std::string* status_reason) {
   if (output_sample == nullptr || status_reason == nullptr) {
@@ -2717,6 +2940,66 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   }
 
   InputMetadata metadata = BuildMetadata(input_sample);
+  if (command_sample != nullptr && command_sample->is_valid()) {
+    const ParkingCommandMode command_mode = command_sample->mode();
+    const std::string command_mode_text =
+        ParkingCommandModeToString(command_mode);
+    if (command_sample->reset_history()) {
+      runtime_->ResetPlanningState();
+    }
+
+    if (command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD ||
+        command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD) {
+      const bool forward =
+          command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD;
+      std::ostringstream stream;
+      stream << BuildStageControlReason(*command_sample, command_mode_text)
+             << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
+             << ", direct_distance="
+             << std::fixed << std::setprecision(3)
+             << SelectDirectDistance(command_sample->direct_distance_m())
+             << ", direct_speed="
+             << SelectDirectSpeed(command_sample->direct_speed_mps());
+      metadata.status_reason = stream.str();
+      *status_reason = metadata.status_reason;
+      *output_sample = BuildDirectTrajectory(
+          config_, metadata, runtime_->vehicle_input, *command_sample,
+          forward, metadata.status_reason);
+      return true;
+    }
+
+    if (command_mode == ParkingCommandMode::PARKING_COMMAND_PAUSE ||
+        command_mode == ParkingCommandMode::PARKING_COMMAND_BRAKE ||
+        command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
+      std::ostringstream stream;
+      stream << BuildStageControlReason(*command_sample, command_mode_text);
+      if (command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
+        stream << ", MISSIONFINISHED";
+      }
+      stream << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION";
+      metadata.status_reason = stream.str();
+      *status_reason = metadata.status_reason;
+      *output_sample = BuildStageControlStopTrajectory(
+          config_, metadata, runtime_->vehicle_input, metadata.status_reason,
+          ::GearPosition::GEAR_PARKING);
+      return true;
+    }
+
+    if (command_mode == ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_LEFT ||
+        command_mode == ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_RIGHT ||
+        command_mode == ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_FRONT ||
+        command_mode == ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_BACK) {
+      metadata.status_reason =
+          BuildStageControlReason(*command_sample, command_mode_text) +
+          ", unsupported_in_mvp, skip=ROI_PATH_PROVIDER_PATH_PARTITION";
+      *status_reason = metadata.status_reason;
+      *output_sample = BuildStageControlStopTrajectory(
+          config_, metadata, runtime_->vehicle_input, metadata.status_reason,
+          ::GearPosition::GEAR_PARKING);
+      return true;
+    }
+  }
+
   if (!input_sample.is_valid()) {
     runtime_->ResetPlanningState();
     metadata.status_reason = "selected_slot.is_valid is false";

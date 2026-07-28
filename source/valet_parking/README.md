@@ -4,6 +4,7 @@
 
 - 目标产物：`libvalet_parking.so`
 - 输入：订阅 typed DDS Topic `/selected_slot`
+- Stage 控制输入：默认订阅 typed DDS Topic `/parking/command`
 - 输出：发布 typed DDS Topic `/planning/trajectory`
 - 可选辅助输入：默认订阅临时 typed DDS Topic `/localization/estimate`、`/chassis/state`、`/perception/obstacles`
 - 当前主链路：`SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory`
@@ -21,6 +22,7 @@
 - NEXT-031 后，新增 SelectedSlot `parking-seq-changes` smoke，验证目标位姿基本不变但 `parking_seq/path_id` 变化时，PATH_PROVIDER 也必须 `replan=TARGET_UPDATE` 并重新生成路径；path_id 稳定后应回到 `history=reused, replan=NONE`。
 - NEXT-032 后，泊车算法源码已本地化到 `source/valet_parking/algorithm/parking_algorithm_standalone`，当前 MVP 构建不再依赖外部 `E:\APA\DDS\parking_algorithm_standalone` 绝对路径。
 - NEXT-033 后，新增 SelectedSlot `multi-lot-seq-switch` smoke，验证同一条 DDS 输入中包含多个 `ParkingLot` 时，Adapter 会按 `opt_parking_seq` 选择对应车位；切到 `parking_seq=2` 后 PATH_PROVIDER 必须 `replan=TARGET_UPDATE`，稳定后回到 `history=reused`。
+- NEXT-034 到 NEXT-037 后，新增 `ParkingCommand` Stage 控制输入、`parking_command_mock_publisher` 和 command smoke；`DIRECT_FORWARD/DIRECT_BACKWARD` 会先走轻量直线分支并跳过 ROI/PATH_PROVIDER/PATH_PARTITION，`PAUSE/BRAKE/FINISH` 会输出非 estop 的单点停止轨迹。
 
 ## 当前算法状态
 
@@ -32,6 +34,7 @@
 - `SPEED_OPTIMIZER`：使用 standalone 中已独立化的 `OpenSpaceSpeedOptimizer::Execute` 为 `chosen_partitioned_path` 生成速度和时间采样。
 - `RuntimeContext`：`ValetParkingStageParkingAdapter` 内部复用 `PATH_PARTITION` 和 `SPEED_OPTIMIZER` 对象，保存上一帧发布档位、speed collision/replan 状态和 last frame 时间信息。
 - `PathProviderRuntimeState`：`RuntimeContext` 内部保存上一帧 PATH_PROVIDER 输出、目标点、路径 id、障碍物签名和复用计数；runner 状态日志会显示 `history=generated|reused` 与 `replan=...`。
+- `ParkingCommand` 轻量 Stage 控制输入：Component 默认订阅 `/parking/command`，缓存最新 command；Adapter 在普通主链路前处理 `DIRECT_FORWARD/DIRECT_BACKWARD/PAUSE/BRAKE/FINISH`，并在输出原因中写入 `STAGE_CONTROL ...`。
 - 外部输入边界：C API 已提供 `vehicle_state` 与 `obstacles` 的 update/clear 入口；未调用时继续使用 fake vehicle 和空障碍物。
 - DDS 辅助输入 reader：`ValetParkingComponent` 已默认订阅临时 `LocalizationEstimate`、`ChassisState`、`ObstacleArray` typed Topic，并把样本转入外部输入边界。
 - 辅助输入边界硬化：invalid/nan localization 会清理外部车辆状态；invalid chassis 会清理速度、加速度和档位；invalid obstacle array 或非法障碍物几何会清空外部障碍物；chassis-only 不会误置 `external_vehicle=true`。
@@ -49,7 +52,9 @@
 - 完整 `OpenSpacePathProvider` 的线程管理、完整 PreCheck、完整 path strategy、完整 warm start/splice path。
 - NLP smoother。
 - 完整原车 `Frame/DependencyInjector` history。
+- 完整 `FunctionManager` 和完整 `OpenSpaceStraightPathProvider`。
 - 真实车端定位/底盘/障碍物 Topic 契约对齐。
+- 真实车端 command Topic 契约对齐。
 - 真实车端辅助输入的异常语义、单位和坐标系对齐。
 
 ## 外部输入 C API
@@ -105,6 +110,59 @@ valet_parking_runner --disable-aux-input-topics
 - `LocalizationEstimate` 为 invalid 或含 NaN/Inf 时会清理外部车辆状态。
 - `ChassisState` 为 invalid 或含 NaN/Inf 时会清理底盘补充状态。
 - `ObstacleArray` 为 invalid、或其中障碍物尺寸/坐标非法时会清空外部障碍物。
+
+## DDS Stage 控制 Topic
+
+当前 IDL 新增了临时控制输入类型：
+
+- `ParkingCommand`：表达 Stage 控制命令，字段包含 `mode`、`parking_seq`、`direct_distance_m`、`direct_speed_mps`、`reset_history` 和 `reason`。
+
+runner 默认订阅：
+
+```text
+/parking/command
+```
+
+可通过参数改名或关闭：
+
+```bash
+valet_parking_runner --command-topic=/your/parking/command
+valet_parking_runner --disable-command-topic
+```
+
+当前支持的轻量行为：
+
+- `PARKING_COMMAND_DIRECT_FORWARD`：生成前进直线短轨迹，输出原因包含 `STAGE_CONTROL DIRECT_FORWARD, skip=ROI_PATH_PROVIDER_PATH_PARTITION`。
+- `PARKING_COMMAND_DIRECT_BACKWARD`：生成倒车直线短轨迹，输出档位为 reverse，原因包含 `STAGE_CONTROL DIRECT_BACKWARD, skip=ROI_PATH_PROVIDER_PATH_PARTITION`。
+- `PARKING_COMMAND_PAUSE`：输出非 estop 的单点停止轨迹。
+- `PARKING_COMMAND_BRAKE`：输出非 estop 的单点停止轨迹。
+- `PARKING_COMMAND_FINISH`：输出非 estop 的单点停止轨迹，原因包含 `MISSIONFINISHED`。
+- `PARKING_COMMAND_PARKING_IN` 或无命令：继续普通 `SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER` 链路。
+
+本阶段新增的测试工具：
+
+```bash
+parking_command_mock_publisher --domain-id=230 --mode=direct-forward
+parking_command_mock_publisher --domain-id=231 --mode=direct-backward
+parking_command_mock_publisher --domain-id=232 --mode=pause
+parking_command_mock_publisher --domain-id=233 --mode=brake
+parking_command_mock_publisher --domain-id=234 --mode=finish
+```
+
+smoke 示例：
+
+```bash
+bash applications/source/valet_parking_tools/smoke_valet_parking_x86.sh \
+  --run-root /mnt/e/APA/DDS/feature_integration/feature_integration_workspace/out/valet_parking_stage_command_037/valet_parking_mvp/x86 \
+  --domain-id 230 \
+  --command-mode direct-forward
+```
+
+重要边界：
+
+- 当前 command Topic 仍是 MVP 临时契约，不代表真实车端协议已经对齐。
+- direct 分支是轻量直线轨迹，不是完整原车 `OpenSpaceStraightPathProvider`。
+- parking-out 模式当前只做安全停止并标记 `unsupported_in_mvp`。
 
 ## WSL 快捷编译
 
@@ -332,10 +390,17 @@ PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds[0] local_start
 
 ## 最近验证
 
-NEXT-033 多车位 `opt_parking_seq` DDS 验证后，已验证：
+NEXT-037 轻量 Stage 控制输入验证后，已验证：
 
 - x86：生成 x86-64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1`。
 - m57：生成 ARM aarch64 `libvalet_parking.so`，链接 `libmagna-dds-core.so.1` 和 `libmagna-dds-impl.so`。
+- x86 valid 回归：domain_229 默认 mock `SelectedSlot` 输入后仍输出非 estop `PlanningTrajectory`，并保持 `PATH_PROVIDER_PRECHECK ok`、`history=generated` 后 `history=reused`。
+- x86 all-valid 辅助输入回归：domain_222 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态保持 `external_vehicle=true`、`external_obstacles=1`，并输出非 estop 轨迹。
+- x86 `direct-forward` command smoke：domain_223 runner 先收到 `mode=DIRECT_FORWARD`，随后输出 21 点短轨迹，subscriber 显示 `gear=1`、`trajectory_type=5`、`is_estop=false`，日志中不出现 `ROI_DECIDER ok`。
+- x86 `direct-backward` command smoke：domain_224 runner 先收到 `mode=DIRECT_BACKWARD`，随后输出 21 点短轨迹，subscriber 显示 `gear=2`、`trajectory_type=5`、`is_estop=false`，日志中不出现 `ROI_DECIDER ok`。
+- x86 `pause`/`brake`/`finish` command smoke：domain_225/226/227 均输出 1 点非 estop 停止轨迹；`finish` 原因包含 `MISSIONFINISHED`。
+- x86 invalid command smoke：domain_228 runner 显示 `mode=NONE (cleared_command)`，随后回到普通 ROI/PATH_PROVIDER 链路并输出非 estop 轨迹。
+- 调试边界：当前环境 `domain-id >= 231` 会 `failed to create DomainParticipant`；本机 smoke 应串行执行，command publisher 需要持续发布并等待 runner 收到命令后再发 `SelectedSlot`。
 - x86 多车位选择 smoke：domain_225 `multi-lot-seq-switch` 每帧发布两个 `ParkingLot`；前 3 组选择 `parking_seq=1`，后 3 组选择 `parking_seq=2`；runner 显示 `input_count=2`，切到 `parking_seq=2` 后 `history=generated, replan=TARGET_UPDATE, reason=target_update, generated_count=2`，稳定后 `history=reused, replan=NONE`，subscriber 收到 `is_estop=false`。
 - x86 默认 valid 回归：domain_226 默认 mock `SelectedSlot` 输入后仍输出非 estop `PlanningTrajectory`，并保持 `PATH_PROVIDER_PRECHECK ok`、`history=generated` 后 `history=reused`。
 - x86 all-valid 辅助输入回归：domain_227 显示 `aux localization`、`aux chassis`、`aux obstacles`，规划状态保持 `external_vehicle=true`、`external_obstacles=1`，并输出非 estop 轨迹。

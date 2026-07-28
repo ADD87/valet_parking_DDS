@@ -4,5 +4,6 @@ software_product_bom:
     - valet_parking
     - valet_parking_runner
     - aux_input_mock_publisher
+    - parking_command_mock_publisher
     - selected_slot_mock_publisher
     - planning_trajectory_mock_subscriber

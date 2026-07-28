@@ -4,8 +4,8 @@
 * All rights reserved
 **************************************************************/
 
-#ifndef VALET_PARKING_TOPICSTOPICDATATYPE_00ddae822629258306247f3b3b5f9ac8_H
-#define VALET_PARKING_TOPICSTOPICDATATYPE_00ddae822629258306247f3b3b5f9ac8_H
+#ifndef VALET_PARKING_TOPICSTOPICDATATYPE_35e2de1fdefcdc5c0930a3f5d111d289_H
+#define VALET_PARKING_TOPICSTOPICDATATYPE_35e2de1fdefcdc5c0930a3f5d111d289_H
 
 #include "magnadds/MagnaDDS.h"
 
@@ -199,6 +199,29 @@ public:
 };
 
 /**
+* @class ParkingCommandTopicDataType
+* @brief A class used as the topic during data exchange.
+* @note
+*/
+
+class ParkingCommandTopicDataType : public magna::dds::TopicDataType
+{
+public:
+	using InstanceHandle_t = magna::dds::InstanceHandle_t;
+
+	ParkingCommandTopicDataType();
+	virtual ~ParkingCommandTopicDataType();
+
+	bool serialize(magna::dds::DdsCdr& cdr, void *data, std::shared_ptr<magna::dds::SerializedPayload_t> data_value) override;
+	bool deserialize(magna::dds::DdsCdr& cdr, std::shared_ptr<magna::dds::SerializedPayload_t> data_value, void* data) override;
+	uint32_t get_serialized_size_bound() override;
+	void* create_data() override;
+	void delete_data(void *data) override;
+	bool get_key(std::shared_ptr<magna::dds::SerializedPayload_t> data_value, InstanceHandle_t* ihandle) noexcept override;
+	bool is_key_defined() override;
+};
+
+/**
 * @class ParkingLotTopicDataType
 * @brief A class used as the topic during data exchange.
 * @note
@@ -359,5 +382,5 @@ public:
 	bool is_key_defined() override;
 };
 
-#endif	// VALET_PARKING_TOPICSTOPICDATATYPE_00ddae822629258306247f3b3b5f9ac8_H
+#endif	// VALET_PARKING_TOPICSTOPICDATATYPE_35e2de1fdefcdc5c0930a3f5d111d289_H
 

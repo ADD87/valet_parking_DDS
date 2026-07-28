@@ -1179,6 +1179,203 @@ std::vector<Obstacle>& ObstacleArray::obstacles()
 	return m_obstacles;
 }
 
+ParkingCommand::ParkingCommand()
+{
+	m_is_valid = 0;
+	m_parking_seq = 0;
+	m_direct_distance_m = 0;
+	m_direct_speed_mps = 0;
+	m_reset_history = 0;
+
+}
+
+magna::dds::DdsCdr& ParkingCommand::serialize(magna::dds::DdsCdr &cdr) const
+{
+	cdr.serialize(m_header);
+	cdr.serialize(m_is_valid);
+	cdr.serialize(m_mode);
+	cdr.serialize(m_parking_seq);
+	cdr.serialize(m_direct_distance_m);
+	cdr.serialize(m_direct_speed_mps);
+	cdr.serialize(m_reset_history);
+	cdr.serialize(m_reason);
+
+	return cdr;
+}
+uint32_t ParkingCommand::serialize(void *const /*data*/, char *const /*payload_buf*/, uint32_t const /*payload_len*/)
+{
+	return 0U;
+}
+
+magna::dds::DdsCdr& ParkingCommand::deserialize(magna::dds::DdsCdr &cdr)
+{
+	cdr.deserialize(m_header);
+	cdr.deserialize(m_is_valid);
+	cdr.deserialize(m_mode);
+	cdr.deserialize(m_parking_seq);
+	cdr.deserialize(m_direct_distance_m);
+	cdr.deserialize(m_direct_speed_mps);
+	cdr.deserialize(m_reset_history);
+	cdr.deserialize(m_reason);
+
+	return cdr;
+}
+bool ParkingCommand::deserialize(char *const /*payload_buf*/, uint32_t const /*payload_len*/, void *const /*data*/)
+{
+	return false;
+}
+
+bool ParkingCommand::is_key_defined()
+{
+	return false;
+
+}
+void ParkingCommand::serialize_key(magna::dds::DdsCdr &cdr) const
+{
+
+}
+void ParkingCommand::serialize_key(char **buf,unsigned int *len)
+{
+	if (buf != nullptr)
+	{
+		*buf = nullptr;
+	}
+	if (len != nullptr)
+	{
+		*len = 0U;
+	}
+
+}
+bool ParkingCommand::is_key_serialize_by_cdr()
+{
+	return false;
+
+}
+bool ParkingCommand::is_plain_types()
+{
+	return false;
+}
+uint32_t ParkingCommand::max_align_size(uint32_t const _cur_al) const
+{
+	return _cur_al + DATA_SIZE;
+
+}
+void ParkingCommand::set_key_val(ParkingCommand const* const _data) noexcept
+{
+
+}
+void ParkingCommand::header(Header const &_header)
+{
+	m_header = _header;
+}
+void ParkingCommand::header(Header &&_header)
+{
+	m_header = std::move(_header);
+}
+Header const& ParkingCommand::header() const
+{
+	return m_header;
+}
+Header& ParkingCommand::header()
+{
+	return m_header;
+}
+
+void ParkingCommand::is_valid(bool const _is_valid)
+{
+	m_is_valid = _is_valid;
+}
+bool ParkingCommand::is_valid() const
+{
+	return m_is_valid;
+}
+bool& ParkingCommand::is_valid()
+{
+	return m_is_valid;
+}
+
+void ParkingCommand::mode(ParkingCommandMode const _mode)
+{
+	m_mode = _mode;
+}
+ParkingCommandMode ParkingCommand::mode() const
+{
+	return m_mode;
+}
+ParkingCommandMode& ParkingCommand::mode()
+{
+	return m_mode;
+}
+
+void ParkingCommand::parking_seq(uint32_t const _parking_seq)
+{
+	m_parking_seq = _parking_seq;
+}
+uint32_t ParkingCommand::parking_seq() const
+{
+	return m_parking_seq;
+}
+uint32_t& ParkingCommand::parking_seq()
+{
+	return m_parking_seq;
+}
+
+void ParkingCommand::direct_distance_m(double const _direct_distance_m)
+{
+	m_direct_distance_m = _direct_distance_m;
+}
+double ParkingCommand::direct_distance_m() const
+{
+	return m_direct_distance_m;
+}
+double& ParkingCommand::direct_distance_m()
+{
+	return m_direct_distance_m;
+}
+
+void ParkingCommand::direct_speed_mps(double const _direct_speed_mps)
+{
+	m_direct_speed_mps = _direct_speed_mps;
+}
+double ParkingCommand::direct_speed_mps() const
+{
+	return m_direct_speed_mps;
+}
+double& ParkingCommand::direct_speed_mps()
+{
+	return m_direct_speed_mps;
+}
+
+void ParkingCommand::reset_history(bool const _reset_history)
+{
+	m_reset_history = _reset_history;
+}
+bool ParkingCommand::reset_history() const
+{
+	return m_reset_history;
+}
+bool& ParkingCommand::reset_history()
+{
+	return m_reset_history;
+}
+
+void ParkingCommand::reason(std::string const &_reason)
+{
+	m_reason = _reason;
+}
+void ParkingCommand::reason(std::string &&_reason)
+{
+	m_reason = std::move(_reason);
+}
+std::string const& ParkingCommand::reason() const
+{
+	return m_reason;
+}
+std::string& ParkingCommand::reason()
+{
+	return m_reason;
+}
+
 ParkingLot::ParkingLot()
 {
 	m_parking_seq = 0;

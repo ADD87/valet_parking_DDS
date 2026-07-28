@@ -19,9 +19,11 @@ valet_parking_config_t DefaultConfig() {
   cfg.domain_id = 0;
   cfg.input_topic_name = "/selected_slot";
   cfg.output_topic_name = "/planning/trajectory";
+  cfg.command_topic_name = "/parking/command";
   cfg.localization_topic_name = "/localization/estimate";
   cfg.chassis_topic_name = "/chassis/state";
   cfg.obstacle_topic_name = "/perception/obstacles";
+  cfg.enable_command_topic = 1U;
   cfg.enable_aux_input_topics = 1U;
   cfg.qos_depth = 10;
   cfg.max_parking_lots = 20;
@@ -49,7 +51,7 @@ bool IsValidConfig(const valet_parking_config_t& cfg) {
 extern "C" {
 
 const char* valet_parking_get_api_version(void) {
-  return "0.2.0-mvp";
+  return "0.3.0-mvp";
 }
 
 int valet_parking_create(const valet_parking_config_t* config,
