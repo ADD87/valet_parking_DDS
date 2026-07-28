@@ -15,7 +15,8 @@ Options:
   --interval-ms N     Mock publish interval. Default: 500.
   --slot-mode MODE    SelectedSlot publisher mode. Default: valid.
                        valid|empty|overflow|nan|degenerate-corners|
-                       target-moves|parking-seq-changes
+                       target-moves|parking-seq-changes|
+                       multi-lot-seq-switch
   --with-aux-inputs   Publish localization/chassis/obstacle samples before SelectedSlot.
   --aux-mode MODE     Aux publisher mode. Default: all-valid.
                        all-valid|invalid-localization|nan-localization|
@@ -110,7 +111,8 @@ effective_count="${count}"
 effective_aux_count="${aux_count}"
 effective_aux_interval_ms="${aux_interval_ms}"
 if [[ "${slot_mode}" == "target-moves" ||
-      "${slot_mode}" == "parking-seq-changes" ]]; then
+      "${slot_mode}" == "parking-seq-changes" ||
+      "${slot_mode}" == "multi-lot-seq-switch" ]]; then
   if ((effective_count < 6)); then
     effective_count=6
   fi
@@ -281,7 +283,8 @@ if [[ "${slot_mode}" == "degenerate-corners" ]]; then
     "${runner_wait_seconds}" || true
 fi
 if [[ "${slot_mode}" == "target-moves" ||
-      "${slot_mode}" == "parking-seq-changes" ]]; then
+      "${slot_mode}" == "parking-seq-changes" ||
+      "${slot_mode}" == "multi-lot-seq-switch" ]]; then
   runner_wait_seconds=$(((timeout_ms + 999) / 1000))
   if ((runner_wait_seconds < 5)); then
     runner_wait_seconds=5
@@ -372,6 +375,20 @@ case "${slot_mode}" in
       "missing history reuse after changed parking_seq/path_id becomes stable"
     require_subscriber_log "is_estop=false" \
       "missing non-estop trajectory for parking-seq-changes slot mode"
+    ;;
+  multi-lot-seq-switch)
+    require_publisher_log "published sample [1-3]/[0-9]+ .*lots=2 .*parking_seq=1 .*target=slot1" \
+      "missing initial multi-lot samples selecting parking_seq=1"
+    require_publisher_log "published sample [4-6]/[0-9]+ .*lots=2 .*parking_seq=2 .*target=slot2" \
+      "missing switched multi-lot samples selecting parking_seq=2"
+    require_runner_log "PATH_PROVIDER ok.*parking_seq=1.*history=generated" \
+      "missing generated path for selected parking_seq=1"
+    require_runner_log "PATH_PROVIDER ok.*parking_seq=2.*history=generated, replan=TARGET_UPDATE.*reason=target_update" \
+      "missing generated path after opt_parking_seq selects parking_seq=2"
+    require_runner_log "PATH_PROVIDER ok.*parking_seq=2.*history=reused, replan=NONE.*generated_count=2" \
+      "missing history reuse after selected parking_seq=2 becomes stable"
+    require_subscriber_log "is_estop=false" \
+      "missing non-estop trajectory for multi-lot-seq-switch slot mode"
     ;;
   degenerate-corners)
     require_runner_log "selected parking lot corner geometry is degenerate" \

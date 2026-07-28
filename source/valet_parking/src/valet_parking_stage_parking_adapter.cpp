@@ -1769,6 +1769,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
            << ", partitions=" << path_output->partitioned_path.size()
            << ", points=" << CountPathProviderPoints(*path_output)
            << ", path_type=" << path_output->path_type
+           << ", parking_seq=" << parking_seq
            << ", smoothed=false"
            << ", history=reused"
            << ", replan=" << replan_text
@@ -1860,6 +1861,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << ", partitions=" << path_output->partitioned_path.size()
          << ", points=" << point_count
          << ", path_type=" << path_output->path_type
+         << ", parking_seq=" << parking_seq
          << ", smoothed=false"
          << ", history=generated"
          << ", replan=" << replan_text
