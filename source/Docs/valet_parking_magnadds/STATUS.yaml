@@ -1,7 +1,7 @@
 project: ValetParkingStageParking_MagnaDDS_MVP
 workspace: E:\APA\DDS\feature_integration\feature_integration_workspace
 created_date: 2026-07-26
-last_updated: 2026-07-27
+last_updated: 2026-07-28
 
 state_authority:
   rule: 本文件与 status_snapshots、decision_records 是项目状态的事实来源；聊天记录仅作辅助。
@@ -29,13 +29,13 @@ current_phase:
   description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathGenerator + HybridAStar + PathPartition 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-031 已完成轻量运行态复用、warm_start/trace_adjust 诊断、vehicle_lot_precheck、moving-localization-large、SelectedSlot degenerate-corners、many-obstacles 过载、far-obstacles 局部边界、obstacle-appears/obstacle-disappears 障碍物变化重规划、target-moves 目标位姿变化重规划和 parking-seq-changes path_id 变化重规划 smoke。NEXT-032 已复制当前 CMake 实际编译使用的 91 个最小 standalone 源码/头文件依赖到本地 algorithm 目录，未复制 proto/**/*.pb.*、ROS2、demo、out、launch 或未验证第三方依赖；CMake 已改用本地相对路径。当前仍使用临时 IDL 契约和简化 Topic，仍未接完整 OpenSpacePathProvider 大类线程、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。x86 已完成 DDS 本机 smoke，m57 已完成 AArch64 交叉编译、ELF 和 MagnaDDS 依赖检查，板端 runtime 尚未验证。
 
 last_completed_snapshot:
-  id: '032'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/032_项目状态快照_泊车算法源码本地化.md
+  id: 032A
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/032A_项目状态快照_TempAPA原始流程差距对照.md
   status: CREATED
 
 last_successful_action:
   date: 2026-07-28
-  summary: 已完成 NEXT-032 泊车算法源码本地化：复制当前 valet_parking/CMakeLists.txt 实际编译使用的 91 个 standalone 最小源码/头文件依赖到 applications/source/valet_parking/algorithm/parking_algorithm_standalone，未复制 proto/**/*.pb.*、ROS2、demo、out、launch 或未验证第三方依赖；CMake 已改用本地相对路径，构建日志显示 standalone .cc 均来自 applications/source/valet_parking/algorithm/...。x86 构建通过；默认 valid smoke、parking-seq-changes 回归、all-valid 辅助输入回归通过；m57 交叉编译通过并生成 ARM aarch64 libvalet_parking.so。m57 只完成交叉编译和 ELF/依赖检查，尚未板端运行。
+  summary: 已完成 032A TempAPA 原始流程复现差距对照：对照 E:\APA\DDS\TempAPA_Code\00_ValetParkingStageParking_超详细流程图总览_重要.md 及 stage_valet_parking_parking、Stage::ExecuteTaskOnOpenSpace、OpenSpacePathProvider、OpenSpaceThreadManager、OpenSpacePathSmoother、OpenSpaceStraightPathProvider 等原始源码，新增当前 DDS Adapter 已接入/轻量替代/缺失/暂不接入差距表；明确当前只能描述为已复现普通 open space 核心算法链路，不能描述为完美复现原始 Stage 全流程；新增 DR-005，确定后续采用行为等价优先而非逐行复制 TempAPA_Code。该阶段仅文档和状态更新，未修改 C++/IDL/构建脚本。
   evidence:
     - applications/config/valet_parking_mvp_bom.yaml
     - applications/source/valet_parking/idl/valet_parking_topics.idl
@@ -56,6 +56,9 @@ last_successful_action:
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
     - applications/source/valet_parking_tools/valet_parking_runner/main.cpp
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/032_项目状态快照_泊车算法源码本地化.md
+    - applications/source/Docs/valet_parking_magnadds/05_TempAPA原始流程复现差距对照表.md
+    - applications/source/Docs/valet_parking_magnadds/decision_records/DR-005_原始流程复现策略_行为等价优先.md
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/032A_项目状态快照_TempAPA原始流程差距对照.md
     - out/valet_parking_algorithm_localized_032/valet_parking_mvp/x86/lib/libvalet_parking.so
     - out/valet_parking_algorithm_localized_032/valet_parking_mvp/x86/smoke_latest/domain_219_20260728_011828_723
     - out/valet_parking_algorithm_localized_032/valet_parking_mvp/x86/smoke_latest/domain_220_20260728_011828_726
@@ -106,6 +109,7 @@ runtime_status:
   x86_path_provider_target_update_smoke_test: PASS
   x86_path_provider_path_id_update_smoke_test: PASS
   algorithm_source_localization: PASS
+  original_flow_gap_map: PASS
   x86_vehicle_lot_precheck_far_localization_test: PASS
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
@@ -162,6 +166,9 @@ decision_records:
     status: ACTIVE
   - id: DR-004
     file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-004_泊车算法源码本地化策略.md
+    status: ACTIVE
+  - id: DR-005
+    file: applications/source/Docs/valet_parking_magnadds/decision_records/DR-005_原始流程复现策略_行为等价优先.md
     status: ACTIVE
 
 status_snapshots:
@@ -301,3 +308,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/032_项目状态快照_泊车算法源码本地化.md
     phase: Fast-2
     status: PASS_ALGORITHM_LOCALIZATION_X86_M57_STATIC_BLOCKED_BOARD
+  - id: 032A
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/032A_项目状态快照_TempAPA原始流程差距对照.md
+    phase: Fast-2
+    status: PASS_ORIGINAL_FLOW_GAP_MAP_DOC_ONLY
