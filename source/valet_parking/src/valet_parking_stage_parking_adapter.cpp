@@ -118,6 +118,14 @@ struct StageFinishEvaluation {
   uint32_t required_consecutive_frames{kStageFinishRequiredConsecutiveFrames};
 };
 
+struct DirectFinishEvaluation {
+  bool command_active{true};
+  bool command_inactive{false};
+  bool vehicle_standstill{false};
+  bool ready_condition{false};
+  bool ready_to_finish{false};
+};
+
 struct FunctionManagerProjection {
   std::string source{"selected_slot"};
   std::string parking_command{"NONE"};
@@ -863,6 +871,45 @@ bool IsLocalPointNearBounds(const TL::common::math::Vec2d& point,
          point.y() <= xy_bounds[3] + margin;
 }
 
+std::size_t DestRegionPointCount(
+    const TL::planning::DestRegionWithAng& dest_region) {
+  return static_cast<std::size_t>(std::get<0>(dest_region).num_points());
+}
+
+double DestRegionArea(const TL::planning::DestRegionWithAng& dest_region) {
+  return std::fabs(std::get<0>(dest_region).area());
+}
+
+void AppendDestRegionContract(
+    const TL::planning::DestRegionWithAng& dest_region,
+    std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", dest_region_points=" << DestRegionPointCount(dest_region)
+          << ", dest_region_area=" << std::fixed << std::setprecision(3)
+          << DestRegionArea(dest_region)
+          << ", dest_region_angle=[" << std::get<1>(dest_region)
+          << "," << std::get<2>(dest_region) << "]";
+}
+
+void AppendRoiOpenSpaceInfoContract(
+    uint32_t path_info_id,
+    const TL::planning::RoiDeciderOutput& roi_output,
+    std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", open_space_info_contract=roi_output"
+          << ", open_space_path_info_id=" << path_info_id
+          << ", xy_bounds_size=" << roi_output.xy_bounds.size()
+          << ", origin=(" << std::fixed << std::setprecision(3)
+          << roi_output.origin_point.x() << ","
+          << roi_output.origin_point.y() << ","
+          << roi_output.origin_heading << ")";
+  AppendDestRegionContract(roi_output.dest_region, stream);
+}
+
 PathProviderPreCheckResult RunPathProviderPreCheck(
     const valet_parking_config_t& config,
     const TL::planning::RoiDeciderOutput& roi_output,
@@ -1047,7 +1094,9 @@ std::string BuildPathProviderPreCheckReason(
     const PathProviderPreCheckResult& result) {
   std::ostringstream stream;
   if (!result.ok) {
-    stream << "PATH_PROVIDER_PRECHECK failed: " << result.reason;
+    stream << "PATH_PROVIDER_PRECHECK failed: " << result.reason
+           << ", collision_contract=geometry_precheck_only"
+           << ", wheel_mask_contract=not_exposed_in_current_mvp";
     return stream.str();
   }
   stream << "PATH_PROVIDER_PRECHECK ok"
@@ -1061,6 +1110,7 @@ std::string BuildPathProviderPreCheckReason(
          << ", near_end_segments=" << result.obstacle_near_end_count
          << ", vehicle_has_state="
          << (result.vehicle_has_state ? "true" : "false")
+         << ", collision_contract=geometry_precheck_only"
          << ", wheel_mask_contract=not_exposed_in_current_mvp";
   return stream.str();
 }
@@ -1985,6 +2035,10 @@ bool RunPathProvider(const valet_parking_config_t& config,
            << ", points=" << CountPathProviderPoints(*path_output)
            << ", path_type=" << path_output->path_type
            << ", parking_seq=" << parking_seq
+           << ", open_space_info_contract=path_provider_output"
+           << ", path_info_id=" << parking_seq;
+    AppendDestRegionContract(roi_output.dest_region, &stream);
+    stream
            << ", smoothed=false"
            << ", history=reused"
            << ", replan=" << replan_text
@@ -2107,6 +2161,10 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << ", points=" << point_count
          << ", path_type=" << path_output->path_type
          << ", parking_seq=" << parking_seq
+         << ", open_space_info_contract=path_provider_output"
+         << ", path_info_id=" << parking_seq;
+  AppendDestRegionContract(roi_output.dest_region, &stream);
+  stream
          << ", smoothed=" << (path_output->has_smoothed ? "true" : "false")
          << ", history=generated"
          << ", replan=" << replan_text
@@ -2394,6 +2452,49 @@ std::string StageFinishStateName(const StageFinishEvaluation& evaluation) {
     return "READY";
   }
   return evaluation.ready_condition ? "HOLDING" : "WAITING";
+}
+
+DirectFinishEvaluation BuildDirectFinishEvaluation(
+    const RuntimeVehicleInput& vehicle_input,
+    bool command_active) {
+  DirectFinishEvaluation evaluation;
+  evaluation.command_active = command_active;
+  evaluation.command_inactive = !command_active;
+  const double vehicle_speed =
+      vehicle_input.has_vehicle_state ? vehicle_input.linear_velocity : 0.0;
+  evaluation.vehicle_standstill =
+      std::fabs(vehicle_speed) <= kStageFinishStandstillThresholdMps;
+  evaluation.ready_condition =
+      evaluation.command_inactive && evaluation.vehicle_standstill;
+  evaluation.ready_to_finish = evaluation.ready_condition;
+  return evaluation;
+}
+
+std::string DirectFinishStateName(
+    const DirectFinishEvaluation& evaluation) {
+  if (evaluation.ready_to_finish) {
+    return "READY";
+  }
+  return evaluation.ready_condition ? "HOLDING" : "WAITING";
+}
+
+void AppendDirectFinishContract(
+    const DirectFinishEvaluation& evaluation,
+    std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", finish_condition=direct_command_inactive_and_standstill"
+          << ", direct_command_active="
+          << (evaluation.command_active ? "true" : "false")
+          << ", direct_command_inactive="
+          << (evaluation.command_inactive ? "true" : "false")
+          << ", direct_vehicle_standstill="
+          << (evaluation.vehicle_standstill ? "true" : "false")
+          << ", direct_finish_ready="
+          << (evaluation.ready_to_finish ? "true" : "false")
+          << ", direct_stage_finish_state="
+          << DirectFinishStateName(evaluation);
 }
 
 std::string ProjectSysCommandName(ParkingCommandMode mode) {
@@ -2751,8 +2852,15 @@ bool RunPathPartition(const valet_parking_config_t& config,
           << (partition_output->destination_reached ? "true" : "false")
           << ", chosen_idx=(" << partition_output->chosen_path_idx.first
           << "," << partition_output->chosen_path_idx.second << ")"
+          << ", open_space_info_contract=path_partition_output"
+          << ", partitioned_paths="
+          << partition_output->partitioned_paths.path_set.size()
+          << ", chosen_path_contract=chosen_partitioned_path"
           << ", chosen_points=" << chosen_points
+          << ", chosen_path_points=" << chosen_points
           << ", gear=" << static_cast<int>(partition_output->chosen_partitioned_path.second)
+         << ", chosen_path_gear="
+         << static_cast<int>(partition_output->chosen_partitioned_path.second)
          << ", gear_changed=" << (partition_output->is_gear_changed ? "true" : "false")
          << ", stop_path=" << (partition_output->is_stop_path ? "true" : "false")
          << ", external_vehicle="
@@ -2878,7 +2986,16 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
          << total_time
          << ", distance=" << total_s
          << ", gear=" << static_cast<int>(speed_output->trajectory_gear.second)
-          << ", stage=" << static_cast<int>(speed_output->interactive_stage)
+         << ", open_space_info_contract=speed_optimizer_output"
+         << ", chosen_path_points="
+         << partition_output.chosen_partitioned_path.first.size()
+         << ", partitioned_paths="
+         << partition_output.partitioned_paths.path_set.size()
+         << ", stop_path="
+         << (partition_output.is_stop_path ? "true" : "false")
+         << ", speed_optimizer_trajectory_points=" << trajectory_points
+         << ", wheel_mask_considered=false"
+         << ", stage=" << static_cast<int>(speed_output->interactive_stage)
          << ", stage_name="
          << TL::planning_internal::SpeedTaskInteractiveStage_Name(
                 speed_output->interactive_stage)
@@ -3632,7 +3749,8 @@ PlanningTrajectory BuildTrajectoryFromSpeedOptimizer(
   return output;
 }
 
-std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output) {
+std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output,
+                           uint32_t path_info_id) {
   std::ostringstream stream;
   stream << "ROI_DECIDER ok"
          << ", scenario=" << static_cast<int>(output.scenario_type)
@@ -3640,6 +3758,8 @@ std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output) {
          << ", target=(" << std::fixed << std::setprecision(3)
          << output.end_pose.x << "," << output.end_pose.y << ","
          << output.end_pose.theta << ")"
+         << ", end_pose=(" << output.end_pose.x << ","
+         << output.end_pose.y << "," << output.end_pose.theta << ")"
          << ", fine_tuned=" << (output.has_fine_tuned ? "true" : "false")
          << ", slot_inner_fs_valid="
          << (output.is_slot_inner_fs_valid ? "true" : "false")
@@ -3651,6 +3771,7 @@ std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output) {
          << ", roi_wall_segments=" << output.roi_wall_segments.size()
          << ", virtual_obs_segments="
          << output.virtual_obs_segments.size();
+  AppendRoiOpenSpaceInfoContract(path_info_id, output, &stream);
   return stream.str();
 }
 
@@ -3734,6 +3855,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       const TL::planning::OpenSpaceSpeedOptimizerConfig direct_speed_config =
           BuildDirectSpeedOptimizerConfig(runtime_->speed_config,
                                           direct_speed_profile);
+      const DirectFinishEvaluation direct_finish_evaluation =
+          BuildDirectFinishEvaluation(runtime_->vehicle_input, true);
       std::ostringstream stream;
       AppendStageControlContract(*command_sample, command_mode_text,
                                  "direct_control",
@@ -3751,6 +3874,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
              << ", direct_speed_bound_max="
              << direct_speed_profile.max_sample_speed
              << ", trajectory_type=NORMAL";
+      AppendDirectFinishContract(direct_finish_evaluation, &stream);
       const std::string stage_control_reason = stream.str();
 
       TL::planning::PartitionOutput straight_partition_output;
@@ -3935,7 +4059,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     return true;
   }
 
-  const std::string roi_reason = BuildRoiReason(roi_output);
+  const std::string roi_reason =
+      BuildRoiReason(roi_output, selected_lot->parking_seq());
   const PathProviderPreCheckResult precheck_result =
       RunPathProviderPreCheck(config_, roi_output, runtime_->vehicle_input,
                               runtime_->obstacles);

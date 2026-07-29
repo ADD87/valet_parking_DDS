@@ -619,10 +619,20 @@ case "${slot_mode}" in
       else
         require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
           "missing threaded OpenSpacePathProvider target plan evidence"
+        require_runner_log "ROI_DECIDER ok.*open_space_info_contract=roi_output.*open_space_path_info_id=1.*dest_region_points=[0-9]+.*dest_region_area=[0-9]" \
+          "missing ROI/OpenSpaceInfo minimal contract evidence"
+        require_runner_log "PATH_PROVIDER_PRECHECK ok.*collision_contract=geometry_precheck_only.*wheel_mask_contract=not_exposed_in_current_mvp" \
+          "missing PreCheck collision/wheel-mask observable contract"
+        require_runner_log "PATH_PROVIDER ok.*open_space_info_contract=path_provider_output.*path_info_id=1.*dest_region_points=[0-9]+.*dest_region_area=[0-9]" \
+          "missing PathProvider/OpenSpaceInfo path_info_id and dest_region evidence"
         require_runner_log "PATH_PARTITION ok.*decision_name=.*finish_name=.*destination_reached=(true|false)" \
           "missing PathPartition decision/finish/destination evidence"
+        require_runner_log "PATH_PARTITION ok.*open_space_info_contract=path_partition_output.*chosen_path_contract=chosen_partitioned_path.*chosen_path_points=[0-9]+.*chosen_path_gear=[0-9]+" \
+          "missing PathPartition/OpenSpaceInfo chosen path evidence"
         require_runner_log "SPEED_OPTIMIZER ok.*stage_name=(INIT|RUNNING|WAITOBSTACLE|WAITREPLAN)" \
           "missing SpeedOptimizer interactive stage name"
+        require_runner_log "SPEED_OPTIMIZER ok.*open_space_info_contract=speed_optimizer_output.*chosen_path_points=[0-9]+.*stop_path=(true|false).*speed_optimizer_trajectory_points=[0-9]+.*wheel_mask_considered=false" \
+          "missing SpeedOptimizer/OpenSpaceInfo trajectory contract"
         require_runner_log "STAGE_OUTPUT open_space.*task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION>SPEED_OPTIMIZER.*path_decision=.*finish_status=.*destination_reached=(true|false).*target_gear=[0-9]+.*trajectory_type=(NORMAL|SHORT_PATH).*parking_status=(running|wait_obstacle|wait_replan|prepare_finish|mission_finished|stop_by_path_partition).*finish_priority=finish_over_interactive" \
           "missing Stage output contract aligned with ValetParkingStageParking flow"
         require_runner_log "STAGE_OUTPUT open_space.*finish_condition=destination_reached_and_standstill.*finish_ready=(true|false).*finish_consecutive_frames=[0-9]+.*finish_required_frames=[0-9]+.*vehicle_standstill=(true|false).*stage_finish_state=(READY|HOLDING|WAITING)" \
@@ -716,6 +726,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing PARKING_IN command publisher evidence"
       require_runner_log "command #[0-9]+ mode=PARKING_IN" \
         "missing PARKING_IN command consumption in runner log"
+      require_runner_log "STAGE_OUTPUT open_space.*function_manager_source=parking_command.*function_manager_sys_mode=RPA.*function_manager_sys_command=PARKINCONTROL.*function_manager_sys_run_state=(PARKSTART|PARKING).*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=PARKING_IN" \
+        "missing PARKING_IN FunctionManager projection evidence"
       require_subscriber_log "is_estop=false" \
         "missing non-estop trajectory with PARKING_IN command mode"
       ;;
@@ -728,6 +740,10 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD stage-control trajectory reason"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*command_action=DIRECT_FORWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH" \
         "missing DIRECT_FORWARD standardized stage-control contract"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*function_manager_source=parking_command.*function_manager_sys_command=FORWARDCONTROL.*function_manager_sys_run_state=PARKING.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=DIRECT_FORWARD" \
+        "missing DIRECT_FORWARD FunctionManager projection evidence"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*finish_condition=direct_command_inactive_and_standstill.*direct_command_active=true.*direct_command_inactive=false.*direct_finish_ready=false.*direct_stage_finish_state=WAITING" \
+        "missing DIRECT_FORWARD direct finish inactive-command contract"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*trajectory_type=NORMAL.*parking_status=direct_(stop_path|moving)" \
         "missing DIRECT_FORWARD trajectory_type/parking_status diagnostics"
       require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
@@ -758,6 +774,10 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD stage-control trajectory reason"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*command_action=DIRECT_BACKWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH" \
         "missing DIRECT_BACKWARD standardized stage-control contract"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*function_manager_source=parking_command.*function_manager_sys_command=BACKWARDCONTROL.*function_manager_sys_run_state=PARKING.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=DIRECT_BACKWARD" \
+        "missing DIRECT_BACKWARD FunctionManager projection evidence"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*finish_condition=direct_command_inactive_and_standstill.*direct_command_active=true.*direct_command_inactive=false.*direct_finish_ready=false.*direct_stage_finish_state=WAITING" \
+        "missing DIRECT_BACKWARD direct finish inactive-command contract"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*trajectory_type=NORMAL.*parking_status=direct_(stop_path|moving)" \
         "missing DIRECT_BACKWARD trajectory_type/parking_status diagnostics"
       require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
@@ -790,6 +810,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing PAUSE stage-control reason"
       require_runner_log "STAGE_CONTROL PAUSE.*command_action=PAUSE.*stage_status=paused.*task=STAGE_CONTROL_STOP.*trajectory_type=SHORT_PATH.*parking_status=stage_control_stop" \
         "missing PAUSE standardized stop contract"
+      require_runner_log "STAGE_CONTROL PAUSE.*function_manager_source=parking_command.*function_manager_sys_command=STOPPARKINROUTE.*function_manager_sys_run_state=PAUSE.*function_manager_sys_warning_info=SYSTEM_PAUSE_0x0B.*function_manager_parking_type=UNCHANGED" \
+        "missing PAUSE FunctionManager projection evidence"
       reject_runner_log "ROI_DECIDER ok" \
         "PAUSE should not run ROI_DECIDER"
       require_subscriber_log "points=1" \
@@ -806,6 +828,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing BRAKE stage-control reason"
       require_runner_log "STAGE_CONTROL BRAKE.*command_action=BRAKE.*stage_status=braking.*task=STAGE_CONTROL_STOP.*trajectory_type=SHORT_PATH.*parking_status=stage_control_stop" \
         "missing BRAKE standardized stop contract"
+      require_runner_log "STAGE_CONTROL BRAKE.*function_manager_source=parking_command.*function_manager_sys_command=BRAKECONTROL.*function_manager_sys_run_state=STRAIGHTBRAKE.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=NOSTATE" \
+        "missing BRAKE/NOSTATE FunctionManager projection evidence"
       reject_runner_log "ROI_DECIDER ok" \
         "BRAKE should not run ROI_DECIDER"
       require_subscriber_log "points=1" \
@@ -822,6 +846,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing FINISH/MISSIONFINISHED stage-control reason"
       require_runner_log "STAGE_CONTROL FINISH.*command_action=FINISH.*stage_status=mission_finished.*task=STAGE_CONTROL_STOP.*finish_status=MISSIONFINISHED.*trajectory_type=SHORT_PATH.*parking_status=mission_finished" \
         "missing FINISH standardized stop contract"
+      require_runner_log "STAGE_CONTROL FINISH.*function_manager_source=parking_command.*function_manager_sys_command=PARKINGFINISH.*function_manager_sys_run_state=QUIT.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=NOSTATE" \
+        "missing FINISH/NOSTATE FunctionManager projection evidence"
       reject_runner_log "ROI_DECIDER ok" \
         "FINISH should not run ROI_DECIDER"
       require_subscriber_log "points=1" \
@@ -853,6 +879,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing ${parking_out_enum} command consumption in runner log"
       require_runner_log "STAGE_CONTROL ${parking_out_enum}.*command_action=${parking_out_enum}.*stage_status=unsupported.*task=UNSUPPORTED_PARKING_OUT.*trajectory_type=SHORT_PATH.*parking_status=parking_out_unsupported.*unsupported_in_mvp" \
         "missing ${parking_out_enum} unsupported parking-out contract"
+      require_runner_log "STAGE_CONTROL ${parking_out_enum}.*function_manager_source=parking_command.*function_manager_sys_run_state=PARKOUT.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=${parking_out_enum}" \
+        "missing ${parking_out_enum} FunctionManager unsupported projection evidence"
       reject_runner_log "ROI_DECIDER ok" \
         "${parking_out_enum} should not run ROI_DECIDER in MVP unsupported branch"
       require_subscriber_log "points=1" \
@@ -867,6 +895,10 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing invalid command publisher evidence"
       require_runner_log "command #[0-9]+ mode=NONE \\(cleared_command\\)" \
         "missing invalid command clearing in runner log"
+      reject_runner_log "STAGE_CONTROL" \
+        "invalid command should clear command state instead of producing a stage-control branch"
+      require_runner_log "STAGE_OUTPUT open_space.*function_manager_source=selected_slot.*function_manager_sys_command=PARKINCONTROL.*function_manager_sys_run_state=(PARKSTART|PARKING).*function_manager_parking_type=PARKING_IN.*function_manager_command=NONE" \
+        "missing selected_slot/default FunctionManager projection after invalid command clear"
       require_subscriber_log "is_estop=false" \
         "missing normal non-estop trajectory after invalid command is cleared"
       ;;
@@ -1045,6 +1077,8 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing aux obstacle consumption in far-obstacles mode"
         require_log "PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds\\[[0-9]+\\]" \
           "missing obstacle local bounds precheck failure"
+        require_log "PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds\\[[0-9]+\\].*collision_contract=geometry_precheck_only.*wheel_mask_contract=not_exposed_in_current_mvp" \
+          "missing collision/wheel-mask contract on far-obstacles precheck failure"
         require_log "estop=true" \
           "missing runner estop for far-obstacles mode"
         require_subscriber_log "is_estop=true" \
@@ -1059,6 +1093,8 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing 128-obstacle aux sample consumption in many-obstacles mode"
         require_log "PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=[0-9]+" \
           "missing obstacle segment overload precheck failure"
+        require_log "PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=[0-9]+.*collision_contract=geometry_precheck_only.*wheel_mask_contract=not_exposed_in_current_mvp" \
+          "missing collision/wheel-mask contract on many-obstacles precheck failure"
         require_log "estop=true" \
           "missing runner estop for many-obstacles mode"
         require_subscriber_log "is_estop=true" \
