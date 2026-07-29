@@ -653,3 +653,48 @@ result=all smoke cases passed
 - formal typed DDS 字段仍未完全替代 `replan_reason` / `estop.reason` 文本诊断。
 - `Frame` / `OpenSpaceInfo` / `PlanningContext` 仍未完全正式化。
 - collision / wheel mask、NLP smoother 和 m57 板端 runtime 仍是后续大项。
+
+## BATCH-085_088 已减少的差异
+
+| 原始流程节点 | 之前差异 | 本批次收敛 |
+|---|---|---|
+| `ValetParkingStageParking::Process` 主骨架 | Adapter 里虽然能跑 ROI/PATH/PARTITION/SPEED，但没有一个显式的 Stage 方法序列承接 `Process -> SetParkingType -> ExecuteTaskOnOpenSpace -> IsReadyToFinishStage -> FinishScenario` | 新增 `ValetParkingStageParkingStageLite`，所有主要输出分支都能看到 `stage_process_methods=Process>SetParkingType>ExecuteTaskOnOpenSpace>IsReadyToFinishStage>FinishScenario` |
+| `Frame` 输入契约 | 之前 Frame 语义分散在 SelectedSlot、runtime 和诊断字符串中 | 新增 `StageFrameLite`，记录 seq、frame_id、时间戳、SelectedSlot 有效性、车位数量、目标车位、车辆状态来源和障碍物数量 |
+| `OpenSpaceInfo` 读写血管 | ROI/PathProvider/PathPartition/SpeedOptimizer 是否写入 OpenSpaceInfo 主要靠各 task reason 片段判断 | 新增 `StageOpenSpaceInfoLite`，在 ROI、PathProvider、PathPartition、SpeedOptimizer、direct straight path 后更新 ready 标志、target seq、destination_reached 和 chosen_path_points |
+| `PlanningContext` | 历史路径、speed frame、stage exit、direct command active 仍散落在 Adapter runtime | 新增 `StagePlanningContextLite`，把 path history、path id、speed frame、stage_exit_requested、direct_command_active、processed_frames 和 fallback_event 收入 Stage 上下文 |
+| `FunctionManager/HMI/collision/wheel mask` | 已有投影但不在一个 Stage 上下文里 | 新增 lite/stub 契约：`StageFunctionManagerLite`、`StageHmiStateLite`、`StageCollisionResultLite`、`StageWheelMaskLite`，先把字段入口固定下来 |
+| direct / stage-control / fallback 分支 | 之前每类分支都各自拼接部分 Stage 诊断，容易漏字段 | normal、direct、stage-control、finish-hold、early fallback、task fallback 均追加统一 `stage_process_contract=lightweight_stage_skeleton` |
+
+## BATCH-085_088 验证
+
+通过：
+```text
+git diff --check
+bash -n source/valet_parking_tools/smoke_valet_parking_x86.sh
+bash -n source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+bash -n source/valet_parking_tools/build_valet_parking.sh
+bash source/valet_parking_tools/build_valet_parking.sh --out-dir /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_085_088
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86 --domain-id 150 --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86 --domain-id 151 --command-mode direct-forward --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86 --first-domain-id 152 --timeout-ms 25000
+```
+
+产物：
+```text
+out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86/lib/libvalet_parking.so
+out/valet_parking_flow_gap_085_088/valet_parking_mvp/m57/lib/libvalet_parking.so
+```
+
+批量 smoke：
+```text
+first-domain-id=152
+result=all smoke cases passed
+```
+
+仍保留的核心差异：
+
+- 这批接入的是轻量 Stage 骨架，不是完整原车 `Stage/Frame/DependencyInjector`。
+- `Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel mask` 字段目前是 lite/stub 契约，很多值仍是假输入、默认值或无效值。
+- `stage_process_contract` 等内容仍承载在 `replan_reason/estop.reason` 文本中，不是 formal typed DDS 字段。
+- Adapter 仍有 5000+ 行，下一批必须开始物理瘦身：让 Adapter 退回 DDS 壳，把 Stage 输入构造、上下文更新、输出契约外移。
+- m57 仍只完成交叉编译和 ELF/依赖检查，尚未做板端 runtime。

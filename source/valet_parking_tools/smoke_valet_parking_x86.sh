@@ -542,6 +542,17 @@ fi
 "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" --count="${effective_count}" \
   --interval-ms="${interval_ms}" >>"${publisher_log}" 2>&1
 
+if ! wait_for_runner_log "bridged sample #" 6; then
+  {
+    echo
+    echo "[valet_parking_smoke] retrying selected_slot after discovery wait miss"
+  } >>"${publisher_log}"
+  "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" \
+    --count="${effective_count}" \
+    --interval-ms="${interval_ms}" >>"${publisher_log}" 2>&1
+  wait_for_runner_log "bridged sample #" 10 || true
+fi
+
 if [[ "${direct_release_mode}" == "1" ]]; then
   release_wait_pattern="STAGE_CONTROL DIRECT_FORWARD.*mission_state=DIRECT_CONTROL_ACTIVE"
   release_done_pattern="STAGE_CONTROL DIRECT_FORWARD_RELEASED"
@@ -831,6 +842,8 @@ case "${slot_mode}" in
         "missing Stage output contract aligned with ValetParkingStageParking flow"
         require_runner_log "STAGE_OUTPUT open_space.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=open_space_output.*status_transport=replan_reason_text.*dds_field_extension=required_before_vehicle_integration" \
           "missing centralized Stage text-contract boundary"
+        require_runner_log "STAGE_OUTPUT open_space.*stage_process_contract=lightweight_stage_skeleton.*stage_process_methods=Process>SetParkingType>ExecuteTaskOnOpenSpace>IsReadyToFinishStage>FinishScenario.*frame_lite_contract=stub_frame_bridge.*open_space_info_lite_contract=stub_open_space_bridge.*planning_context_lite_contract=stub_planning_context_bridge" \
+          "missing lightweight Stage skeleton/Frame/OpenSpaceInfo/PlanningContext bridge contract"
         require_runner_log "STAGE_OUTPUT open_space.*mission_state_contract=lightweight_stage_projection.*mission_state=(MISSION_RUNNING|WAIT_OBSTACLE|WAIT_REPLAN|PREPARE_FINISH|STOP_BY_PATH_PARTITION|MISSION_FINISHED).*next_stage=(PARKING|FINISH).*finish_scenario_intent=(true|false).*finish_scenario_contract=diagnostic_only" \
           "missing lightweight MissionState/next_stage/FinishScenario contract"
         require_runner_log "STAGE_OUTPUT open_space.*finish_condition=destination_reached_and_standstill.*finish_ready=(true|false).*finish_consecutive_frames=[0-9]+.*finish_required_frames=[0-9]+.*vehicle_standstill=(true|false).*stage_finish_state=(READY|HOLDING|WAITING)" \
@@ -982,6 +995,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD standardized stage-control contract"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=stage_control.*status_transport=replan_reason_text" \
         "missing DIRECT_FORWARD centralized Stage control contract"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*stage_process_contract=lightweight_stage_skeleton.*stage_skeleton_branch=direct_open_space.*stage_skeleton_task_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER.*frame_lite_contract=stub_frame_bridge.*open_space_info_lite_contract=stub_open_space_bridge.*planning_context_lite_contract=stub_planning_context_bridge" \
+        "missing DIRECT_FORWARD lightweight Stage skeleton bridge contract"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*function_manager_source=parking_command.*function_manager_sys_command=FORWARDCONTROL.*function_manager_sys_run_state=PARKING.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=DIRECT_FORWARD" \
         "missing DIRECT_FORWARD FunctionManager projection evidence"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*mission_state_contract=lightweight_stage_projection.*mission_state=DIRECT_CONTROL_ACTIVE.*next_stage=PARKING.*finish_scenario_intent=false" \
@@ -1078,6 +1093,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD standardized stage-control contract"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=stage_control.*status_transport=replan_reason_text" \
         "missing DIRECT_BACKWARD centralized Stage control contract"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*stage_process_contract=lightweight_stage_skeleton.*stage_skeleton_branch=direct_open_space.*stage_skeleton_task_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER.*frame_lite_contract=stub_frame_bridge.*open_space_info_lite_contract=stub_open_space_bridge.*planning_context_lite_contract=stub_planning_context_bridge" \
+        "missing DIRECT_BACKWARD lightweight Stage skeleton bridge contract"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*function_manager_source=parking_command.*function_manager_sys_command=BACKWARDCONTROL.*function_manager_sys_run_state=PARKING.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=DIRECT_BACKWARD" \
         "missing DIRECT_BACKWARD FunctionManager projection evidence"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*mission_state_contract=lightweight_stage_projection.*mission_state=DIRECT_CONTROL_ACTIVE.*next_stage=PARKING.*finish_scenario_intent=false" \
