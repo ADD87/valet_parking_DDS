@@ -16,6 +16,8 @@ Options:
 This batch runs the BATCH-042_046 command/status hardening smoke matrix:
   valid, timeout, multi-lot, direct, reset_history, pause/brake/finish,
   invalid clear, parking-out unsupported, and core target/obstacle regressions.
+  BATCH-065_068 also reuses this matrix for finish-boundary and combined-state
+  regressions.
 EOF
 }
 
@@ -98,6 +100,12 @@ run_case "multi-lot-preplan-candidate" \
   --slot-mode multi-lot-seq-switch \
   --expect-thread-provider-stop
 
+run_case "destination-reached-finish-boundary" \
+  --with-aux-inputs \
+  --aux-mode near-destination \
+  --aux-chassis-gear drive \
+  --expect-thread-provider-stop
+
 run_case "direct-forward-stop-contract" \
   --command-mode direct-forward
 
@@ -124,8 +132,17 @@ run_case "direct-forward-release-finish-contract" \
 run_case "direct-backward-release-finish-contract" \
   --command-mode direct-backward-release
 
+run_case "direct-release-restore-target-update" \
+  --slot-mode target-moves \
+  --command-mode direct-forward-release
+
 run_case "direct-reset-history-one-shot" \
   --command-mode direct-forward \
+  --command-reset-history
+
+run_case "parking-in-reset-target-update" \
+  --slot-mode target-moves \
+  --command-mode parking-in \
   --command-reset-history
 
 run_case "pause-stop-contract" \

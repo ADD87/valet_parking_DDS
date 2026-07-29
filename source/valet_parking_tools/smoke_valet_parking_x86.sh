@@ -38,6 +38,7 @@ Options:
                        all-valid|invalid-localization|nan-localization|
                        chassis-only|invalid-obstacles|bad-obstacle-geometry|
                        moving-localization|moving-localization-large|
+                       near-destination|
                        far-localization|far-obstacles|many-obstacles|
                        obstacle-appears|obstacle-disappears
   --aux-chassis-gear GEAR
@@ -237,6 +238,7 @@ fi
 if [[ "${with_aux_inputs}" == "1" &&
       ( "${aux_mode}" == "moving-localization" ||
         "${aux_mode}" == "moving-localization-large" ||
+        "${aux_mode}" == "near-destination" ||
         "${aux_mode}" == "obstacle-appears" ||
         "${aux_mode}" == "obstacle-disappears" ) &&
       "${disable_aux_input_topics}" != "1" ]]; then
@@ -245,6 +247,14 @@ if [[ "${with_aux_inputs}" == "1" &&
   fi
   if ((effective_aux_count < 8)); then
     effective_aux_count=8
+  fi
+  if [[ "${aux_mode}" == "near-destination" ]]; then
+    if ((effective_count < 12)); then
+      effective_count=12
+    fi
+    if ((effective_aux_count < 14)); then
+      effective_aux_count=14
+    fi
   fi
 fi
 if [[ "${expect_path_provider_timeout}" == "1" &&
@@ -365,6 +375,7 @@ if [[ "${with_aux_inputs}" == "1" &&
       ( "${aux_mode}" == "moving-localization" ||
         "${aux_mode}" == "moving-localization-large" ||
         "${aux_mode}" == "far-localization" ||
+        "${aux_mode}" == "near-destination" ||
         "${aux_mode}" == "obstacle-appears" ||
         "${aux_mode}" == "obstacle-disappears" ) &&
       "${disable_aux_input_topics}" != "1" ]]; then
@@ -485,7 +496,14 @@ if [[ "${direct_release_mode}" == "1" ]]; then
     echo
     echo "[valet_parking_smoke] publishing selected_slot after command clear"
   } >>"${publisher_log}"
-  "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" --count=4 \
+  post_clear_count=4
+  if [[ "${slot_mode}" == "target-moves" ||
+        "${slot_mode}" == "parking-seq-changes" ||
+        "${slot_mode}" == "multi-lot-seq-switch" ]]; then
+    post_clear_count=6
+  fi
+  "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" \
+    --count="${post_clear_count}" \
     --interval-ms="${interval_ms}" >>"${publisher_log}" 2>&1
   wait_for_runner_log "${release_done_pattern}" 10 || true
 fi
@@ -524,6 +542,8 @@ if [[ "${aux_runs_in_background}" == "1" ]]; then
     runner_wait_pattern="warm_start_reject=lateral_offset_large"
   elif [[ "${aux_mode}" == "far-localization" ]]; then
     runner_wait_pattern="vehicle_lot_precheck failed"
+  elif [[ "${aux_mode}" == "near-destination" ]]; then
+    runner_wait_pattern="STAGE_OUTPUT open_space.*finish_ready=true"
   elif [[ "${aux_mode}" == "obstacle-appears" ]]; then
     runner_wait_pattern="replan=BLOCK_BY_STATIC_OBSTACLE"
   elif [[ "${aux_mode}" == "obstacle-disappears" ]]; then
@@ -687,8 +707,10 @@ case "${slot_mode}" in
           "missing SpeedOptimizer interactive stage name"
         require_runner_log "SPEED_OPTIMIZER ok.*open_space_info_contract=speed_optimizer_output.*chosen_path_points=[0-9]+.*stop_path=(true|false).*speed_optimizer_trajectory_points=[0-9]+.*wheel_mask_considered=false" \
           "missing SpeedOptimizer/OpenSpaceInfo trajectory contract"
-        require_runner_log "STAGE_OUTPUT open_space.*task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION>SPEED_OPTIMIZER.*path_decision=.*finish_status=.*destination_reached=(true|false).*target_gear=[0-9]+.*trajectory_type=(NORMAL|SHORT_PATH).*parking_status=(running|wait_obstacle|wait_replan|prepare_finish|mission_finished|stop_by_path_partition).*finish_priority=finish_over_interactive" \
-          "missing Stage output contract aligned with ValetParkingStageParking flow"
+      require_runner_log "STAGE_OUTPUT open_space.*task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION>SPEED_OPTIMIZER.*path_decision=.*finish_status=.*destination_reached=(true|false).*target_gear=[0-9]+.*trajectory_type=(NORMAL|SHORT_PATH).*parking_status=(running|wait_obstacle|wait_replan|prepare_finish|mission_finished|stop_by_path_partition).*finish_priority=finish_over_interactive" \
+        "missing Stage output contract aligned with ValetParkingStageParking flow"
+        require_runner_log "STAGE_OUTPUT open_space.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=open_space_output.*status_transport=replan_reason_text.*dds_field_extension=required_before_vehicle_integration" \
+          "missing centralized Stage text-contract boundary"
         require_runner_log "STAGE_OUTPUT open_space.*mission_state_contract=lightweight_stage_projection.*mission_state=(MISSION_RUNNING|WAIT_OBSTACLE|WAIT_REPLAN|PREPARE_FINISH|STOP_BY_PATH_PARTITION|MISSION_FINISHED).*next_stage=(PARKING|FINISH).*finish_scenario_intent=(true|false).*finish_scenario_contract=diagnostic_only" \
           "missing lightweight MissionState/next_stage/FinishScenario contract"
         require_runner_log "STAGE_OUTPUT open_space.*finish_condition=destination_reached_and_standstill.*finish_ready=(true|false).*finish_consecutive_frames=[0-9]+.*finish_required_frames=[0-9]+.*vehicle_standstill=(true|false).*stage_finish_state=(READY|HOLDING|WAITING)" \
@@ -778,8 +800,8 @@ if [[ "${command_mode}" != "none" ]]; then
       "missing reset_history=true in runner command consumption log"
     require_runner_log "command reset_history consumed mode=.*\\(one_shot\\)" \
       "missing one-shot reset_history consumption log"
-    require_runner_log "STAGE_CONTROL .*reset_history=true" \
-      "missing reset_history=true in stage-control reason"
+    require_runner_log "(STAGE_CONTROL .*reset_history=true|STAGE_OUTPUT open_space.*function_manager_reset_history=true)" \
+      "missing reset_history=true in stage-control or Stage output reason"
   fi
 
   case "${command_mode}" in
@@ -802,6 +824,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD stage-control trajectory reason"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*command_action=DIRECT_FORWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH" \
         "missing DIRECT_FORWARD standardized stage-control contract"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=stage_control.*status_transport=replan_reason_text" \
+        "missing DIRECT_FORWARD centralized Stage control contract"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*function_manager_source=parking_command.*function_manager_sys_command=FORWARDCONTROL.*function_manager_sys_run_state=PARKING.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=DIRECT_FORWARD" \
         "missing DIRECT_FORWARD FunctionManager projection evidence"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*mission_state_contract=lightweight_stage_projection.*mission_state=DIRECT_CONTROL_ACTIVE.*next_stage=PARKING.*finish_scenario_intent=false" \
@@ -842,6 +866,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD active half before release"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*command_action=DIRECT_FORWARD_RELEASED.*stage_status=mission_finished.*task=DIRECT_COMMAND_RELEASE" \
         "missing DIRECT_FORWARD_RELEASED stage-control branch"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=stage_control.*status_transport=replan_reason_text" \
+        "missing DIRECT_FORWARD_RELEASED centralized Stage control contract"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*function_manager_source=cleared_direct_command.*function_manager_sys_command=FORWARDCONTROL.*function_manager_sys_run_state=QUIT.*function_manager_parking_type=DIRECT_FORWARD.*function_manager_command=NONE" \
         "missing released DIRECT_FORWARD FunctionManager projection evidence"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*mission_state_contract=lightweight_stage_projection.*mission_state=DIRECT_FINISH_READY.*next_stage=FINISH.*finish_scenario_intent=true.*finish_scenario_contract=diagnostic_only" \
@@ -862,6 +888,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD stage-control trajectory reason"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*command_action=DIRECT_BACKWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH" \
         "missing DIRECT_BACKWARD standardized stage-control contract"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=stage_control.*status_transport=replan_reason_text" \
+        "missing DIRECT_BACKWARD centralized Stage control contract"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*function_manager_source=parking_command.*function_manager_sys_command=BACKWARDCONTROL.*function_manager_sys_run_state=PARKING.*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=DIRECT_BACKWARD" \
         "missing DIRECT_BACKWARD FunctionManager projection evidence"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*mission_state_contract=lightweight_stage_projection.*mission_state=DIRECT_CONTROL_ACTIVE.*next_stage=PARKING.*finish_scenario_intent=false" \
@@ -904,6 +932,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD active half before release"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*command_action=DIRECT_BACKWARD_RELEASED.*stage_status=mission_finished.*task=DIRECT_COMMAND_RELEASE" \
         "missing DIRECT_BACKWARD_RELEASED stage-control branch"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=stage_control.*status_transport=replan_reason_text" \
+        "missing DIRECT_BACKWARD_RELEASED centralized Stage control contract"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*function_manager_source=cleared_direct_command.*function_manager_sys_command=BACKWARDCONTROL.*function_manager_sys_run_state=QUIT.*function_manager_parking_type=DIRECT_BACKWARD.*function_manager_command=NONE" \
         "missing released DIRECT_BACKWARD FunctionManager projection evidence"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*mission_state_contract=lightweight_stage_projection.*mission_state=DIRECT_FINISH_READY.*next_stage=FINISH.*finish_scenario_intent=true.*finish_scenario_contract=diagnostic_only" \
@@ -1179,6 +1209,28 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing no_trace_path trace adjust diagnostic"
         require_log "trace_adjust_path_length=0" \
           "missing zero trace adjust path length after rejected warm start"
+        ;;
+      near-destination)
+        require_aux_log "published sample group [1-6]/[0-9]+ localization=valid" \
+          "missing initial origin aux publisher evidence before near-destination"
+        require_aux_log "published sample group ([7-9]|1[0-4])/[0-9]+ localization=near-destination-valid" \
+          "missing near-destination aux publisher evidence"
+        require_log "aux localization #[0-9]+ \\(x=0(\\.00)?, y=0" \
+          "missing initial origin localization consumption in near-destination mode"
+        require_log "aux localization #[0-9]+ \\(x=7\\.31[0-9]*, y=1\\.76" \
+          "missing near-destination localization consumption in runner log"
+        require_log "aux chassis #[0-9]+ .*speed_mps=0" \
+          "missing standstill chassis consumption in near-destination mode"
+        require_log "PATH_PARTITION ok.*finish_name=REACH_TARGET.*destination_reached=true" \
+          "missing PathPartition destination reached evidence"
+        require_log "STAGE_OUTPUT open_space.*stage_status=mission_finished.*destination_reached=true.*trajectory_type=SHORT_PATH.*parking_status=mission_finished" \
+          "missing mission_finished Stage output for destination reached"
+        require_log "STAGE_OUTPUT open_space.*mission_state=MISSION_FINISHED.*next_stage=FINISH.*finish_scenario_intent=true" \
+          "missing MissionState FINISH projection for destination reached"
+        require_log "STAGE_OUTPUT open_space.*finish_ready=true.*finish_ready_condition=true.*finish_consecutive_frames=[2-9][0-9]*.*stage_finish_state=READY" \
+          "missing consecutive-frame finish-ready evidence"
+        require_subscriber_log "is_estop=false" \
+          "missing non-estop trajectory in near-destination finish mode"
         ;;
       far-localization)
         require_log "aux localization #[0-9]+ .*x=1000" \

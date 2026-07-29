@@ -2359,7 +2359,8 @@ TL::planning::PartitionInput BuildPathPartitionInput(
                                 : roi_output.end_pose;
   input.dest_region_with_angle = roi_output.dest_region;
   input.obstacles_segments_vec = BuildObstacleSegments(roi_output, obstacles);
-  input.is_vehicle_stand_still = true;
+  input.is_vehicle_stand_still =
+      std::fabs(input.vehicle_state.linear_velocity) < 1.0e-3;
   input.replan_triggered_by_speed_plan = replan_triggered_by_speed_plan;
   input.guard_triggered = false;
   input.input_replan_status = path_output.replan_status;
@@ -2563,6 +2564,17 @@ void AppendMissionStateContract(const std::string& mission_state,
           << ", finish_scenario_intent="
           << (finish_scenario_intent ? "true" : "false")
           << ", finish_scenario_contract=diagnostic_only";
+}
+
+void AppendStageProjectionContract(const std::string& record_type,
+                                   std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", stage_contract=lightweight_valet_parking_stage_projection"
+          << ", stage_contract_record=" << record_type
+          << ", status_transport=replan_reason_text"
+          << ", dds_field_extension=required_before_vehicle_integration";
 }
 
 std::string ProjectSysCommandName(ParkingCommandMode mode) {
@@ -2845,6 +2857,10 @@ std::string BuildOpenSpaceStageOutputContract(
 
   std::ostringstream stream;
   stream << "STAGE_OUTPUT open_space"
+         << ", stage_contract=lightweight_valet_parking_stage_projection"
+         << ", stage_contract_record=open_space_output"
+         << ", status_transport=replan_reason_text"
+         << ", dds_field_extension=required_before_vehicle_integration"
          << ", stage_status=" << StageStatusFromParkingStatus(parking_status)
          << ", task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION";
   if (speed_output != nullptr) {
@@ -3320,6 +3336,7 @@ void AppendStageControlContract(const ParkingCommand& command,
           << ", task=" << task
           << ", reset_history="
           << (command.reset_history() ? "true" : "false");
+  AppendStageProjectionContract("stage_control", stream);
 }
 
 double SelectDirectDistance(double distance_m) {
@@ -4159,6 +4176,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
            << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
            << ", task=DIRECT_COMMAND_RELEASE"
            << ", reset_history=false";
+    AppendStageProjectionContract("stage_control", &stream);
     AppendFunctionManagerProjectionContract(released_projection, &stream);
     AppendMissionStateContract(
         direct_finish_evaluation.ready_to_finish ? "DIRECT_FINISH_READY"

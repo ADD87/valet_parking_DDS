@@ -433,3 +433,47 @@ DDS 适配层结构保持干净；
 ```
 
 这样做比“整目录搬 TempAPA_Code”更稳，也更适合 MagnaDDS 中间件集成。
+
+## BATCH-065_068 已减少的差异
+
+| 原始流程节点 | 之前差异 | 本批次收敛 |
+|---|---|---|
+| `Stage::Process` / Stage 输出契约 | `stage_status`、`parking_status`、`mission_state`、`FunctionManagerProjection` 等仍散落在不同输出拼接点，后续扩展容易漏字段 | 新增统一 `stage_contract=lightweight_valet_parking_stage_projection`，普通 open-space 输出和 stage-control 输出都显式标记 `stage_contract_record`、`status_transport`、`dds_field_extension` |
+| `IsReadyToFinishStage()` | 只有轻量连续帧状态机，但缺少 DDS smoke 证明 `destination_reached + standstill` 能自然触发 `MISSION_FINISHED -> FINISH` | 新增 `near-destination` 辅助输入模式，先从原点生成路径，再切到终点附近并降速到 0，x86 smoke 已触发 `PATH_PARTITION TASK_FINISH / REACH_TARGET`、`finish_ready=true`、`mission_state=MISSION_FINISHED` |
+| `PathPartition` 车辆运动状态输入 | Adapter 之前把 `PartitionInput.is_vehicle_stand_still` 固定为 true，不能表达车辆先执行路径再静止的原始语义 | 改为按 DDS chassis `linear_velocity` 判断 standstill；near-destination smoke 用前半段 0.2 m/s、后半段 0 m/s 验证 warm-start/finish 边界 |
+| 辅助输入稳定性 | near-destination 测试障碍物 id 每帧变化，会误触发 `obstacles_changed` 重规划，干扰 finish 验证 | near-destination 远处静态障碍物 id 固定，测试输入不再自己制造动态变化 |
+| direct release 后恢复普通泊车 | direct active -> NONE -> release 已有 smoke，但 release 后再进入 target update 的普通链路帧数不足 | direct release 后对 `target-moves` 类 SelectedSlot 自动补发 6 帧，验证 release 后能重新进入普通 ROI/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER，并在 moved target 稳定后复用历史路径 |
+| `reset_history + target update` 组合状态 | reset_history、target update 各自已有 smoke，但组合路径覆盖不足 | 批量矩阵新增 `parking-in-reset-target-update`，验证 reset one-shot 消费后 target update 和 history reuse 不互相污染 |
+| collision / wheel mask 正式接入 | 仍只有几何 precheck 和文本诊断，缺少真实车端字段 | 本批次继续把 `wheel_mask_idl_extension=required_before_vehicle_integration` 保持为显式 blocker，不假装已经完整接入 |
+
+## BATCH-065_068 验证
+
+通过：
+```text
+git diff --check
+bash -n source/valet_parking_tools/smoke_valet_parking_x86.sh
+bash -n source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+bash -n source/valet_parking_tools/build_valet_parking.sh
+bash source/valet_parking_tools/build_valet_parking.sh --out-dir /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_065_068
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_065_068/valet_parking_mvp/x86 --domain-id 210 --with-aux-inputs --aux-mode near-destination --aux-chassis-gear drive --timeout-ms 25000 --expect-thread-provider-stop
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_065_068/valet_parking_mvp/x86 --domain-id 213 --slot-mode target-moves --command-mode direct-forward-release --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_065_068/valet_parking_mvp/x86 --first-domain-id 120 --timeout-ms 25000
+```
+
+产物：
+```text
+out/valet_parking_flow_gap_065_068/valet_parking_mvp/x86/lib/libvalet_parking.so
+out/valet_parking_flow_gap_065_068/valet_parking_mvp/m57/lib/libvalet_parking.so
+```
+
+批量 smoke：
+```text
+first-domain-id=120
+result=all smoke cases passed
+```
+
+仍保留的核心差异：
+- `stage_contract`、`mission_state`、`FunctionManagerProjection`、`OpenSpaceInfo` 仍通过 `replan_reason/estop.reason` 文本诊断承载，不是正式 DDS 字段。
+- `FinishScenario` 仍是轻量诊断意图，未接入完整原车状态机。
+- collision/wheel mask 仍未拿到真实车端输入语义，当前只做几何前置保护和 blocker 显式输出。
+- m57 已通过交叉编译和 ELF/依赖检查，但未做板端 runtime。

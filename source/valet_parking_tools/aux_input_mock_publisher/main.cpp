@@ -25,6 +25,7 @@ enum class AuxPublishMode {
   kBadObstacleGeometry,
   kMovingLocalization,
   kMovingLocalizationLarge,
+  kNearDestination,
   kFarLocalization,
   kFarObstacles,
   kManyObstacles,
@@ -35,6 +36,7 @@ enum class AuxPublishMode {
 constexpr uint32_t kManyObstaclesCount = 128U;
 constexpr uint32_t kObstacleAppearsStartIndex = 3U;
 constexpr uint32_t kObstacleDisappearsClearIndex = 3U;
+constexpr uint32_t kNearDestinationSwitchIndex = 6U;
 
 struct PublisherOptions {
   uint32_t domain_id{0U};
@@ -129,6 +131,10 @@ bool ParseMode(const std::string& text, AuxPublishMode* out_mode) {
   }
   if (text == "moving-localization-large") {
     *out_mode = AuxPublishMode::kMovingLocalizationLarge;
+    return true;
+  }
+  if (text == "near-destination") {
+    *out_mode = AuxPublishMode::kNearDestination;
     return true;
   }
   if (text == "far-localization") {
@@ -260,6 +266,10 @@ std::string LocalizationStatusForLog(const PublisherOptions& options,
   if (options.mode == AuxPublishMode::kMovingLocalizationLarge) {
     return "moving-large-valid";
   }
+  if (options.mode == AuxPublishMode::kNearDestination) {
+    return index >= kNearDestinationSwitchIndex ? "near-destination-valid"
+                                                : "valid";
+  }
   if (options.mode == AuxPublishMode::kFarLocalization) {
     return "far-valid";
   }
@@ -308,6 +318,12 @@ LocalizationEstimate BuildLocalization(const PublisherOptions& options,
     sample.x(1.40);
     sample.y(1.30);
   }
+  if (options.mode == AuxPublishMode::kNearDestination &&
+      index >= kNearDestinationSwitchIndex) {
+    sample.x(7.314);
+    sample.y(1.760);
+    sample.heading(0.2);
+  }
   if (options.mode == AuxPublishMode::kFarLocalization) {
     sample.x(1000.0);
     sample.y(1000.0);
@@ -330,6 +346,9 @@ ChassisState BuildChassis(const PublisherOptions& options, uint32_t index) {
   sample.speed_mps(options.chassis_speed_mps);
   sample.acceleration_mps2(0.0);
   sample.gear(options.chassis_gear);
+  if (options.mode == AuxPublishMode::kNearDestination) {
+    sample.speed_mps(index >= kNearDestinationSwitchIndex ? 0.0 : 0.2);
+  }
   return sample;
 }
 
@@ -338,7 +357,8 @@ Obstacle BuildObstacle(const PublisherOptions& options,
                        uint32_t obstacle_index) {
   Obstacle obstacle;
   if (options.mode == AuxPublishMode::kMovingLocalization ||
-      options.mode == AuxPublishMode::kMovingLocalizationLarge) {
+      options.mode == AuxPublishMode::kMovingLocalizationLarge ||
+      options.mode == AuxPublishMode::kNearDestination) {
     obstacle.id(1000U);
   } else if (options.mode == AuxPublishMode::kManyObstacles) {
     obstacle.id(100000U + index * 1000U + obstacle_index);
@@ -418,6 +438,7 @@ void PrintUsage() {
             << "  --mode=<name>                 all-valid|invalid-localization|nan-localization|\n"
             << "                                chassis-only|invalid-obstacles|bad-obstacle-geometry|\n"
             << "                                moving-localization|moving-localization-large|\n"
+            << "                                near-destination|\n"
             << "                                far-localization|far-obstacles|many-obstacles|\n"
             << "                                obstacle-appears|obstacle-disappears\n"
             << "  --chassis-gear=<name>         parking|drive|reverse|neutral (default parking)\n"
