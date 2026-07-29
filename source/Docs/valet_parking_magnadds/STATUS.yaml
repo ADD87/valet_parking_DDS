@@ -25,7 +25,7 @@ local_git:
 current_phase:
   id: Fast-2
   name: .so + typed DDS + localized valet parking algorithm sources
-  status: PASS_BATCH_042_046_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  status: PASS_BATCH_047_048_TOPIC_CONTRACT_M57_PACKAGE_READY_BLOCKED_BOARD
   description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathProvider + OpenSpaceThreadManager + OpenSpacePathGenerator + HybridAStar 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路。NEXT-039 已把 direct_speed_mps 映射到 direct 分支速度优化器 speed bound，新增 aux chassis signed speed 输入和速度方向冲突 smoke，并在 direct 输出原因中补 target_gear、direct_speed_bound_min/max、trajectory_type 和 parking_status 诊断。NEXT-040 已接入本地化 OpenSpacePathProvider / OpenSpaceThreadManager 线程骨架，普通主链经 TargetPlan 生成当前车位路径，多车位非选中 lot 经 PrePlan 进入 search threads；复验阶段补充了 PrePlan 队列硬化，避免覆盖 has_task=true 的候选输入。NEXT-041 已补充线程生命周期硬化：search/target worker 持有 shared early_stop，StopThreads/CancelTargetPlan 可取消正在跑的 Hybrid A*；timeout 负向路径可观测 provider_status=TARGET_TIMEOUT、target_cancel=true 和 fallback to ROI seed；x86 valid、timeout、multi-lot PrePlan、direct 回归通过，m57 交叉编译、ELF 和 MagnaDDS 依赖检查通过；NLP smoother 已评估，当前因 thirdparty/x86/m57 缺少随包 OSQP/IPOPT 等依赖，暂不接入产品链路。当前仍使用临时 IDL 契约和简化 Topic，parking_status 仍只是 replan_reason/estop.reason 诊断文本，不是正式 DDS 字段；仍未接完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。m57 板端 runtime 尚未验证。
   execution_policy: NEXT-041 后执行节奏切换为批量硬化：先批量检测和契约扫描，再批量修订代码/脚本/文档，再统一 x86/m57 编译和 x86 smoke 矩阵，最后集中排错并统一提交推送。
   active_batch: NONE
@@ -34,27 +34,38 @@ current_phase:
       status: PASS_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
       date: 2026-07-29
       summary: 已完成 direct / command / stage / parking-out 状态诊断契约批量硬化；x86/m57 统一编译通过，x86 批量 smoke 矩阵通过。
+    - id: BATCH-047_048
+      status: PASS_DOCS_PACKAGE_READY_BLOCKED_BOARD
+      date: 2026-07-29
+      summary: 已完成真实车端 Topic/IDL 契约差距表、m57 运行包脚本与板端联调 Runbook；运行包生成和 manifest 检查通过，但 m57 板端 runtime 仍未验证。
 
 last_completed_snapshot:
-  id: 042_046
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/042_046_项目状态快照_批量硬化闭环.md
-  status: PASS_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  id: 047_048
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/047_048_项目状态快照_Topic契约与m57联调包.md
+  status: PASS_DOCS_PACKAGE_READY_BLOCKED_BOARD
 
 last_plan_update:
   date: 2026-07-29
-  summary: BATCH-042_046 已完成：统一了 direct / command / stage / parking-out 的诊断契约，补充 reset_history 一次性消费日志与 smoke，parking-out 明确保持 MVP unsupported，修正 aux 负向场景的 smoke 预期，并消除 WSL 日志轮询 grep 噪声。x86/m57 统一编译通过，x86 批量 smoke 矩阵通过。
+  summary: BATCH-047_048 已完成：补充真实车端 Topic/IDL 契约差距表、m57 板端运行包与联调 Runbook，并新增 package_valet_parking_m57.sh。脚本语法检查通过，运行包生成通过，manifest 已记录 runner/lib 的 aarch64 ELF、NEEDED/RPATH 和 sha256；m57 板端 runtime 仍未验证。
   evidence:
-    - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.cpp
-    - applications/source/valet_parking/src/valet_parking_component.cpp
-    - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
-    - applications/source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+    - applications/source/Docs/valet_parking_magnadds/12_真实车端Topic契约差距表.md
+    - applications/source/Docs/valet_parking_magnadds/13_m57板端运行包与联调Runbook.md
     - applications/source/Docs/valet_parking_magnadds/09_NEXT039到048后续任务预测与执行节奏.md
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/042_046_项目状态快照_批量硬化闭环.md
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/047_048_项目状态快照_Topic契约与m57联调包.md
+    - applications/source/valet_parking_tools/package_valet_parking_m57.sh
+    - out/valet_parking_m57_package/valet_parking_m57_runtime_20260729_081921
+    - out/valet_parking_m57_package/valet_parking_m57_runtime_20260729_081921.tar.gz
 
 last_successful_action:
   date: 2026-07-29
-  summary: 已完成 BATCH-042_046：批量硬化 direct / ParkingCommand / PAUSE-BRAKE-FINISH / PARKING_OUT_* / 主链路 stage-status-replan 诊断契约。新增批量 smoke 脚本，覆盖 valid、timeout、multi-lot、direct、reset_history、pause/brake/finish、invalid、parking-out unsupported、target/path_id/far-obstacles 回归。x86/m57 统一编译通过，x86 批量 smoke 通过；m57 仍只代表交叉编译与 ELF/依赖检查通过，不代表板端 runtime 通过。
+  summary: 已完成 BATCH-047_048：真实车端 Topic/IDL 契约差距表和 m57 板端联调 Runbook 已补齐，m57 运行包脚本已通过 bash -n 和实际打包验证；包内 runner、libvalet_parking.so 与 MagnaDDS 实库均为 aarch64 ELF，manifest 已记录 runner/lib 动态依赖和 sha256。m57 仍只代表运行包准备完成，不代表板端 runtime 通过。
   evidence:
+    - applications/source/Docs/valet_parking_magnadds/12_真实车端Topic契约差距表.md
+    - applications/source/Docs/valet_parking_magnadds/13_m57板端运行包与联调Runbook.md
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/047_048_项目状态快照_Topic契约与m57联调包.md
+    - applications/source/valet_parking_tools/package_valet_parking_m57.sh
+    - out/valet_parking_m57_package/valet_parking_m57_runtime_20260729_081921/PACKAGE_MANIFEST.txt
+    - out/valet_parking_m57_package/valet_parking_m57_runtime_20260729_081921.tar.gz
     - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.cpp
     - applications/source/valet_parking/src/valet_parking_component.cpp
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
@@ -225,6 +236,10 @@ runtime_status:
   x86_parking_command_invalid_clear_smoke_test: PASS
   x86_batch_042_046_smoke_matrix: PASS
   m57_batch_042_046_static_build: PASS
+  topic_contract_gap_table: PASS_DOC_READY
+  m57_runtime_package_script: PASS
+  m57_runtime_package_manifest: PASS
+  m57_runtime_package_tarball: PASS_NOT_COMMITTED_OUT
   algorithm_source_localization: PASS
   original_flow_gap_map: PASS
   path_provider_reuse_value_assessment: PASS
@@ -235,8 +250,8 @@ runtime_status:
   note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-040 后，PATH_PROVIDER 已走本地化 OpenSpacePathProvider + OpenSpaceThreadManager，valid/domain_145 显示 threaded=true、provider_status=TARGET_READY、target_source=target_thread，multi-lot/domain_150 显示 preplan_candidates=1、thread_path_ids=[2,1,...] 且 target_source=preplan_candidate，direct-forward/domain_148 回归保持 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER。NEXT-041 后，valid/domain_160 显示 target_cancel=false 且 runner 退出时 OpenSpaceThreadManager stopped，timeout/domain_161 显示 provider_status=TARGET_TIMEOUT、target_timeout=true、target_cancel=true 和 fallback to ROI seed，multi-lot/domain_162 继续显示 target_source=preplan_candidate，direct-forward/domain_164 回归通过，且 direct 分支按设计跳过 threaded Provider，不要求线程停止日志；build_valet_parking.sh 已修正相对 out-dir 归一化。NLP smoother 评估结论是当前不接入：WSL x86 有 IPOPT 3.11.9，但 OSQP pkg-config 缺失，thirdparty/x86 与 thirdparty/m57 未发现随包 IPOPT/OSQP 实库。NEXT-039 后，direct-forward/domain_131 在 direct_speed=1.2 时输出 direct_speed_bound_max=1.200、parking_status=direct_moving，速度方向冲突 smoke 输出 velocity_direction_conflict 和 direct_stop_path。pause/brake/finish/invalid command 的 NEXT-037 历史 smoke 仍作为已验证边界。NEXT-033 到 NEXT-031/030/029/028/027/026/025/024 的历史边界 smoke 仍有效。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: BATCH-047_048
-  description: 批量完成真实车端 Topic/IDL 契约差距表与 m57 板端运行包/联调 Runbook。先扫描当前临时 IDL、runner 参数、m57 产物依赖和培训材料约束，再补文档/必要脚本；不贸然改正式 IDL，不修改 compile/thirdparty，不把 m57 交叉编译写成板端运行通过。
+  id: BATCH-049_052
+  description: 在继续使用简化 Topic 的前提下，批量补充当前 DDS 输入输出验证切口：梳理临时 DDS sample 到内部模型的 protocol adapter 边界，补 SelectedSlot/ParkingCommand/Aux 输入快照与回放验证，补 PlanningTrajectory 输出契约解析与对比脚本，形成端到端 I/O 回归矩阵；不等待真实车端 IDL，不贸然改正式 IDL，不修改 compile/thirdparty。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -465,3 +480,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/042_046_项目状态快照_批量硬化闭环.md
     phase: Fast-2
     status: PASS_BATCH_042_046_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  - id: 047_048
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/047_048_项目状态快照_Topic契约与m57联调包.md
+    phase: Fast-2
+    status: PASS_DOCS_PACKAGE_READY_BLOCKED_BOARD
