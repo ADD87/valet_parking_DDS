@@ -29,6 +29,9 @@ Options:
   --command-reset-history
                        Publish command with reset_history=true and require the
                        runner to consume it as a one-shot reset.
+  --pre-command-slot-count N
+                       Publish N SelectedSlot samples before command smoke so
+                       cleanup can be verified with existing path history.
   --direct-distance M Direct branch distance in meters. Default: 3.0.
   --direct-speed M    Direct branch speed in m/s. Default: 0.8.
   --disable-command-topic
@@ -78,6 +81,7 @@ command_mode="none"
 command_count=1
 command_interval_ms=100
 command_reset_history=0
+pre_command_slot_count=0
 direct_distance=3.0
 direct_speed=0.8
 disable_command_topic=0
@@ -133,6 +137,10 @@ while [[ $# -gt 0 ]]; do
     --command-reset-history)
       command_reset_history=1
       shift
+      ;;
+    --pre-command-slot-count)
+      pre_command_slot_count="${2:-}"
+      shift 2
       ;;
     --direct-distance)
       direct_distance="${2:-}"
@@ -197,6 +205,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if ! [[ "${pre_command_slot_count}" =~ ^[0-9]+$ ]]; then
+  echo "Invalid --pre-command-slot-count: ${pre_command_slot_count}" >&2
+  exit 2
+fi
 
 effective_count="${count}"
 effective_command_count="${command_count}"
@@ -407,6 +420,17 @@ else
   sleep 2
 fi
 
+if [[ "${command_mode}" != "none" ]] &&
+   ((pre_command_slot_count > 0)); then
+  {
+    echo "[valet_parking_smoke] publishing selected_slot before command"
+  } >>"${publisher_log}"
+  "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" \
+    --count="${pre_command_slot_count}" \
+    --interval-ms="${interval_ms}" >>"${publisher_log}" 2>&1
+  wait_for_runner_log "PATH_PROVIDER ok.*history=generated" 10 || true
+fi
+
 if [[ "${command_mode}" != "none" ]]; then
   command_args=(
     "--domain-id=${domain_id}"
@@ -474,7 +498,7 @@ if [[ "${command_mode}" != "none" ]]; then
 fi
 
 "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" --count="${effective_count}" \
-  --interval-ms="${interval_ms}" >"${publisher_log}" 2>&1
+  --interval-ms="${interval_ms}" >>"${publisher_log}" 2>&1
 
 if [[ "${direct_release_mode}" == "1" ]]; then
   release_wait_pattern="STAGE_CONTROL DIRECT_FORWARD.*mission_state=DIRECT_CONTROL_ACTIVE"
@@ -543,7 +567,7 @@ if [[ "${aux_runs_in_background}" == "1" ]]; then
   elif [[ "${aux_mode}" == "far-localization" ]]; then
     runner_wait_pattern="vehicle_lot_precheck failed"
   elif [[ "${aux_mode}" == "near-destination" ]]; then
-    runner_wait_pattern="STAGE_OUTPUT open_space.*finish_ready=true"
+    runner_wait_pattern="STAGE_CONTROL FINISH_HOLD"
   elif [[ "${aux_mode}" == "obstacle-appears" ]]; then
     runner_wait_pattern="replan=BLOCK_BY_STATIC_OBSTACLE"
   elif [[ "${aux_mode}" == "obstacle-disappears" ]]; then
@@ -693,16 +717,26 @@ case "${slot_mode}" in
       else
         require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
           "missing threaded OpenSpacePathProvider target plan evidence"
+        require_runner_log "ROI_DECIDER ok.*task_contract=lightweight_open_space_task_projection.*task_contract_record=roi_decider_output" \
+          "missing ROI task projection contract"
         require_runner_log "ROI_DECIDER ok.*open_space_info_contract=roi_output.*open_space_path_info_id=1.*dest_region_points=[0-9]+.*dest_region_area=[0-9]" \
           "missing ROI/OpenSpaceInfo minimal contract evidence"
+        require_runner_log "PATH_PROVIDER_PRECHECK ok.*task_contract=lightweight_open_space_task_projection.*task_contract_record=path_provider_precheck" \
+          "missing PathProvider PreCheck task projection contract"
         require_runner_log "PATH_PROVIDER_PRECHECK ok.*collision_contract=geometry_precheck_only.*collision_input_source=roi_and_external_segments.*wheel_mask_contract=not_exposed_in_current_mvp.*wheel_mask_input_source=none.*wheel_mask_idl_extension=required_before_vehicle_integration" \
           "missing PreCheck collision/wheel-mask observable contract"
+        require_runner_log "PATH_PROVIDER ok.*task_contract=lightweight_open_space_task_projection.*task_contract_record=path_provider_output" \
+          "missing PathProvider task projection contract"
         require_runner_log "PATH_PROVIDER ok.*open_space_info_contract=path_provider_output.*path_info_id=1.*dest_region_points=[0-9]+.*dest_region_area=[0-9].*planning_context_contract=path_provider_runtime_projection.*path_history_state=(generated|reused).*planning_context_path_id=1.*planning_context_replan_reason=.*target_update_writeback=(true|false)" \
           "missing PathProvider/OpenSpaceInfo and PlanningContext path writeback evidence"
+        require_runner_log "PATH_PARTITION ok.*task_contract=lightweight_open_space_task_projection.*task_contract_record=path_partition_output" \
+          "missing PathPartition task projection contract"
         require_runner_log "PATH_PARTITION ok.*decision_name=.*finish_name=.*destination_reached=(true|false)" \
           "missing PathPartition decision/finish/destination evidence"
         require_runner_log "PATH_PARTITION ok.*open_space_info_contract=path_partition_output.*chosen_path_contract=chosen_partitioned_path.*chosen_path_points=[0-9]+.*chosen_path_gear=[0-9]+" \
           "missing PathPartition/OpenSpaceInfo chosen path evidence"
+        require_runner_log "SPEED_OPTIMIZER ok.*task_contract=lightweight_open_space_task_projection.*task_contract_record=speed_optimizer_output" \
+          "missing SpeedOptimizer task projection contract"
         require_runner_log "SPEED_OPTIMIZER ok.*stage_name=(INIT|RUNNING|WAITOBSTACLE|WAITREPLAN)" \
           "missing SpeedOptimizer interactive stage name"
         require_runner_log "SPEED_OPTIMIZER ok.*open_space_info_contract=speed_optimizer_output.*chosen_path_points=[0-9]+.*stop_path=(true|false).*speed_optimizer_trajectory_points=[0-9]+.*wheel_mask_considered=false" \
@@ -717,6 +751,8 @@ case "${slot_mode}" in
           "missing lightweight IsReadyToFinishStage state evidence"
         require_runner_log "STAGE_OUTPUT open_space.*function_manager_source=selected_slot.*function_manager_sys_mode=RPA.*function_manager_sys_command=PARKINCONTROL.*function_manager_sys_run_state=(PARKSTART|PARKING).*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=PARKING_IN" \
           "missing FunctionManager projection evidence for normal open-space branch"
+        require_runner_log "STAGE_OUTPUT open_space.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=normal_open_space.*stage_exit_action=continue_parking.*path_history_action=keep_for_reuse.*speed_frame_action=keep_for_speed_warm_start.*direct_state_action=already_clear" \
+          "missing normal open-space runtime lifecycle evidence"
         reject_runner_log "provider_status=TARGET_TIMEOUT" \
           "unexpected threaded OpenSpacePathProvider timeout"
       fi
@@ -803,6 +839,12 @@ if [[ "${command_mode}" != "none" ]]; then
     require_runner_log "(STAGE_CONTROL .*reset_history=true|STAGE_OUTPUT open_space.*function_manager_reset_history=true)" \
       "missing reset_history=true in stage-control or Stage output reason"
   fi
+  if ((pre_command_slot_count > 0)); then
+    require_publisher_log "publishing selected_slot before command" \
+      "missing pre-command SelectedSlot publisher marker"
+    require_runner_log "PATH_PROVIDER ok.*history=generated.*generated_count=1" \
+      "missing pre-command generated path history"
+  fi
 
   case "${command_mode}" in
     parking-in)
@@ -832,6 +874,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD active MissionState lifecycle evidence"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*finish_condition=direct_command_inactive_and_standstill.*direct_command_active=true.*direct_command_inactive=false.*direct_finish_ready=false.*direct_stage_finish_state=WAITING" \
         "missing DIRECT_FORWARD direct finish inactive-command contract"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=direct_control_active.*stage_exit_action=continue_direct_control.*direct_state_action=keep_direct_command" \
+        "missing DIRECT_FORWARD active runtime lifecycle evidence"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*trajectory_type=NORMAL.*parking_status=direct_(stop_path|moving)" \
         "missing DIRECT_FORWARD trajectory_type/parking_status diagnostics"
       require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
@@ -874,6 +918,12 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD release MissionState/next_stage evidence"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*finish_condition=direct_command_inactive_and_standstill.*direct_command_active=false.*direct_command_inactive=true.*direct_finish_ready=true.*direct_stage_finish_state=READY.*previous_direct_command=DIRECT_FORWARD.*trajectory_type=SHORT_PATH.*parking_status=mission_finished" \
         "missing DIRECT_FORWARD inactive-command finish-ready contract"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=direct_release_ready.*stage_exit_action=reset_planning_state_after_publish.*path_history_action=reset_after_publish.*speed_frame_action=reset_after_publish.*direct_state_action=reset_after_publish" \
+        "missing DIRECT_FORWARD release runtime cleanup evidence"
+      if ((pre_command_slot_count > 0)); then
+        require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*path_history_available=true.*path_history_action=reset_after_publish" \
+          "missing DIRECT_FORWARD release cleanup of existing path history"
+      fi
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_FORWARD_RELEASED skip evidence for ROI/PathProvider/PathPartition"
       require_subscriber_log "is_estop=false" \
@@ -896,6 +946,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD active MissionState lifecycle evidence"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*finish_condition=direct_command_inactive_and_standstill.*direct_command_active=true.*direct_command_inactive=false.*direct_finish_ready=false.*direct_stage_finish_state=WAITING" \
         "missing DIRECT_BACKWARD direct finish inactive-command contract"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=direct_control_active.*stage_exit_action=continue_direct_control.*direct_state_action=keep_direct_command" \
+        "missing DIRECT_BACKWARD active runtime lifecycle evidence"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*trajectory_type=NORMAL.*parking_status=direct_(stop_path|moving)" \
         "missing DIRECT_BACKWARD trajectory_type/parking_status diagnostics"
       require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
@@ -940,6 +992,12 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD release MissionState/next_stage evidence"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*finish_condition=direct_command_inactive_and_standstill.*direct_command_active=false.*direct_command_inactive=true.*direct_finish_ready=true.*direct_stage_finish_state=READY.*previous_direct_command=DIRECT_BACKWARD.*trajectory_type=SHORT_PATH.*parking_status=mission_finished" \
         "missing DIRECT_BACKWARD inactive-command finish-ready contract"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=direct_release_ready.*stage_exit_action=reset_planning_state_after_publish.*path_history_action=reset_after_publish.*speed_frame_action=reset_after_publish.*direct_state_action=reset_after_publish" \
+        "missing DIRECT_BACKWARD release runtime cleanup evidence"
+      if ((pre_command_slot_count > 0)); then
+        require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*path_history_available=true.*path_history_action=reset_after_publish" \
+          "missing DIRECT_BACKWARD release cleanup of existing path history"
+      fi
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_BACKWARD_RELEASED skip evidence for ROI/PathProvider/PathPartition"
       require_subscriber_log "is_estop=false" \
@@ -1229,6 +1287,12 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing MissionState FINISH projection for destination reached"
         require_log "STAGE_OUTPUT open_space.*finish_ready=true.*finish_ready_condition=true.*finish_consecutive_frames=[2-9][0-9]*.*stage_finish_state=READY" \
           "missing consecutive-frame finish-ready evidence"
+        require_log "STAGE_OUTPUT open_space.*runtime_lifecycle_event=stage_finish_ready.*stage_exit_action=latch_finish_hold_after_publish.*path_history_action=keep_until_stage_reset.*speed_frame_action=keep_until_stage_reset" \
+          "missing finish-ready runtime lifecycle latch evidence"
+        require_log "STAGE_CONTROL FINISH_HOLD.*function_manager_source=stage_finish_latched.*function_manager_sys_command=PARKINGFINISH.*function_manager_sys_run_state=QUIT.*function_manager_parking_type=PARKING_IN" \
+          "missing FINISH_HOLD FunctionManager projection after Stage finish latch"
+        require_log "STAGE_CONTROL FINISH_HOLD.*runtime_lifecycle_event=stage_finish_hold.*stage_exit_action=hold_until_reset_history_or_new_stage.*path_history_action=keep_until_stage_reset.*speed_frame_action=keep_until_stage_reset.*parking_status=mission_finished" \
+          "missing FINISH_HOLD runtime lifecycle evidence"
         require_subscriber_log "is_estop=false" \
           "missing non-estop trajectory in near-destination finish mode"
         ;;

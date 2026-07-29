@@ -477,3 +477,44 @@ result=all smoke cases passed
 - `FinishScenario` 仍是轻量诊断意图，未接入完整原车状态机。
 - collision/wheel mask 仍未拿到真实车端输入语义，当前只做几何前置保护和 blocker 显式输出。
 - m57 已通过交叉编译和 ELF/依赖检查，但未做板端 runtime。
+
+## BATCH-069_072 已减少的差异
+
+| 原始流程节点 | 之前差异 | 本批次收敛 |
+|---|---|---|
+| `Stage::ExecuteTaskOnOpenSpace` task 输出链路 | ROI、PathProvider、PathPartition、SpeedOptimizer 虽有各自 reason，但缺少统一 task 输出契约，后续字段扩展容易散落 | 新增 `task_contract=lightweight_open_space_task_projection`，四段 task 和 PreCheck 都输出 `task_contract_record` 与完整 task chain |
+| `IsReadyToFinishStage()` 后的 Stage 退出语义 | `finish_ready=true` 只在普通 `STAGE_OUTPUT` 中表达，后续 SelectedSlot 帧仍可能继续跑 PARKING task | 新增 `stage_exit_requested` 锁存；finish-ready 后输出 `STAGE_CONTROL FINISH_HOLD`，跳过 ROI/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER |
+| `FinishScenario` / FunctionManager 输出投影 | `MISSION_FINISHED -> FINISH` 只是同一帧轻量意图，缺少后续保持态的 FunctionManager 命名 | `FINISH_HOLD` 输出 `function_manager_source=stage_finish_latched`、`PARKINGFINISH`、`QUIT`、`PARKING_IN`，作为当前 MVP 的退出保持态投影 |
+| direct release 后历史状态清理 | release 分支已有 reset，但 smoke 主要覆盖无普通历史或 release 后恢复普通链路，不能证明已有历史时 release 会清理 | 新增 `--pre-command-slot-count`，先生成普通路径历史，再发 direct release；smoke 断言 `path_history_available=true` 且 `path_history_action=reset_after_publish` |
+| FunctionManagerProjection 与 Stage 输出一致性 | 普通链、direct active、direct release、finish 的投影断言分散 | batch smoke 新增 runtime lifecycle 断言，把 `mission_state/parking_status/function_manager/runtime_lifecycle` 组合起来验证 |
+
+## BATCH-069_072 验证
+
+通过：
+```text
+git diff --check
+bash -n source/valet_parking_tools/smoke_valet_parking_x86.sh
+bash -n source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+bash source/valet_parking_tools/build_valet_parking.sh --out-dir /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_069_072
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_069_072/valet_parking_mvp/x86 --domain-id 121 --with-aux-inputs --aux-mode near-destination --aux-chassis-gear drive --timeout-ms 25000 --expect-thread-provider-stop
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_069_072/valet_parking_mvp/x86 --domain-id 122 --slot-mode target-moves --command-mode direct-forward-release --pre-command-slot-count 3 --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_069_072/valet_parking_mvp/x86 --first-domain-id 130 --timeout-ms 25000
+```
+
+产物：
+```text
+out/valet_parking_flow_gap_069_072/valet_parking_mvp/x86/lib/libvalet_parking.so
+out/valet_parking_flow_gap_069_072/valet_parking_mvp/m57/lib/libvalet_parking.so
+```
+
+批量 smoke：
+```text
+first-domain-id=130
+result=all smoke cases passed
+```
+
+仍保留的核心差异：
+- 新增 task/runtime contract 仍是诊断文本，不是正式 DDS 字段。
+- `FINISH_HOLD` 只是当前 Adapter 的轻量 Stage 退出锁存，不是完整原车 `FinishScenario()`。
+- collision/wheel mask、完整 `Frame/OpenSpaceInfo/PlanningContext` 和 NLP smoother 仍未完整接入。
+- m57 尚未做板端 runtime。

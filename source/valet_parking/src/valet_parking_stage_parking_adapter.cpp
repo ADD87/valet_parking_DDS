@@ -235,6 +235,7 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
     path_provider.Reset();
     stage_finish.Reset();
     direct_command.Reset();
+    stage_exit_requested = false;
     straight_path_provider.Reset();
     return path_partition_ready;
   }
@@ -338,6 +339,7 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
   PathProviderRuntimeState path_provider;
   StageFinishRuntimeState stage_finish;
   DirectCommandRuntimeState direct_command;
+  bool stage_exit_requested{false};
   TL::planning_internal::AvpSpeedPlanCollisionInfo
       last_speed_plan_collision_info;
   RuntimeVehicleInput vehicle_input;
@@ -922,6 +924,18 @@ void AppendRoiOpenSpaceInfoContract(
   AppendDestRegionContract(roi_output.dest_region, stream);
 }
 
+void AppendOpenSpaceTaskContract(const std::string& record_type,
+                                 std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", task_contract=lightweight_open_space_task_projection"
+          << ", task_contract_record=" << record_type
+          << ", task_contract_chain="
+          << "ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION>SPEED_OPTIMIZER"
+          << ", task_status_transport=replan_reason_text";
+}
+
 PathProviderPreCheckResult RunPathProviderPreCheck(
     const valet_parking_config_t& config,
     const TL::planning::RoiDeciderOutput& roi_output,
@@ -1106,8 +1120,9 @@ std::string BuildPathProviderPreCheckReason(
     const PathProviderPreCheckResult& result) {
   std::ostringstream stream;
   if (!result.ok) {
-    stream << "PATH_PROVIDER_PRECHECK failed: " << result.reason
-           << ", collision_contract=geometry_precheck_only"
+    stream << "PATH_PROVIDER_PRECHECK failed: " << result.reason;
+    AppendOpenSpaceTaskContract("path_provider_precheck", &stream);
+    stream << ", collision_contract=geometry_precheck_only"
            << ", collision_input_source=roi_and_external_segments"
            << ", wheel_mask_contract=not_exposed_in_current_mvp"
            << ", wheel_mask_input_source=none"
@@ -1124,8 +1139,9 @@ std::string BuildPathProviderPreCheckReason(
          << ", near_start_segments=" << result.obstacle_near_start_count
          << ", near_end_segments=" << result.obstacle_near_end_count
          << ", vehicle_has_state="
-         << (result.vehicle_has_state ? "true" : "false")
-         << ", collision_contract=geometry_precheck_only"
+         << (result.vehicle_has_state ? "true" : "false");
+  AppendOpenSpaceTaskContract("path_provider_precheck", &stream);
+  stream << ", collision_contract=geometry_precheck_only"
          << ", collision_input_source=roi_and_external_segments"
          << ", wheel_mask_contract=not_exposed_in_current_mvp"
          << ", wheel_mask_input_source=none"
@@ -2068,8 +2084,9 @@ bool RunPathProvider(const valet_parking_config_t& config,
     ++provider_state->reused_count;
 
     std::ostringstream stream;
-    stream << "PATH_PROVIDER ok"
-           << ", partitions=" << path_output->partitioned_path.size()
+    stream << "PATH_PROVIDER ok";
+    AppendOpenSpaceTaskContract("path_provider_output", &stream);
+    stream << ", partitions=" << path_output->partitioned_path.size()
            << ", points=" << CountPathProviderPoints(*path_output)
            << ", path_type=" << path_output->path_type
            << ", parking_seq=" << parking_seq
@@ -2109,6 +2126,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
     if (provider == nullptr) {
       std::ostringstream stream;
       stream << "PATH_PROVIDER failed: threaded provider unavailable";
+      AppendOpenSpaceTaskContract("path_provider_output", &stream);
       AppendPathProviderAttemptDiagnostics(decision, replan_text,
                                            strategy_summary, vehicle_input,
                                            obstacles.size(), &stream);
@@ -2121,6 +2139,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
     if (!provider_status.ok()) {
       std::ostringstream stream;
       stream << "PATH_PROVIDER failed: " << provider_status.error_message();
+      AppendOpenSpaceTaskContract("path_provider_output", &stream);
       AppendPathProviderAttemptDiagnostics(decision, replan_text,
                                            strategy_summary, vehicle_input,
                                            obstacles.size(), &stream);
@@ -2132,6 +2151,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
   } catch (const std::exception& ex) {
     std::ostringstream stream;
     stream << "PATH_PROVIDER failed: exception: " << ex.what();
+    AppendOpenSpaceTaskContract("path_provider_output", &stream);
     AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
                                          vehicle_input, obstacles.size(),
                                          &stream);
@@ -2142,6 +2162,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
   } catch (...) {
     std::ostringstream stream;
     stream << "PATH_PROVIDER failed: unknown exception";
+    AppendOpenSpaceTaskContract("path_provider_output", &stream);
     AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
                                          vehicle_input, obstacles.size(),
                                          &stream);
@@ -2157,6 +2178,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
     stream << "PATH_PROVIDER failed: " << path_output->error_msg
            << ", partitions=" << path_output->partitioned_path.size()
            << ", points=" << point_count;
+    AppendOpenSpaceTaskContract("path_provider_output", &stream);
     AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
                                          vehicle_input, obstacles.size(),
                                          &stream);
@@ -2170,6 +2192,7 @@ bool RunPathProvider(const valet_parking_config_t& config,
     stream << "PATH_PROVIDER failed: insufficient path points"
            << ", partitions=" << path_output->partitioned_path.size()
            << ", points=" << point_count;
+    AppendOpenSpaceTaskContract("path_provider_output", &stream);
     AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
                                          vehicle_input, obstacles.size(),
                                          &stream);
@@ -2196,8 +2219,9 @@ bool RunPathProvider(const valet_parking_config_t& config,
   ++provider_state->generated_count;
 
   std::ostringstream stream;
-  stream << "PATH_PROVIDER ok"
-         << ", partitions=" << path_output->partitioned_path.size()
+  stream << "PATH_PROVIDER ok";
+  AppendOpenSpaceTaskContract("path_provider_output", &stream);
+  stream << ", partitions=" << path_output->partitioned_path.size()
          << ", points=" << point_count
          << ", path_type=" << path_output->path_type
          << ", parking_seq=" << parking_seq
@@ -2577,6 +2601,33 @@ void AppendStageProjectionContract(const std::string& record_type,
           << ", dds_field_extension=required_before_vehicle_integration";
 }
 
+void AppendRuntimeLifecycleContract(const std::string& event,
+                                    const std::string& stage_exit_action,
+                                    const std::string& path_history_action,
+                                    const std::string& speed_frame_action,
+                                    const std::string& direct_state_action,
+                                    bool path_history_available,
+                                    bool speed_frame_available,
+                                    bool direct_command_active,
+                                    std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", runtime_lifecycle_contract="
+          << "lightweight_stage_runtime_projection"
+          << ", runtime_lifecycle_event=" << event
+          << ", stage_exit_action=" << stage_exit_action
+          << ", path_history_available="
+          << (path_history_available ? "true" : "false")
+          << ", path_history_action=" << path_history_action
+          << ", speed_frame_available="
+          << (speed_frame_available ? "true" : "false")
+          << ", speed_frame_action=" << speed_frame_action
+          << ", direct_command_active="
+          << (direct_command_active ? "true" : "false")
+          << ", direct_state_action=" << direct_state_action;
+}
+
 std::string ProjectSysCommandName(ParkingCommandMode mode) {
   switch (mode) {
     case ParkingCommandMode::PARKING_COMMAND_PARKING_IN:
@@ -2704,6 +2755,18 @@ FunctionManagerProjection BuildReleasedDirectFunctionProjection(
   projection.sys_run_state = "QUIT";
   projection.sys_warning_info = "NO_WARNING";
   projection.parking_type = ProjectParkingTypeName(previous_direct_mode);
+  projection.reset_history = false;
+  return projection;
+}
+
+FunctionManagerProjection BuildStageFinishHoldFunctionProjection() {
+  FunctionManagerProjection projection;
+  projection.source = "stage_finish_latched";
+  projection.parking_command = "NONE";
+  projection.sys_command = "PARKINGFINISH";
+  projection.sys_run_state = "QUIT";
+  projection.sys_warning_info = "NO_WARNING";
+  projection.parking_type = "PARKING_IN";
   projection.reset_history = false;
   return projection;
 }
@@ -2846,7 +2909,10 @@ std::string BuildOpenSpaceStageOutputContract(
     const TL::planning::PartitionOutput& partition_output,
     const TL::planning::SpeedOptimizerOutput* speed_output,
     const StageFinishEvaluation* finish_evaluation,
-    const FunctionManagerProjection* function_projection) {
+    const FunctionManagerProjection* function_projection,
+    const PathProviderRuntimeState* provider_state,
+    bool has_last_speed_frame,
+    bool direct_command_active) {
   const std::string parking_status =
       StageParkingStatus(partition_output, speed_output, finish_evaluation);
   const PlanningTrajectoryType trajectory_type =
@@ -2901,6 +2967,16 @@ std::string BuildOpenSpaceStageOutputContract(
   if (function_projection != nullptr) {
     AppendFunctionManagerProjectionContract(*function_projection, &stream);
   }
+  const bool finish_ready =
+      finish_evaluation != nullptr && finish_evaluation->ready_to_finish;
+  AppendRuntimeLifecycleContract(
+      finish_ready ? "stage_finish_ready" : "normal_open_space",
+      finish_ready ? "latch_finish_hold_after_publish" : "continue_parking",
+      finish_ready ? "keep_until_stage_reset" : "keep_for_reuse",
+      finish_ready ? "keep_until_stage_reset" : "keep_for_speed_warm_start",
+      direct_command_active ? "unexpected_active" : "already_clear",
+      provider_state != nullptr && provider_state->has_history,
+      has_last_speed_frame, direct_command_active, &stream);
   if (speed_output != nullptr) {
     stream << ", speed_interactive_stage="
            << TL::planning_internal::SpeedTaskInteractiveStage_Name(
@@ -2963,8 +3039,9 @@ bool RunPathPartition(const valet_parking_config_t& config,
   }
 
   std::ostringstream stream;
-  stream << "PATH_PARTITION ok"
-          << ", decision=" << static_cast<int>(partition_output->path_decision)
+  stream << "PATH_PARTITION ok";
+  AppendOpenSpaceTaskContract("path_partition_output", &stream);
+  stream << ", decision=" << static_cast<int>(partition_output->path_decision)
           << ", decision_name="
           << PathDecisionToString(partition_output->path_decision)
           << ", finish=" << static_cast<int>(partition_output->finish_status)
@@ -3102,8 +3179,9 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
       trajectory.TrajectoryPointAt(trajectory_points - 1).path_point.s -
       trajectory.TrajectoryPointAt(0).path_point.s;
   std::ostringstream stream;
-  stream << "SPEED_OPTIMIZER ok"
-         << ", points=" << trajectory_points
+  stream << "SPEED_OPTIMIZER ok";
+  AppendOpenSpaceTaskContract("speed_optimizer_output", &stream);
+  stream << ", points=" << trajectory_points
          << ", duration=" << std::fixed << std::setprecision(3)
          << total_time
          << ", distance=" << total_s
@@ -3875,8 +3953,9 @@ PlanningTrajectory BuildTrajectoryFromSpeedOptimizer(
 std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output,
                            uint32_t path_info_id) {
   std::ostringstream stream;
-  stream << "ROI_DECIDER ok"
-         << ", scenario=" << static_cast<int>(output.scenario_type)
+  stream << "ROI_DECIDER ok";
+  AppendOpenSpaceTaskContract("roi_decider_output", &stream);
+  stream << ", scenario=" << static_cast<int>(output.scenario_type)
          << ", lot_status=" << static_cast<int>(output.lot_status)
          << ", target=(" << std::fixed << std::setprecision(3)
          << output.end_pose.x << "," << output.end_pose.y << ","
@@ -4002,6 +4081,12 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
              << direct_speed_profile.max_sample_speed
              << ", trajectory_type=NORMAL";
       AppendDirectFinishContract(direct_finish_evaluation, &stream);
+      AppendRuntimeLifecycleContract(
+          "direct_control_active", "continue_direct_control",
+          "preserve_ordinary_history", "update_from_direct_speed_optimizer",
+          "keep_direct_command", runtime_->path_provider.has_history,
+          runtime_->has_last_speed_frame, runtime_->direct_command.active,
+          &stream);
       const std::string stage_control_reason = stream.str();
 
       TL::planning::PartitionOutput straight_partition_output;
@@ -4099,7 +4184,23 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       }
       stream << ", trajectory_type=SHORT_PATH"
              << ", parking_status=" << parking_status;
+      AppendRuntimeLifecycleContract(
+          command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH
+              ? "finish_command_ready"
+              : (command_mode == ParkingCommandMode::PARKING_COMMAND_BRAKE
+                     ? "brake_hold"
+                     : "pause_hold"),
+          command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH
+              ? "latch_finish_hold_after_publish"
+              : "hold_stage_control",
+          "keep_until_stage_reset", "keep_until_stage_reset",
+          "already_clear", runtime_->path_provider.has_history,
+          runtime_->has_last_speed_frame, runtime_->direct_command.active,
+          &stream);
       metadata.status_reason = stream.str();
+      if (command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
+        runtime_->stage_exit_requested = true;
+      }
       *status_reason = metadata.status_reason;
       *output_sample = BuildStageControlStopTrajectory(
           config_, metadata, runtime_->vehicle_input, metadata.status_reason,
@@ -4122,6 +4223,12 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
              << ", parking_status=parking_out_unsupported"
              << ", unsupported_in_mvp"
              << ", unsupported_reason=parking_out_not_in_mvp";
+      AppendRuntimeLifecycleContract(
+          "parking_out_unsupported", "stay_in_parking_stage",
+          "keep_until_supported_parking_out", "keep_until_supported_parking_out",
+          "already_clear", runtime_->path_provider.has_history,
+          runtime_->has_last_speed_frame, runtime_->direct_command.active,
+          &stream);
       metadata.status_reason = stream.str();
       *status_reason = metadata.status_reason;
       *output_sample = BuildStageControlStopTrajectory(
@@ -4184,6 +4291,20 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         direct_finish_evaluation.ready_to_finish ? "FINISH" : "PARKING",
         direct_finish_evaluation.ready_to_finish, &stream);
     AppendDirectFinishContract(direct_finish_evaluation, &stream);
+    AppendRuntimeLifecycleContract(
+        direct_finish_evaluation.ready_to_finish ? "direct_release_ready"
+                                                 : "direct_release_waiting",
+        direct_finish_evaluation.ready_to_finish
+            ? "reset_planning_state_after_publish"
+            : "wait_for_direct_release_ready",
+        direct_finish_evaluation.ready_to_finish ? "reset_after_publish"
+                                                 : "keep_until_release_ready",
+        direct_finish_evaluation.ready_to_finish ? "reset_after_publish"
+                                                 : "keep_until_release_ready",
+        direct_finish_evaluation.ready_to_finish ? "reset_after_publish"
+                                                 : "keep_release_waiting",
+        runtime_->path_provider.has_history, runtime_->has_last_speed_frame,
+        runtime_->direct_command.active, &stream);
     stream << ", previous_direct_command="
            << ParkingCommandModeToString(released_mode)
            << ", trajectory_type=SHORT_PATH"
@@ -4196,6 +4317,36 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     if (direct_finish_evaluation.ready_to_finish) {
       runtime_->ResetPlanningState();
     }
+    *status_reason = metadata.status_reason;
+    *output_sample = BuildStageControlStopTrajectory(
+        config_, metadata, runtime_->vehicle_input, metadata.status_reason,
+        ::GearPosition::GEAR_PARKING);
+    return true;
+  }
+
+  if (runtime_->stage_exit_requested) {
+    const FunctionManagerProjection finish_hold_projection =
+        BuildStageFinishHoldFunctionProjection();
+
+    std::ostringstream stream;
+    stream << "STAGE_CONTROL FINISH_HOLD"
+           << ", command_action=FINISH_HOLD"
+           << ", stage_status=mission_finished"
+           << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
+           << ", task=STAGE_FINISH_HOLD"
+           << ", reset_history=false";
+    AppendStageProjectionContract("stage_control", &stream);
+    AppendFunctionManagerProjectionContract(finish_hold_projection, &stream);
+    AppendMissionStateContract("MISSION_FINISHED", "FINISH", true, &stream);
+    AppendRuntimeLifecycleContract(
+        "stage_finish_hold", "hold_until_reset_history_or_new_stage",
+        "keep_until_stage_reset", "keep_until_stage_reset", "already_clear",
+        runtime_->path_provider.has_history, runtime_->has_last_speed_frame,
+        runtime_->direct_command.active, &stream);
+    stream << ", trajectory_type=SHORT_PATH"
+           << ", parking_status=mission_finished";
+
+    metadata.status_reason = stream.str();
     *status_reason = metadata.status_reason;
     *output_sample = BuildStageControlStopTrajectory(
         config_, metadata, runtime_->vehicle_input, metadata.status_reason,
@@ -4308,12 +4459,18 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
                             &speed_output, &speed_optimizer_reason)) {
         runtime_->UpdateAfterSpeedOptimizer(metadata.data_stamp_ms,
                                             speed_output);
+        if (stage_finish_evaluation.ready_to_finish) {
+          runtime_->stage_exit_requested = true;
+        }
         metadata.status_reason =
             speed_optimizer_reason + "; " +
             BuildOpenSpaceStageOutputContract(partition_output,
                                               &speed_output,
                                               &stage_finish_evaluation,
-                                              &function_projection) +
+                                              &function_projection,
+                                              &runtime_->path_provider,
+                                              runtime_->has_last_speed_frame,
+                                              runtime_->direct_command.active) +
             "; " + path_partition_reason + "; " + path_provider_reason +
             "; " + precheck_reason + "; " + roi_reason;
         *status_reason = metadata.status_reason;
@@ -4323,11 +4480,17 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       }
 
       runtime_->UpdateAfterPartitionFallback(partition_output);
+      if (stage_finish_evaluation.ready_to_finish) {
+        runtime_->stage_exit_requested = true;
+      }
       metadata.status_reason =
           speed_optimizer_reason + "; fallback to PATH_PARTITION; " +
           BuildOpenSpaceStageOutputContract(partition_output, nullptr,
                                             &stage_finish_evaluation,
-                                            &function_projection) + "; " +
+                                            &function_projection,
+                                            &runtime_->path_provider,
+                                            runtime_->has_last_speed_frame,
+                                            runtime_->direct_command.active) + "; " +
           path_partition_reason + "; " + path_provider_reason + "; " +
           precheck_reason + "; " + roi_reason;
       *status_reason = metadata.status_reason;
