@@ -15,6 +15,7 @@ Options:
   --interval-ms N     Mock publish interval. Default: 500.
   --slot-mode MODE    SelectedSlot publisher mode. Default: valid.
                        valid|empty|overflow|nan|degenerate-corners|
+                       missing-selected-lot|
                        target-moves|parking-seq-changes|
                        multi-lot-seq-switch
   --command-mode MODE ParkingCommand publisher mode. Default: none.
@@ -570,7 +571,16 @@ if [[ "${direct_release_mode}" == "1" ]]; then
   "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" \
     --count="${post_clear_count}" \
     --interval-ms="${interval_ms}" >>"${publisher_log}" 2>&1
-  wait_for_runner_log "${release_done_pattern}" 10 || true
+  if ! wait_for_runner_log "${release_done_pattern}" 10; then
+    {
+      echo
+      echo "[valet_parking_smoke] retrying selected_slot after release wait miss"
+    } >>"${publisher_log}"
+    "${publisher}" --domain-id="${domain_id}" --mode="${slot_mode}" \
+      --count="${post_clear_count}" \
+      --interval-ms="${interval_ms}" >>"${publisher_log}" 2>&1
+    wait_for_runner_log "${release_done_pattern}" 20 || true
+  fi
 fi
 
 if [[ -n "${command_publisher_pid:-}" ]]; then
@@ -817,7 +827,7 @@ case "${slot_mode}" in
           "missing SpeedOptimizer interactive stage name"
         require_runner_log "SPEED_OPTIMIZER ok.*open_space_info_contract=speed_optimizer_output.*chosen_path_points=[0-9]+.*stop_path=(true|false).*speed_optimizer_trajectory_points=[0-9]+.*wheel_mask_considered=false" \
           "missing SpeedOptimizer/OpenSpaceInfo trajectory contract"
-      require_runner_log "STAGE_OUTPUT open_space.*task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION>SPEED_OPTIMIZER.*path_decision=.*finish_status=.*destination_reached=(true|false).*target_gear=[0-9]+.*trajectory_type=(NORMAL|SHORT_PATH).*parking_status=(running|wait_obstacle|wait_replan|prepare_finish|mission_finished|stop_by_path_partition).*finish_priority=finish_over_interactive" \
+      require_runner_log "STAGE_OUTPUT open_space.*original_flow_branch=normal_open_space.*task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION>SPEED_OPTIMIZER.*path_decision=.*finish_status=.*destination_reached=(true|false).*target_gear=[0-9]+.*trajectory_type=(NORMAL|SHORT_PATH).*parking_status=(running|wait_obstacle|wait_replan|prepare_finish|mission_finished|stop_by_path_partition).*finish_priority=finish_over_interactive" \
         "missing Stage output contract aligned with ValetParkingStageParking flow"
         require_runner_log "STAGE_OUTPUT open_space.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=open_space_output.*status_transport=replan_reason_text.*dds_field_extension=required_before_vehicle_integration" \
           "missing centralized Stage text-contract boundary"
@@ -894,7 +904,7 @@ case "${slot_mode}" in
     require_subscriber_log "is_estop=true" \
       "missing subscriber estop for degenerate-corners slot mode"
     ;;
-  empty|overflow|nan)
+  empty|overflow|nan|missing-selected-lot)
     case "${slot_mode}" in
       empty)
         require_runner_log "selected_slot.is_valid is false" \
@@ -911,6 +921,14 @@ case "${slot_mode}" in
       nan)
         require_runner_log "STAGE_OUTPUT fallback.*fallback_event=parking_lot_convert_failed.*fallback_action=publish_estop.*runtime_lifecycle_event=parking_lot_convert_failed_fallback" \
           "missing Stage fallback lifecycle evidence for nan slot mode"
+        ;;
+      missing-selected-lot)
+        require_runner_log "selected_slot opt_parking_seq is unavailable.*opt_parking_seq=99.*available_parking_seq=\\[1\\]" \
+          "missing selected_lot_unavailable rejection for missing-selected-lot mode"
+        require_runner_log "STAGE_OUTPUT fallback.*fallback_event=selected_lot_unavailable.*fallback_action=publish_estop.*original_flow_branch=normal_open_space_early_input.*runtime_lifecycle_event=selected_lot_unavailable_fallback" \
+          "missing Stage fallback lifecycle evidence for missing-selected-lot mode"
+        reject_runner_log "ROI_DECIDER ok" \
+          "missing-selected-lot should fail before ROI_DECIDER"
         ;;
     esac
     require_runner_log "estop=true" \
@@ -960,7 +978,7 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD command consumption in runner log"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_FORWARD stage-control trajectory reason"
-      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*command_action=DIRECT_FORWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH" \
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*command_action=DIRECT_FORWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH.*original_flow_branch=direct_open_space" \
         "missing DIRECT_FORWARD standardized stage-control contract"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=stage_control.*status_transport=replan_reason_text" \
         "missing DIRECT_FORWARD centralized Stage control contract"
@@ -982,7 +1000,7 @@ if [[ "${command_mode}" != "none" ]]; then
       require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
         "missing DIRECT_FORWARD OPEN_SPACE_STRAIGHT_PATH execution evidence"
       if [[ "${force_straight_path_fail}" == "1" ]]; then
-        require_runner_log "OPEN_SPACE_STRAIGHT_PATH failed: forced_by_smoke_env.*task_contract=lightweight_direct_path_projection.*task_contract_record=open_space_straight_path_output" \
+        require_runner_log "OPEN_SPACE_STRAIGHT_PATH failed: forced_by_smoke_env.*task_contract=lightweight_direct_task_projection.*task_contract_record=open_space_straight_path_output.*task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER" \
           "missing forced DIRECT_FORWARD straight path failure evidence"
         require_runner_log "STAGE_OUTPUT fallback.*fallback_event=open_space_straight_path_failed.*fallback_action=publish_stage_control_stop.*runtime_lifecycle_event=direct_straight_path_fallback" \
           "missing DIRECT_FORWARD straight path Stage fallback evidence"
@@ -991,14 +1009,14 @@ if [[ "${command_mode}" != "none" ]]; then
         require_subscriber_log "points=1" \
           "DIRECT_FORWARD straight path failure should publish one-point stop"
       elif [[ "${force_speed_optimizer_fail}" == "1" ]]; then
-        require_runner_log "SPEED_OPTIMIZER failed: forced_by_smoke_env.*task_contract=lightweight_open_space_task_projection.*task_contract_record=speed_optimizer_output" \
+        require_runner_log "SPEED_OPTIMIZER failed: forced_by_smoke_env.*task_contract=lightweight_direct_task_projection.*task_contract_record=direct_speed_optimizer_output.*task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER" \
           "missing forced DIRECT_FORWARD speed optimizer failure evidence"
         require_runner_log "fallback to OPEN_SPACE_STRAIGHT_PATH" \
           "missing DIRECT_FORWARD fallback to straight path after speed failure"
         require_runner_log "STAGE_OUTPUT fallback.*fallback_event=direct_speed_optimizer_failed.*fallback_action=(publish_open_space_straight_path|publish_stage_control_stop).*runtime_lifecycle_event=direct_speed_optimizer_fallback" \
           "missing DIRECT_FORWARD speed fallback Stage evidence"
       else
-        require_runner_log "SPEED_OPTIMIZER ok" \
+        require_runner_log "SPEED_OPTIMIZER ok.*task_contract=lightweight_direct_task_projection.*task_contract_record=direct_speed_optimizer_output.*task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER" \
           "missing DIRECT_FORWARD speed optimizer handoff evidence"
         require_runner_log "direct_speed_bound_max=${direct_speed}" \
           "missing DIRECT_FORWARD direct speed bound mapping evidence"
@@ -1056,7 +1074,7 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD command consumption in runner log"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_BACKWARD stage-control trajectory reason"
-      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*command_action=DIRECT_BACKWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH" \
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*command_action=DIRECT_BACKWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH.*original_flow_branch=direct_open_space" \
         "missing DIRECT_BACKWARD standardized stage-control contract"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*stage_contract=lightweight_valet_parking_stage_projection.*stage_contract_record=stage_control.*status_transport=replan_reason_text" \
         "missing DIRECT_BACKWARD centralized Stage control contract"
@@ -1078,7 +1096,7 @@ if [[ "${command_mode}" != "none" ]]; then
       require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
         "missing DIRECT_BACKWARD OPEN_SPACE_STRAIGHT_PATH execution evidence"
       if [[ "${force_straight_path_fail}" == "1" ]]; then
-        require_runner_log "OPEN_SPACE_STRAIGHT_PATH failed: forced_by_smoke_env.*task_contract=lightweight_direct_path_projection.*task_contract_record=open_space_straight_path_output" \
+        require_runner_log "OPEN_SPACE_STRAIGHT_PATH failed: forced_by_smoke_env.*task_contract=lightweight_direct_task_projection.*task_contract_record=open_space_straight_path_output.*task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER" \
           "missing forced DIRECT_BACKWARD straight path failure evidence"
         require_runner_log "STAGE_OUTPUT fallback.*fallback_event=open_space_straight_path_failed.*fallback_action=publish_stage_control_stop.*runtime_lifecycle_event=direct_straight_path_fallback" \
           "missing DIRECT_BACKWARD straight path Stage fallback evidence"
@@ -1087,14 +1105,14 @@ if [[ "${command_mode}" != "none" ]]; then
         require_subscriber_log "points=1" \
           "DIRECT_BACKWARD straight path failure should publish one-point stop"
       elif [[ "${force_speed_optimizer_fail}" == "1" ]]; then
-        require_runner_log "SPEED_OPTIMIZER failed: forced_by_smoke_env.*task_contract=lightweight_open_space_task_projection.*task_contract_record=speed_optimizer_output" \
+        require_runner_log "SPEED_OPTIMIZER failed: forced_by_smoke_env.*task_contract=lightweight_direct_task_projection.*task_contract_record=direct_speed_optimizer_output.*task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER" \
           "missing forced DIRECT_BACKWARD speed optimizer failure evidence"
         require_runner_log "fallback to OPEN_SPACE_STRAIGHT_PATH" \
           "missing DIRECT_BACKWARD fallback to straight path after speed failure"
         require_runner_log "STAGE_OUTPUT fallback.*fallback_event=direct_speed_optimizer_failed.*fallback_action=(publish_open_space_straight_path|publish_stage_control_stop).*runtime_lifecycle_event=direct_speed_optimizer_fallback" \
           "missing DIRECT_BACKWARD speed fallback Stage evidence"
       else
-        require_runner_log "SPEED_OPTIMIZER ok" \
+        require_runner_log "SPEED_OPTIMIZER ok.*task_contract=lightweight_direct_task_projection.*task_contract_record=direct_speed_optimizer_output.*task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER" \
           "missing DIRECT_BACKWARD speed optimizer handoff evidence"
         require_runner_log "direct_speed_bound_max=${direct_speed}" \
           "missing DIRECT_BACKWARD direct speed bound mapping evidence"

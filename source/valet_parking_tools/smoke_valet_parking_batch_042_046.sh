@@ -114,6 +114,9 @@ run_case "empty-selected-slot-fallback" \
 run_case "overflow-selected-slot-fallback" \
   --slot-mode overflow
 
+run_case "missing-selected-lot-fallback" \
+  --slot-mode missing-selected-lot
+
 run_case "nan-parking-lot-fallback" \
   --slot-mode nan
 
@@ -156,6 +159,14 @@ run_case "direct-forward-straight-path-fallback" \
 
 run_case "direct-forward-speed-fallback" \
   --command-mode direct-forward \
+  --force-speed-optimizer-fail
+
+run_case "direct-backward-straight-path-fallback" \
+  --command-mode direct-backward \
+  --force-straight-path-fail
+
+run_case "direct-backward-speed-fallback" \
+  --command-mode direct-backward \
   --force-speed-optimizer-fail
 
 run_case "direct-forward-release-finish-contract" \

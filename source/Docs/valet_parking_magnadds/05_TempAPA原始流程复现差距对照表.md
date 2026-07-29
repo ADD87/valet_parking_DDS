@@ -615,3 +615,41 @@ result=all smoke cases passed
 - direct speed fallback 的 task chain 仍复用通用 `SPEED_OPTIMIZER` 输出诊断，后续可拆成 direct 专用 task contract。
 - collision/wheel mask、完整 `Frame/OpenSpaceInfo/PlanningContext` 和 NLP smoother 仍未完整接入。
 - m57 尚未做板端 runtime。
+
+## BATCH-081_084 已减少的差异
+
+| 原始流程节点 | 之前差异 | 本批次收敛 |
+|---|---|---|
+| `SelectedSlot` 选位语义 | `opt_parking_seq` 缺失时，adapter 可能静默回退到第一个车位，容易把“车位不存在”和“选到了别的车位”混在一起 | 严格返回 `selected_lot_unavailable`，不再静默回退，和原始流程的明确失败语义更一致 |
+| direct release 历史清理 | release 只在独立命令成功样本里验证，缺少“已有历史路径”时的 release 后清理证据 | 新增 `--pre-command-slot-count` 和 post-clear 触发窗口，确认 `path_history_action=reset_after_publish` |
+| direct branch 支路契约 | direct forward/backward 的 open-space 直线链路和普通 open-space task contract 容易混在一起 | 增加 `original_flow_branch=direct_open_space` 和 direct 专用 task contract，减少诊断歧义 |
+| 原始流程支路可读性 | 只能看见局部 reason，难以快速对照原始流程图 | Stage 输出开始显式投影 `original_flow_reference` / `original_flow_branch`，更容易按原始流程图逐段核对 |
+
+## BATCH-081_084 验证
+
+通过：
+```text
+bash -n source/valet_parking_tools/smoke_valet_parking_x86.sh
+bash -n source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+git diff --check
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_081_084/valet_parking_mvp/x86 --domain-id 186 --slot-mode target-moves --command-mode direct-forward-release --pre-command-slot-count 3 --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_081_084/valet_parking_mvp/x86 --first-domain-id 187 --timeout-ms 25000
+```
+
+产物：
+```text
+out/valet_parking_flow_gap_081_084/valet_parking_mvp/x86/lib/libvalet_parking.so
+out/valet_parking_flow_gap_081_084/valet_parking_mvp/m57/lib/libvalet_parking.so
+```
+
+批量 smoke：
+```text
+first-domain-id=187
+result=all smoke cases passed
+```
+
+仍保留的核心差异：
+
+- formal typed DDS 字段仍未完全替代 `replan_reason` / `estop.reason` 文本诊断。
+- `Frame` / `OpenSpaceInfo` / `PlanningContext` 仍未完全正式化。
+- collision / wheel mask、NLP smoother 和 m57 板端 runtime 仍是后续大项。

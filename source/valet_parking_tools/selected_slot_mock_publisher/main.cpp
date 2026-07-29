@@ -57,6 +57,7 @@ bool ParseUint32(const std::string& text, uint32_t* out_value) {
 bool IsModeSupported(const std::string& mode) {
   return mode == "valid" || mode == "empty" || mode == "overflow" ||
          mode == "nan" || mode == "degenerate-corners" ||
+         mode == "missing-selected-lot" ||
          mode == "target-moves" || mode == "parking-seq-changes" ||
          mode == "multi-lot-seq-switch";
 }
@@ -153,6 +154,9 @@ std::vector<PsPoint> BuildSlotCorners(double center_x,
 }
 
 uint32_t BuildSelectedParkingSeq(const PublisherOptions& options, uint32_t index) {
+  if (options.mode == "missing-selected-lot") {
+    return 99U;
+  }
   if ((options.mode == "parking-seq-changes" &&
        index >= kParkingSeqChangesStartIndex) ||
       (options.mode == "multi-lot-seq-switch" &&
@@ -183,6 +187,9 @@ std::string BuildTargetLabel(const PublisherOptions& options, uint32_t index) {
   }
   if (options.mode == "multi-lot-seq-switch") {
     return BuildSelectedParkingSeq(options, index) == 2U ? "slot2" : "slot1";
+  }
+  if (options.mode == "missing-selected-lot") {
+    return "missing-selected-lot";
   }
   return "base";
 }
@@ -248,6 +255,8 @@ SelectedSlot BuildSample(const PublisherOptions& options, uint32_t index) {
   if (options.mode == "multi-lot-seq-switch") {
     lots.push_back(BuildParkingLot(options, index, 1U));
     lots.push_back(BuildParkingLot(options, index, 2U));
+  } else if (options.mode == "missing-selected-lot") {
+    lots.push_back(BuildParkingLot(options, index, 1U));
   } else {
     lots.push_back(BuildParkingLot(options, index, selected_seq));
   }
@@ -262,7 +271,7 @@ void PrintUsage() {
             << "Options:\n"
             << "  --domain-id=<uint32>          DDS domain id (default 0)\n"
             << "  --topic=<name>                topic name (default /selected_slot)\n"
-            << "  --mode=<valid|empty|overflow|nan|degenerate-corners|target-moves|parking-seq-changes|multi-lot-seq-switch>\n"
+            << "  --mode=<valid|empty|overflow|nan|degenerate-corners|missing-selected-lot|target-moves|parking-seq-changes|multi-lot-seq-switch>\n"
             << "  --count=<uint32>              number of samples to publish (default 3)\n"
             << "  --interval-ms=<uint32>        interval between samples (default 100)\n"
             << "  --help                        show this message\n";

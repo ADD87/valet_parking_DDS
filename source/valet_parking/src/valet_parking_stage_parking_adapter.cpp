@@ -405,9 +405,29 @@ Header MakeHeader(uint64_t seq,
   return header;
 }
 
-const ParkingLot* SelectParkingLot(const SelectedSlot& sample) {
+std::string JoinParkingLotSeqs(const std::vector<ParkingLot>& lots) {
+  if (lots.empty()) {
+    return "[]";
+  }
+  std::ostringstream stream;
+  stream << "[";
+  for (std::size_t i = 0U; i < lots.size(); ++i) {
+    if (i > 0U) {
+      stream << ",";
+    }
+    stream << lots[i].parking_seq();
+  }
+  stream << "]";
+  return stream.str();
+}
+
+const ParkingLot* SelectParkingLot(const SelectedSlot& sample,
+                                   std::string* status_reason) {
   const auto& lots = sample.parking_lots();
   if (lots.empty()) {
+    if (status_reason != nullptr) {
+      *status_reason = "selected_slot has no parking_lots";
+    }
     return nullptr;
   }
 
@@ -418,7 +438,14 @@ const ParkingLot* SelectParkingLot(const SelectedSlot& sample) {
     }
   }
 
-  return &lots.front();
+  if (status_reason != nullptr) {
+    std::ostringstream stream;
+    stream << "selected_slot opt_parking_seq is unavailable"
+           << ", opt_parking_seq=" << selected_seq
+           << ", available_parking_seq=" << JoinParkingLotSeqs(lots);
+    *status_reason = stream.str();
+  }
+  return nullptr;
 }
 
 InputMetadata BuildMetadata(const SelectedSlot& sample) {
@@ -2618,7 +2645,59 @@ void AppendStageProjectionContract(const std::string& record_type,
   *stream << ", stage_contract=lightweight_valet_parking_stage_projection"
           << ", stage_contract_record=" << record_type
           << ", status_transport=replan_reason_text"
-          << ", dds_field_extension=required_before_vehicle_integration";
+          << ", dds_field_extension=required_before_vehicle_integration"
+          << ", original_flow_reference="
+          << "ValetParkingStageParking.Process>Stage.ExecuteTaskOnOpenSpace"
+          << ", original_flow_contract=lightweight_node_projection";
+}
+
+std::string OriginalFlowBranchForTask(const std::string& task) {
+  if (task == "OPEN_SPACE_STRAIGHT_PATH") {
+    return "direct_open_space";
+  }
+  if (task == "STAGE_FINISH_HOLD") {
+    return "stage_finish_hold";
+  }
+  if (task == "UNSUPPORTED_PARKING_OUT") {
+    return "unsupported_parking_out";
+  }
+  return "stage_control_override";
+}
+
+std::string OriginalFlowBranchForFallback(
+    const std::string& fallback_event) {
+  if (fallback_event == "open_space_straight_path_failed" ||
+      fallback_event == "direct_speed_optimizer_failed") {
+    return "direct_open_space";
+  }
+  if (fallback_event == "path_provider_failed" ||
+      fallback_event == "precheck_failed" ||
+      fallback_event == "path_partition_failed" ||
+      fallback_event == "speed_optimizer_failed") {
+    return "normal_open_space_task";
+  }
+  return "normal_open_space_early_input";
+}
+
+void AppendDirectTaskContract(const std::string& record_type,
+                              std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", task_contract=lightweight_direct_task_projection"
+          << ", task_contract_record=" << record_type
+          << ", task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER"
+          << ", task_status_transport=replan_reason_text"
+          << ", original_flow_branch=direct_open_space";
+}
+
+void AppendSpeedOptimizerTaskContract(bool is_rpa_direct_mode,
+                                      std::ostringstream* stream) {
+  if (is_rpa_direct_mode) {
+    AppendDirectTaskContract("direct_speed_optimizer_output", stream);
+  } else {
+    AppendOpenSpaceTaskContract("speed_optimizer_output", stream);
+  }
 }
 
 void AppendRuntimeLifecycleContract(const std::string& event,
@@ -2947,6 +3026,10 @@ std::string BuildOpenSpaceStageOutputContract(
          << ", stage_contract_record=open_space_output"
          << ", status_transport=replan_reason_text"
          << ", dds_field_extension=required_before_vehicle_integration"
+         << ", original_flow_reference="
+         << "ValetParkingStageParking.Process>Stage.ExecuteTaskOnOpenSpace"
+         << ", original_flow_contract=lightweight_node_projection"
+         << ", original_flow_branch=normal_open_space"
          << ", stage_status=" << StageStatusFromParkingStatus(parking_status)
          << ", task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION";
   if (speed_output != nullptr) {
@@ -3029,6 +3112,8 @@ std::string BuildFallbackStageOutputContract(
   AppendStageProjectionContract("fallback_output", &stream);
   stream << ", fallback_event=" << fallback_event
          << ", fallback_action=" << fallback_action
+         << ", original_flow_branch="
+         << OriginalFlowBranchForFallback(fallback_event)
          << ", stage_status=" << stage_status
          << ", trajectory_type=" << TrajectoryTypeName(trajectory_type)
          << ", parking_status=" << parking_status;
@@ -3225,7 +3310,7 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
   if (IsSmokeFlagEnabled(kForceSpeedOptimizerFailEnv)) {
     std::ostringstream stream;
     stream << "SPEED_OPTIMIZER failed: forced_by_smoke_env";
-    AppendOpenSpaceTaskContract("speed_optimizer_output", &stream);
+    AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
     *status_reason = stream.str();
     return false;
   }
@@ -3240,16 +3325,23 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
                                  is_rpa_direct_mode);
     const bool ok = optimizer->Execute(input, speed_output);
     if (!ok || !speed_output->success) {
-      *status_reason =
-          "SPEED_OPTIMIZER failed: " + speed_output->message;
+      std::ostringstream stream;
+      stream << "SPEED_OPTIMIZER failed: " << speed_output->message;
+      AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
+      *status_reason = stream.str();
       return false;
     }
   } catch (const std::exception& ex) {
-    *status_reason = std::string("SPEED_OPTIMIZER failed: exception: ") +
-                     ex.what();
+    std::ostringstream stream;
+    stream << "SPEED_OPTIMIZER failed: exception: " << ex.what();
+    AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
+    *status_reason = stream.str();
     return false;
   } catch (...) {
-    *status_reason = "SPEED_OPTIMIZER failed: unknown exception";
+    std::ostringstream stream;
+    stream << "SPEED_OPTIMIZER failed: unknown exception";
+    AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
+    *status_reason = stream.str();
     return false;
   }
 
@@ -3260,6 +3352,7 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
     stream << "SPEED_OPTIMIZER failed: insufficient trajectory points"
            << ", points=" << trajectory_points
            << ", message=" << speed_output->message;
+    AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
     *status_reason = stream.str();
     return false;
   }
@@ -3272,7 +3365,7 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
       trajectory.TrajectoryPointAt(0).path_point.s;
   std::ostringstream stream;
   stream << "SPEED_OPTIMIZER ok";
-  AppendOpenSpaceTaskContract("speed_optimizer_output", &stream);
+  AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
   stream << ", points=" << trajectory_points
          << ", duration=" << std::fixed << std::setprecision(3)
          << total_time
@@ -3504,6 +3597,7 @@ void AppendStageControlContract(const ParkingCommand& command,
           << ", stage_status=" << stage_status
           << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
           << ", task=" << task
+          << ", original_flow_branch=" << OriginalFlowBranchForTask(task)
           << ", reset_history="
           << (command.reset_history() ? "true" : "false");
   AppendStageProjectionContract("stage_control", stream);
@@ -3648,11 +3742,8 @@ bool RunOpenSpaceStraightPath(
 
   if (IsSmokeFlagEnabled(kForceStraightPathFailEnv)) {
     std::ostringstream stream;
-    stream << "OPEN_SPACE_STRAIGHT_PATH failed: forced_by_smoke_env"
-           << ", task_contract=lightweight_direct_path_projection"
-           << ", task_contract_record=open_space_straight_path_output"
-           << ", task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER"
-           << ", task_status_transport=replan_reason_text";
+    stream << "OPEN_SPACE_STRAIGHT_PATH failed: forced_by_smoke_env";
+    AppendDirectTaskContract("open_space_straight_path_output", &stream);
     *status_reason = stream.str();
     return false;
   }
@@ -3665,18 +3756,24 @@ bool RunOpenSpaceStraightPath(
     const TL::common::Status status =
         provider->Process(input, &straight_output);
     if (!status.ok()) {
-      *status_reason =
-          "OPEN_SPACE_STRAIGHT_PATH failed: " + status.error_message();
+      std::ostringstream stream;
+      stream << "OPEN_SPACE_STRAIGHT_PATH failed: "
+             << status.error_message();
+      AppendDirectTaskContract("open_space_straight_path_output", &stream);
+      *status_reason = stream.str();
       return false;
     }
   } catch (const std::exception& ex) {
-    *status_reason =
-        std::string("OPEN_SPACE_STRAIGHT_PATH failed: exception: ") +
-        ex.what();
+    std::ostringstream stream;
+    stream << "OPEN_SPACE_STRAIGHT_PATH failed: exception: " << ex.what();
+    AppendDirectTaskContract("open_space_straight_path_output", &stream);
+    *status_reason = stream.str();
     return false;
   } catch (...) {
-    *status_reason =
-        "OPEN_SPACE_STRAIGHT_PATH failed: unknown exception";
+    std::ostringstream stream;
+    stream << "OPEN_SPACE_STRAIGHT_PATH failed: unknown exception";
+    AppendDirectTaskContract("open_space_straight_path_output", &stream);
+    *status_reason = stream.str();
     return false;
   }
 
@@ -3689,6 +3786,7 @@ bool RunOpenSpaceStraightPath(
     stream << "OPEN_SPACE_STRAIGHT_PATH failed: insufficient path points"
            << ", points=" << path_points
            << ", diagnostic=" << straight_output.diagnostic;
+    AppendDirectTaskContract("open_space_straight_path_output", &stream);
     *status_reason = stream.str();
     return false;
   }
@@ -3700,6 +3798,7 @@ bool RunOpenSpaceStraightPath(
          << ", external_vehicle="
          << (vehicle_input.has_vehicle_state ? "true" : "false")
          << ", direct_speed=" << SelectDirectSpeed(command.direct_speed_mps());
+  AppendDirectTaskContract("open_space_straight_path_output", &stream);
   *status_reason = stream.str();
   return true;
 }
@@ -4441,6 +4540,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
                    : "direct_release_waiting")
            << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
            << ", task=DIRECT_COMMAND_RELEASE"
+           << ", original_flow_branch=direct_open_space"
            << ", reset_history=false";
     AppendStageProjectionContract("stage_control", &stream);
     AppendFunctionManagerProjectionContract(released_projection, &stream);
@@ -4493,6 +4593,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
            << ", stage_status=mission_finished"
            << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
            << ", task=STAGE_FINISH_HOLD"
+           << ", original_flow_branch=stage_finish_hold"
            << ", reset_history=false";
     AppendStageProjectionContract("stage_control", &stream);
     AppendFunctionManagerProjectionContract(finish_hold_projection, &stream);
@@ -4513,11 +4614,13 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     return true;
   }
 
-  const ParkingLot* selected_lot = SelectParkingLot(input_sample);
+  std::string selected_lot_reason;
+  const ParkingLot* selected_lot =
+      SelectParkingLot(input_sample, &selected_lot_reason);
   if (selected_lot == nullptr) {
     runtime_->ResetPlanningState();
     metadata.status_reason =
-        "selected_slot selected lot is unavailable; " +
+        selected_lot_reason + "; " +
         BuildEarlyEstopFallbackContract(
             "selected_lot_unavailable", "selected_lot_unavailable",
             function_projection, &runtime_->path_provider,
