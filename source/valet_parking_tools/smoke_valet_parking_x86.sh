@@ -619,6 +619,16 @@ case "${slot_mode}" in
       else
         require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
           "missing threaded OpenSpacePathProvider target plan evidence"
+        require_runner_log "PATH_PARTITION ok.*decision_name=.*finish_name=.*destination_reached=(true|false)" \
+          "missing PathPartition decision/finish/destination evidence"
+        require_runner_log "SPEED_OPTIMIZER ok.*stage_name=(INIT|RUNNING|WAITOBSTACLE|WAITREPLAN)" \
+          "missing SpeedOptimizer interactive stage name"
+        require_runner_log "STAGE_OUTPUT open_space.*task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION>SPEED_OPTIMIZER.*path_decision=.*finish_status=.*destination_reached=(true|false).*target_gear=[0-9]+.*trajectory_type=(NORMAL|SHORT_PATH).*parking_status=(running|wait_obstacle|wait_replan|prepare_finish|mission_finished|stop_by_path_partition).*finish_priority=finish_over_interactive" \
+          "missing Stage output contract aligned with ValetParkingStageParking flow"
+        require_runner_log "STAGE_OUTPUT open_space.*finish_condition=destination_reached_and_standstill.*finish_ready=(true|false).*finish_consecutive_frames=[0-9]+.*finish_required_frames=[0-9]+.*vehicle_standstill=(true|false).*stage_finish_state=(READY|HOLDING|WAITING)" \
+          "missing lightweight IsReadyToFinishStage state evidence"
+        require_runner_log "STAGE_OUTPUT open_space.*function_manager_source=selected_slot.*function_manager_sys_mode=RPA.*function_manager_sys_command=PARKINCONTROL.*function_manager_sys_run_state=(PARKSTART|PARKING).*function_manager_sys_warning_info=NO_WARNING.*function_manager_parking_type=PARKING_IN" \
+          "missing FunctionManager projection evidence for normal open-space branch"
         reject_runner_log "provider_status=TARGET_TIMEOUT" \
           "unexpected threaded OpenSpacePathProvider timeout"
       fi
