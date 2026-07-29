@@ -126,6 +126,16 @@ struct DirectFinishEvaluation {
   bool ready_to_finish{false};
 };
 
+struct DirectCommandRuntimeState {
+  void Reset() {
+    active = false;
+    last_mode = ParkingCommandMode::PARKING_COMMAND_NONE;
+  }
+
+  bool active{false};
+  ParkingCommandMode last_mode{ParkingCommandMode::PARKING_COMMAND_NONE};
+};
+
 struct FunctionManagerProjection {
   std::string source{"selected_slot"};
   std::string parking_command{"NONE"};
@@ -224,6 +234,7 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
     last_published_gear = TL::soc::GearPosition::GEAR_PARKING;
     path_provider.Reset();
     stage_finish.Reset();
+    direct_command.Reset();
     straight_path_provider.Reset();
     return path_partition_ready;
   }
@@ -326,6 +337,7 @@ struct ValetParkingStageParkingAdapter::RuntimeContext {
   TL::planning::OpenSpaceSpeedOptimizer speed_optimizer;
   PathProviderRuntimeState path_provider;
   StageFinishRuntimeState stage_finish;
+  DirectCommandRuntimeState direct_command;
   TL::planning_internal::AvpSpeedPlanCollisionInfo
       last_speed_plan_collision_info;
   RuntimeVehicleInput vehicle_input;
@@ -1096,7 +1108,10 @@ std::string BuildPathProviderPreCheckReason(
   if (!result.ok) {
     stream << "PATH_PROVIDER_PRECHECK failed: " << result.reason
            << ", collision_contract=geometry_precheck_only"
-           << ", wheel_mask_contract=not_exposed_in_current_mvp";
+           << ", collision_input_source=roi_and_external_segments"
+           << ", wheel_mask_contract=not_exposed_in_current_mvp"
+           << ", wheel_mask_input_source=none"
+           << ", wheel_mask_idl_extension=required_before_vehicle_integration";
     return stream.str();
   }
   stream << "PATH_PROVIDER_PRECHECK ok"
@@ -1111,7 +1126,10 @@ std::string BuildPathProviderPreCheckReason(
          << ", vehicle_has_state="
          << (result.vehicle_has_state ? "true" : "false")
          << ", collision_contract=geometry_precheck_only"
-         << ", wheel_mask_contract=not_exposed_in_current_mvp";
+         << ", collision_input_source=roi_and_external_segments"
+         << ", wheel_mask_contract=not_exposed_in_current_mvp"
+         << ", wheel_mask_input_source=none"
+         << ", wheel_mask_idl_extension=required_before_vehicle_integration";
   return stream.str();
 }
 
@@ -1956,6 +1974,26 @@ void AppendPathProviderAttemptDiagnostics(
           << ", external_obstacles=" << obstacle_count;
 }
 
+void AppendPlanningContextPathProjection(
+    const PathProviderRuntimeState& provider_state,
+    const std::string& history_state,
+    const std::string& replan_text,
+    std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", planning_context_contract=path_provider_runtime_projection"
+          << ", path_history_state=" << history_state
+          << ", path_history_available="
+          << (provider_state.has_history ? "true" : "false")
+          << ", planning_context_path_id=" << provider_state.path_id
+          << ", planning_context_replan_reason=" << replan_text
+          << ", target_update_writeback="
+          << (replan_text == "TARGET_UPDATE" ? "true" : "false")
+          << ", planning_context_history_points="
+          << CountPathProviderPoints(provider_state.last_output);
+}
+
 std::string JoinThreadPathIds(const std::vector<int>& path_ids) {
   if (path_ids.empty()) {
     return "[]";
@@ -2052,6 +2090,8 @@ bool RunPathProvider(const valet_parking_config_t& config,
            << ", external_vehicle="
            << (vehicle_input.has_vehicle_state ? "true" : "false")
            << ", external_obstacles=" << obstacles.size();
+    AppendPlanningContextPathProjection(*provider_state, "reused",
+                                        replan_text, &stream);
     *status_reason = stream.str();
     return true;
   }
@@ -2222,6 +2262,8 @@ bool RunPathProvider(const valet_parking_config_t& config,
          << ", external_vehicle="
          << (vehicle_input.has_vehicle_state ? "true" : "false")
          << ", external_obstacles=" << obstacles.size();
+  AppendPlanningContextPathProjection(*provider_state, "generated",
+                                      replan_text, &stream);
   AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
   *status_reason = stream.str();
   return true;
@@ -2478,6 +2520,17 @@ std::string DirectFinishStateName(
   return evaluation.ready_condition ? "HOLDING" : "WAITING";
 }
 
+bool IsDirectCommandMode(ParkingCommandMode mode) {
+  return mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD ||
+         mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD;
+}
+
+std::string DirectReleasedActionName(ParkingCommandMode mode) {
+  return mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD
+             ? "DIRECT_BACKWARD_RELEASED"
+             : "DIRECT_FORWARD_RELEASED";
+}
+
 void AppendDirectFinishContract(
     const DirectFinishEvaluation& evaluation,
     std::ostringstream* stream) {
@@ -2495,6 +2548,21 @@ void AppendDirectFinishContract(
           << (evaluation.ready_to_finish ? "true" : "false")
           << ", direct_stage_finish_state="
           << DirectFinishStateName(evaluation);
+}
+
+void AppendMissionStateContract(const std::string& mission_state,
+                                const std::string& next_stage,
+                                bool finish_scenario_intent,
+                                std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << ", mission_state_contract=lightweight_stage_projection"
+          << ", mission_state=" << mission_state
+          << ", next_stage=" << next_stage
+          << ", finish_scenario_intent="
+          << (finish_scenario_intent ? "true" : "false")
+          << ", finish_scenario_contract=diagnostic_only";
 }
 
 std::string ProjectSysCommandName(ParkingCommandMode mode) {
@@ -2615,6 +2683,19 @@ FunctionManagerProjection BuildFunctionManagerProjection(
   return projection;
 }
 
+FunctionManagerProjection BuildReleasedDirectFunctionProjection(
+    ParkingCommandMode previous_direct_mode) {
+  FunctionManagerProjection projection;
+  projection.source = "cleared_direct_command";
+  projection.parking_command = "NONE";
+  projection.sys_command = ProjectSysCommandName(previous_direct_mode);
+  projection.sys_run_state = "QUIT";
+  projection.sys_warning_info = "NO_WARNING";
+  projection.parking_type = ProjectParkingTypeName(previous_direct_mode);
+  projection.reset_history = false;
+  return projection;
+}
+
 void AppendFunctionManagerProjectionContract(
     const FunctionManagerProjection& projection,
     std::ostringstream* stream) {
@@ -2690,6 +2771,25 @@ std::string StageStatusFromParkingStatus(const std::string& parking_status) {
   return "running";
 }
 
+std::string MissionStateFromParkingStatus(const std::string& parking_status) {
+  if (parking_status == "mission_finished") {
+    return "MISSION_FINISHED";
+  }
+  if (parking_status == "wait_obstacle") {
+    return "WAIT_OBSTACLE";
+  }
+  if (parking_status == "wait_replan") {
+    return "WAIT_REPLAN";
+  }
+  if (parking_status == "prepare_finish") {
+    return "PREPARE_FINISH";
+  }
+  if (parking_status == "stop_by_path_partition") {
+    return "STOP_BY_PATH_PARTITION";
+  }
+  return "MISSION_RUNNING";
+}
+
 std::string TrajectoryTypeName(PlanningTrajectoryType trajectory_type) {
   switch (trajectory_type) {
     case PlanningTrajectoryType::TRAJECTORY_TYPE_NORMAL:
@@ -2761,6 +2861,12 @@ std::string BuildOpenSpaceStageOutputContract(
          << ", target_gear=" << static_cast<int>(target_gear)
          << ", trajectory_type=" << TrajectoryTypeName(trajectory_type)
          << ", parking_status=" << parking_status;
+  const bool finish_scenario_intent =
+      finish_evaluation != nullptr && finish_evaluation->ready_to_finish;
+  AppendMissionStateContract(
+      MissionStateFromParkingStatus(parking_status),
+      finish_scenario_intent ? "FINISH" : "PARKING",
+      finish_scenario_intent, &stream);
   if (finish_evaluation != nullptr) {
     stream << ", finish_condition=destination_reached_and_standstill"
            << ", finish_ready="
@@ -3850,6 +3956,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD) {
       const bool forward =
           command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD;
+      runtime_->direct_command.active = true;
+      runtime_->direct_command.last_mode = command_mode;
       const DirectSpeedOptimizerProfile direct_speed_profile =
           BuildDirectSpeedOptimizerProfile(command_sample->direct_speed_mps());
       const TL::planning::OpenSpaceSpeedOptimizerConfig direct_speed_config =
@@ -3862,6 +3970,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
                                  "direct_control",
                                  "OPEN_SPACE_STRAIGHT_PATH", &stream);
       AppendFunctionManagerProjectionContract(function_projection, &stream);
+      AppendMissionStateContract("DIRECT_CONTROL_ACTIVE", "PARKING", false,
+                                 &stream);
       stream << ", target_gear="
              << static_cast<int>(TargetGearForDirectCommand(forward))
              << ", direct_distance="
@@ -3939,6 +4049,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       return true;
     }
 
+    runtime_->direct_command.Reset();
+
     if (command_mode == ParkingCommandMode::PARKING_COMMAND_PAUSE ||
         command_mode == ParkingCommandMode::PARKING_COMMAND_BRAKE ||
         command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
@@ -3954,6 +4066,16 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       AppendStageControlContract(*command_sample, command_mode_text,
                                  stage_status, "STAGE_CONTROL_STOP", &stream);
       AppendFunctionManagerProjectionContract(function_projection, &stream);
+      AppendMissionStateContract(
+          command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH
+              ? "MISSION_FINISHED"
+              : (command_mode == ParkingCommandMode::PARKING_COMMAND_BRAKE
+                     ? "MISSION_BRAKING"
+                     : "MISSION_PAUSED"),
+          command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH
+              ? "FINISH"
+              : "PARKING",
+          command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH, &stream);
       if (command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
         stream << ", MISSIONFINISHED"
                << ", finish_status=MISSIONFINISHED";
@@ -3977,6 +4099,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
                                  "unsupported", "UNSUPPORTED_PARKING_OUT",
                                  &stream);
       AppendFunctionManagerProjectionContract(function_projection, &stream);
+      AppendMissionStateContract("UNSUPPORTED_PARKING_OUT", "PARKING",
+                                 false, &stream);
       stream << ", trajectory_type=SHORT_PATH"
              << ", parking_status=parking_out_unsupported"
              << ", unsupported_in_mvp"
@@ -4012,6 +4136,52 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     metadata.status_reason = "selected_slot count exceeds parking_lots size";
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
+    return true;
+  }
+
+  if (runtime_->direct_command.active &&
+      IsDirectCommandMode(runtime_->direct_command.last_mode)) {
+    const ParkingCommandMode released_mode = runtime_->direct_command.last_mode;
+    const DirectFinishEvaluation direct_finish_evaluation =
+        BuildDirectFinishEvaluation(runtime_->vehicle_input, false);
+    const FunctionManagerProjection released_projection =
+        BuildReleasedDirectFunctionProjection(released_mode);
+    const std::string released_action =
+        DirectReleasedActionName(released_mode);
+
+    std::ostringstream stream;
+    stream << "STAGE_CONTROL " << released_action
+           << ", command_action=" << released_action
+           << ", stage_status="
+           << (direct_finish_evaluation.ready_to_finish
+                   ? "mission_finished"
+                   : "direct_release_waiting")
+           << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
+           << ", task=DIRECT_COMMAND_RELEASE"
+           << ", reset_history=false";
+    AppendFunctionManagerProjectionContract(released_projection, &stream);
+    AppendMissionStateContract(
+        direct_finish_evaluation.ready_to_finish ? "DIRECT_FINISH_READY"
+                                                 : "DIRECT_FINISH_WAITING",
+        direct_finish_evaluation.ready_to_finish ? "FINISH" : "PARKING",
+        direct_finish_evaluation.ready_to_finish, &stream);
+    AppendDirectFinishContract(direct_finish_evaluation, &stream);
+    stream << ", previous_direct_command="
+           << ParkingCommandModeToString(released_mode)
+           << ", trajectory_type=SHORT_PATH"
+           << ", parking_status="
+           << (direct_finish_evaluation.ready_to_finish
+                   ? "mission_finished"
+                   : "direct_finish_waiting");
+
+    metadata.status_reason = stream.str();
+    if (direct_finish_evaluation.ready_to_finish) {
+      runtime_->ResetPlanningState();
+    }
+    *status_reason = metadata.status_reason;
+    *output_sample = BuildStageControlStopTrajectory(
+        config_, metadata, runtime_->vehicle_input, metadata.status_reason,
+        ::GearPosition::GEAR_PARKING);
     return true;
   }
 

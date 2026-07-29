@@ -25,9 +25,10 @@ local_git:
 current_phase:
   id: Fast-2
   name: .so + typed DDS + localized valet parking algorithm sources
-  status: PASS_BATCH_057_060_OPEN_SPACE_INFO_CONTRACTS_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  status: PASS_BATCH_061_064_MISSION_STATE_DIRECT_RELEASE_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
   description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathProvider + OpenSpaceThreadManager + OpenSpacePathGenerator + HybridAStar 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路。NEXT-039 已把 direct_speed_mps 映射到 direct 分支速度优化器 speed bound，新增 aux chassis signed speed 输入和速度方向冲突 smoke，并在 direct 输出原因中补 target_gear、direct_speed_bound_min/max、trajectory_type 和 parking_status 诊断。NEXT-040 已接入本地化 OpenSpacePathProvider / OpenSpaceThreadManager 线程骨架，普通主链经 TargetPlan 生成当前车位路径，多车位非选中 lot 经 PrePlan 进入 search threads；复验阶段补充了 PrePlan 队列硬化，避免覆盖 has_task=true 的候选输入。NEXT-041 已补充线程生命周期硬化：search/target worker 持有 shared early_stop，StopThreads/CancelTargetPlan 可取消正在跑的 Hybrid A*；timeout 负向路径可观测 provider_status=TARGET_TIMEOUT、target_cancel=true 和 fallback to ROI seed；BATCH-049_052 已按原始流程图补充普通主链轻量 Stage 输出收口：PathPartition 输出 decision_name/finish_name/destination_reached，SpeedOptimizer 输出 stage_name，STAGE_OUTPUT 统一输出 stage_status、target_gear、trajectory_type、parking_status 和 finish_priority。BATCH-053_056 已继续对照原始流程图缩小差异：补轻量 StageFinish 连续帧状态机、FunctionManager/sys_command/sys_run_state/sys_warning_info/parking_type 投影、ROI/OpenSpaceInfo 最小字段诊断、PreCheck/collision/wheel mask 可观测契约。BATCH-057_060 已补 direct finish 命令失活诊断、FunctionManager unsupported/default/NOSTATE 负向路径 smoke、ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约与 collision/wheel mask 成功/负向断言；x86 valid smoke、x86 批量 smoke 和 m57 交叉编译通过。当前仍使用临时 IDL 契约和简化 Topic，parking_status、FunctionManagerProjection、stage_finish_state、OpenSpaceInfo 契约仍只是 replan_reason/estop.reason 诊断文本，不是正式 DDS 字段；仍未接完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。m57 板端 runtime 尚未验证。
   execution_policy: NEXT-041 后执行节奏切换为批量硬化：先批量检测和契约扫描，再批量修订代码/脚本/文档，再统一 x86/m57 编译和 x86 smoke 矩阵，最后集中排错并统一提交推送。
+  latest_batch_summary: BATCH-061_064 已完成：继续对照原始 ValetParkingStageParking 流程图减少差异；本批新增轻量 MissionState/next_stage/FinishScenario 诊断投影、direct command active -> NONE -> release finish-ready 轻量闭环、PlanningContext path history/replan/target update 写回投影，并明确 collision/wheel mask 当前输入来源和正式 IDL 扩展 blocker。x86 release smoke 和 x86 批量 smoke 通过，x86/m57 统一构建产物已生成；m57 仍未做板端 runtime。
   active_batch: NONE
   completed_batches:
     - id: BATCH-042_046
@@ -50,34 +51,49 @@ current_phase:
       status: PASS_OPEN_SPACE_INFO_CONTRACTS_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
       date: 2026-07-29
       summary: 已根据原始流程图补 direct finish 命令失活诊断、FunctionManager unsupported/default/NOSTATE 负向路径 smoke、ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约和 collision/wheel mask 成功/负向断言；x86 valid smoke 和批量 smoke 通过，m57 交叉编译通过。
+    - id: BATCH-061_064
+      status: PASS_MISSION_STATE_DIRECT_RELEASE_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+      date: 2026-07-29
+      summary: 已根据原始流程图补轻量 MissionState/next_stage/FinishScenario 诊断契约、direct 命令 active -> NONE -> release finish-ready 闭环、PlanningContext path history/replan/target update 写回投影，以及 collision/wheel mask 输入来源边界；x86 direct release smoke 和批量 smoke 通过，m57 交叉编译产物已生成但未做板端 runtime。
 
 last_completed_snapshot:
-  id: 057_060
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/057_060_项目状态快照_DirectFinish与OpenSpaceInfo契约收敛.md
-  status: PASS_OPEN_SPACE_INFO_CONTRACTS_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  id: 061_064
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/061_064_项目状态快照_MissionState与Direct命令生命周期收敛.md
+  status: PASS_MISSION_STATE_DIRECT_RELEASE_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
 
 last_plan_update:
   date: 2026-07-29
-  summary: BATCH-057_060 已完成：主线继续对照原始 ValetParkingStageParking 流程图减少差异。本批补 direct finish 命令失活诊断、FunctionManager unsupported/default/NOSTATE 负向路径 smoke、ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约和 collision/wheel mask 成功/负向断言；x86 valid smoke、x86 批量 smoke 和 m57 交叉编译通过。
+  summary: BATCH-061_064 已完成：主线继续对照原始 ValetParkingStageParking 流程图减少差异。本批补轻量 MissionState/next_stage/FinishScenario 诊断契约、direct 命令 active -> NONE -> release finish-ready 轻量闭环、PlanningContext path history/replan/target update 写回投影，以及 collision/wheel mask 输入来源边界；x86 valid/direct release smoke、x86 批量 smoke 和 m57 交叉编译通过。
   evidence:
     - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.cpp
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
+    - applications/source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
     - applications/source/Docs/valet_parking_magnadds/05_TempAPA原始流程复现差距对照表.md
     - applications/source/Docs/valet_parking_magnadds/14_原始流程差异收敛执行记录.md
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/057_060_项目状态快照_DirectFinish与OpenSpaceInfo契约收敛.md
-    - out/valet_parking_flow_gap_057_060/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_flow_gap_057_060/valet_parking_mvp/m57/lib/libvalet_parking.so
-    - out/valet_parking_flow_gap_057_060/valet_parking_mvp/x86/smoke_latest/domain_217_20260729_115557_737
-    - out/valet_parking_flow_gap_057_060/valet_parking_mvp/x86/smoke_latest/domain_180_20260729_115619_900
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/061_064_项目状态快照_MissionState与Direct命令生命周期收敛.md
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/smoke_latest/domain_198_20260729_130915_2541
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/smoke_latest/domain_204_20260729_132214_792
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/smoke_latest/domain_205_20260729_132348_727
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/smoke_latest/domain_180_20260729_132412_938
 
 last_successful_action:
   date: 2026-07-29
-  summary: 已完成 BATCH-057_060：direct 分支新增命令失活完成条件诊断，普通主链新增 ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约，FunctionManager 负向路径、collision/wheel mask 当前边界进入 smoke 断言，继续减少当前 MagnaDDS Adapter 与原始 ValetParkingStageParking 的可观察差异。x86 valid smoke 通过，x86 批量 smoke 通过，m57 交叉编译通过；m57 仍不代表板端 runtime 通过。
+  summary: 已完成 BATCH-061_064：普通主链和控制分支新增轻量 MissionState/next_stage/FinishScenario 诊断契约；direct 分支新增 ParkingCommand active -> NONE -> DIRECT_*_RELEASED 的 finish-ready 轻量闭环；PathProvider 新增 PlanningContext path history/replan/target update 写回投影；collision/wheel mask 当前输入来源和正式 IDL 扩展 blocker 进入 smoke 断言。x86 direct release smoke 通过，x86 批量 smoke 通过，m57 交叉编译通过；m57 仍不代表板端 runtime 通过。
   evidence:
     - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.cpp
     - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
+    - applications/source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
     - applications/source/Docs/valet_parking_magnadds/05_TempAPA原始流程复现差距对照表.md
     - applications/source/Docs/valet_parking_magnadds/14_原始流程差异收敛执行记录.md
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/061_064_项目状态快照_MissionState与Direct命令生命周期收敛.md
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/smoke_latest/domain_198_20260729_130915_2541
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/smoke_latest/domain_204_20260729_132214_792
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/smoke_latest/domain_205_20260729_132348_727
+    - out/valet_parking_flow_gap_061_064/valet_parking_mvp/x86/smoke_latest/domain_180_20260729_132412_938
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/057_060_项目状态快照_DirectFinish与OpenSpaceInfo契约收敛.md
     - out/valet_parking_flow_gap_057_060/valet_parking_mvp/x86/lib/libvalet_parking.so
     - out/valet_parking_flow_gap_057_060/valet_parking_mvp/m57/lib/libvalet_parking.so
@@ -279,6 +295,12 @@ runtime_status:
   x86_flow_gap_057_060_batch_smoke_matrix: PASS
   m57_flow_gap_057_060_static_build: PASS
   original_flow_open_space_info_contract_gap_reduction: PASS
+  x86_mission_state_projection_smoke_test: PASS
+  x86_direct_command_release_smoke_test: PASS
+  x86_planning_context_projection_smoke_test: PASS
+  x86_flow_gap_061_064_batch_smoke_matrix: PASS
+  m57_flow_gap_061_064_static_build: PASS
+  original_flow_mission_state_direct_lifecycle_gap_reduction: PASS
   topic_contract_gap_table: PASS_DOC_READY
   m57_runtime_package_script: PASS
   m57_runtime_package_manifest: PASS
@@ -290,11 +312,11 @@ runtime_status:
   m57_static_build: PASS
   m57_board: NOT_AVAILABLE
   quick_build_script: PASS_X86_AND_M57_ABSOLUTE_OUT_DIR
-  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-040 后，PATH_PROVIDER 已走本地化 OpenSpacePathProvider + OpenSpaceThreadManager，valid/domain_145 显示 threaded=true、provider_status=TARGET_READY、target_source=target_thread，multi-lot/domain_150 显示 preplan_candidates=1、thread_path_ids=[2,1,...] 且 target_source=preplan_candidate，direct-forward/domain_148 回归保持 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER。NEXT-041 后，valid/domain_160 显示 target_cancel=false 且 runner 退出时 OpenSpaceThreadManager stopped，timeout/domain_161 显示 provider_status=TARGET_TIMEOUT、target_timeout=true、target_cancel=true 和 fallback to ROI seed，multi-lot/domain_162 继续显示 target_source=preplan_candidate，direct-forward/domain_164 回归通过，且 direct 分支按设计跳过 threaded Provider，不要求线程停止日志；build_valet_parking.sh 已修正相对 out-dir 归一化。NLP smoother 评估结论是当前不接入：WSL x86 有 IPOPT 3.11.9，但 OSQP pkg-config 缺失，thirdparty/x86 与 thirdparty/m57 未发现随包 IPOPT/OSQP 实库。NEXT-039 后，direct-forward/domain_131 在 direct_speed=1.2 时输出 direct_speed_bound_max=1.200、parking_status=direct_moving，速度方向冲突 smoke 输出 velocity_direction_conflict 和 direct_stop_path。BATCH-057_060 后，valid/domain_217 输出 ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约，batch first-domain-id=180 全部通过，direct/pause/brake/finish/parking-out/invalid clear 与 far/many obstacles 均有对应契约断言。pause/brake/finish/invalid command 的 NEXT-037 历史 smoke 仍作为已验证边界。NEXT-033 到 NEXT-031/030/029/028/027/026/025/024 的历史边界 smoke 仍有效。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
+  note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-040 后，PATH_PROVIDER 已走本地化 OpenSpacePathProvider + OpenSpaceThreadManager，valid/domain_145 显示 threaded=true、provider_status=TARGET_READY、target_source=target_thread，multi-lot/domain_150 显示 preplan_candidates=1、thread_path_ids=[2,1,...] 且 target_source=preplan_candidate，direct-forward/domain_148 回归保持 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER。NEXT-041 后，valid/domain_160 显示 target_cancel=false 且 runner 退出时 OpenSpaceThreadManager stopped，timeout/domain_161 显示 provider_status=TARGET_TIMEOUT、target_timeout=true、target_cancel=true 和 fallback to ROI seed，multi-lot/domain_162 继续显示 target_source=preplan_candidate，direct-forward/domain_164 回归通过，且 direct 分支按设计跳过 threaded Provider，不要求线程停止日志；build_valet_parking.sh 已修正相对 out-dir 归一化。NLP smoother 评估结论是当前不接入：WSL x86 有 IPOPT 3.11.9，但 OSQP pkg-config 缺失，thirdparty/x86 与 thirdparty/m57 未发现随包 IPOPT/OSQP 实库。NEXT-039 后，direct-forward/domain_131 在 direct_speed=1.2 时输出 direct_speed_bound_max=1.200、parking_status=direct_moving，速度方向冲突 smoke 输出 velocity_direction_conflict 和 direct_stop_path。BATCH-057_060 后，valid/domain_217 输出 ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约，batch first-domain-id=180 全部通过，direct/pause/brake/finish/parking-out/invalid clear 与 far/many obstacles 均有对应契约断言。BATCH-061_064 后，valid/domain_198 输出 MissionState 与 PlanningContext 投影，direct-forward-release/domain_204 与 direct-backward-release/domain_205 均输出 DIRECT_*_RELEASED，batch first-domain-id=180 全部通过；release smoke 断言 release 分支自身跳过 ROI/PathProvider/PathPartition，允许 release 后恢复普通 ROI 链路。pause/brake/finish/invalid command 的 NEXT-037 历史 smoke 仍作为已验证边界。NEXT-033 到 NEXT-031/030/029/028/027/026/025/024 的历史边界 smoke 仍有效。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: BATCH-061_064
-  description: 继续对照 00_ValetParkingStageParking_超详细流程图总览_重要.md 减少差异：补轻量 MissionState/next_stage/FinishScenario 诊断契约，补 direct 命令 active -> inactive 生命周期边界，继续显式化 PlanningContext/OpenSpaceInfo 的历史路径、replan reason、target update 写回点，并评估 collision/wheel mask 的真实输入来源与正式 IDL 扩展草案；仍采用先批量检测和批量修订，再统一编译 smoke，再集中排错的节奏。
+  id: BATCH-065_068
+  description: 继续对照 00_ValetParkingStageParking_超详细流程图总览_重要.md 减少差异：集中梳理 Stage 输出文本契约，减少 mission_state/parking_status/FunctionManagerProjection/OpenSpaceInfo 字段散落风险；补 destination_reached + standstill 的 finish 边界 smoke；补 reset_history、target update、direct release 后恢复普通泊车的组合场景；形成 collision/wheel mask 正式 IDL 扩展草案但不在未拿到真实车端输入前强行接入。仍采用先批量检测和批量修订，再统一编译 smoke，再集中排错的节奏。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -539,3 +561,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/057_060_项目状态快照_DirectFinish与OpenSpaceInfo契约收敛.md
     phase: Fast-2
     status: PASS_OPEN_SPACE_INFO_CONTRACTS_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  - id: 061_064
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/061_064_项目状态快照_MissionState与Direct命令生命周期收敛.md
+    phase: Fast-2
+    status: PASS_MISSION_STATE_DIRECT_RELEASE_X86_SMOKE_M57_STATIC_BLOCKED_BOARD

@@ -118,6 +118,12 @@ run_case "direct-backward-moving-contract" \
   --aux-chassis-gear reverse \
   --direct-speed 1.2
 
+run_case "direct-forward-release-finish-contract" \
+  --command-mode direct-forward-release
+
+run_case "direct-backward-release-finish-contract" \
+  --command-mode direct-backward-release
+
 run_case "direct-reset-history-one-shot" \
   --command-mode direct-forward \
   --command-reset-history
