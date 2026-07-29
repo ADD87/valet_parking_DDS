@@ -2594,6 +2594,23 @@ std::string BuildStageControlReason(const ParkingCommand& command,
   return stream.str();
 }
 
+void AppendStageControlContract(const ParkingCommand& command,
+                                const std::string& action,
+                                const std::string& stage_status,
+                                const std::string& task,
+                                std::ostringstream* stream) {
+  if (stream == nullptr) {
+    return;
+  }
+  *stream << BuildStageControlReason(command, action)
+          << ", command_action=" << action
+          << ", stage_status=" << stage_status
+          << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
+          << ", task=" << task
+          << ", reset_history="
+          << (command.reset_history() ? "true" : "false");
+}
+
 double SelectDirectDistance(double distance_m) {
   constexpr double kDefaultDirectDistanceM = 3.0;
   constexpr double kMaxDirectDistanceM = 20.0;
@@ -3213,10 +3230,10 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
           BuildDirectSpeedOptimizerConfig(runtime_->speed_config,
                                           direct_speed_profile);
       std::ostringstream stream;
-      stream << BuildStageControlReason(*command_sample, command_mode_text)
-             << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
-             << ", task=OPEN_SPACE_STRAIGHT_PATH"
-             << ", target_gear="
+      AppendStageControlContract(*command_sample, command_mode_text,
+                                 "direct_control",
+                                 "OPEN_SPACE_STRAIGHT_PATH", &stream);
+      stream << ", target_gear="
              << static_cast<int>(TargetGearForDirectCommand(forward))
              << ", direct_distance="
              << std::fixed << std::setprecision(3)
@@ -3296,11 +3313,22 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         command_mode == ParkingCommandMode::PARKING_COMMAND_BRAKE ||
         command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
       std::ostringstream stream;
-      stream << BuildStageControlReason(*command_sample, command_mode_text);
-      if (command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
-        stream << ", MISSIONFINISHED";
+      std::string stage_status = "paused";
+      std::string parking_status = "stage_control_stop";
+      if (command_mode == ParkingCommandMode::PARKING_COMMAND_BRAKE) {
+        stage_status = "braking";
+      } else if (command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
+        stage_status = "mission_finished";
+        parking_status = "mission_finished";
       }
-      stream << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION";
+      AppendStageControlContract(*command_sample, command_mode_text,
+                                 stage_status, "STAGE_CONTROL_STOP", &stream);
+      if (command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH) {
+        stream << ", MISSIONFINISHED"
+               << ", finish_status=MISSIONFINISHED";
+      }
+      stream << ", trajectory_type=SHORT_PATH"
+             << ", parking_status=" << parking_status;
       metadata.status_reason = stream.str();
       *status_reason = metadata.status_reason;
       *output_sample = BuildStageControlStopTrajectory(
@@ -3313,9 +3341,15 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         command_mode == ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_RIGHT ||
         command_mode == ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_FRONT ||
         command_mode == ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_BACK) {
-      metadata.status_reason =
-          BuildStageControlReason(*command_sample, command_mode_text) +
-          ", unsupported_in_mvp, skip=ROI_PATH_PROVIDER_PATH_PARTITION";
+      std::ostringstream stream;
+      AppendStageControlContract(*command_sample, command_mode_text,
+                                 "unsupported", "UNSUPPORTED_PARKING_OUT",
+                                 &stream);
+      stream << ", trajectory_type=SHORT_PATH"
+             << ", parking_status=parking_out_unsupported"
+             << ", unsupported_in_mvp"
+             << ", unsupported_reason=parking_out_not_in_mvp";
+      metadata.status_reason = stream.str();
       *status_reason = metadata.status_reason;
       *output_sample = BuildStageControlStopTrajectory(
           config_, metadata, runtime_->vehicle_input, metadata.status_reason,

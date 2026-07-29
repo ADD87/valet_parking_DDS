@@ -19,10 +19,15 @@ Options:
                        multi-lot-seq-switch
   --command-mode MODE ParkingCommand publisher mode. Default: none.
                        none|parking-in|direct-forward|direct-backward|
-                       pause|brake|finish|invalid
+                       pause|brake|finish|parking-out-left|
+                       parking-out-right|parking-out-front|parking-out-back|
+                       invalid
   --command-count N   ParkingCommand publish count. Default: 1.
   --command-interval-ms N
                        ParkingCommand publish interval. Default: 100.
+  --command-reset-history
+                       Publish command with reset_history=true and require the
+                       runner to consume it as a one-shot reset.
   --direct-distance M Direct branch distance in meters. Default: 3.0.
   --direct-speed M    Direct branch speed in m/s. Default: 0.8.
   --disable-command-topic
@@ -70,6 +75,7 @@ slot_mode="valid"
 command_mode="none"
 command_count=1
 command_interval_ms=100
+command_reset_history=0
 direct_distance=3.0
 direct_speed=0.8
 disable_command_topic=0
@@ -121,6 +127,10 @@ while [[ $# -gt 0 ]]; do
     --command-interval-ms)
       command_interval_ms="${2:-}"
       shift 2
+      ;;
+    --command-reset-history)
+      command_reset_history=1
+      shift
       ;;
     --direct-distance)
       direct_distance="${2:-}"
@@ -299,7 +309,7 @@ wait_for_runner_log() {
   local timeout_seconds="$2"
   local deadline=$((SECONDS + timeout_seconds))
   while ((SECONDS < deadline)); do
-    if grep -Eq "${pattern}" "${runner_log}"; then
+    if grep -Eq "${pattern}" "${runner_log}" 2>/dev/null; then
       return 0
     fi
     sleep 0.2
@@ -356,7 +366,7 @@ fi
   >"${subscriber_log}" 2>&1 &
 subscriber_pid=$!
 if [[ "${aux_runs_in_background}" == "1" ]]; then
-  sleep 1
+  sleep 0.2
   "${aux_publisher}" --domain-id="${domain_id}" --mode="${aux_mode}" \
     --chassis-gear="${aux_chassis_gear}" \
     --chassis-speed-mps="${aux_chassis_speed_mps}" \
@@ -369,12 +379,19 @@ else
 fi
 
 if [[ "${command_mode}" != "none" ]]; then
-  "${command_publisher}" --domain-id="${domain_id}" --mode="${command_mode}" \
-    --count="${effective_command_count}" \
-    --interval-ms="${effective_command_interval_ms}" \
-    --direct-distance="${direct_distance}" \
-    --direct-speed="${direct_speed}" \
-    --reason="smoke-${command_mode}" >"${command_publisher_log}" 2>&1 &
+  command_args=(
+    "--domain-id=${domain_id}"
+    "--mode=${command_mode}"
+    "--count=${effective_command_count}"
+    "--interval-ms=${effective_command_interval_ms}"
+    "--direct-distance=${direct_distance}"
+    "--direct-speed=${direct_speed}"
+    "--reason=smoke-${command_mode}"
+  )
+  if [[ "${command_reset_history}" == "1" ]]; then
+    command_args+=("--reset-history")
+  fi
+  "${command_publisher}" "${command_args[@]}" >"${command_publisher_log}" 2>&1 &
   command_publisher_pid=$!
 
   command_wait_pattern="command #[0-9]+ mode="
@@ -396,6 +413,18 @@ if [[ "${command_mode}" != "none" ]]; then
       ;;
     finish)
       command_wait_pattern="command #[0-9]+ mode=FINISH"
+      ;;
+    parking-out-left)
+      command_wait_pattern="command #[0-9]+ mode=PARKING_OUT_LEFT"
+      ;;
+    parking-out-right)
+      command_wait_pattern="command #[0-9]+ mode=PARKING_OUT_RIGHT"
+      ;;
+    parking-out-front)
+      command_wait_pattern="command #[0-9]+ mode=PARKING_OUT_FRONT"
+      ;;
+    parking-out-back)
+      command_wait_pattern="command #[0-9]+ mode=PARKING_OUT_BACK"
       ;;
     invalid)
       command_wait_pattern="command #[0-9]+ mode=NONE \\(cleared_command\\)"
@@ -482,7 +511,7 @@ echo "[valet_parking_smoke] run_root=${run_root}"
 echo "[valet_parking_smoke] logs=${log_dir}"
 echo "[valet_parking_smoke] subscriber_status=${subscriber_status}"
 echo "[valet_parking_smoke] runner status lines:"
-grep -E "command #|command rejected|STAGE_CONTROL|OPEN_SPACE_STRAIGHT_PATH|SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample|aux localization|aux chassis|aux obstacles" "${runner_log}" | tail -n 100 || true
+grep -E "command #|command rejected|STAGE_CONTROL|OPEN_SPACE_STRAIGHT_PATH|SPEED_OPTIMIZER|PATH_PARTITION|PATH_PROVIDER|bridged sample|aux localization|aux chassis|aux obstacles" "${runner_log}" 2>/dev/null | tail -n 100 || true
 if [[ "${command_mode}" != "none" ]]; then
   echo "[valet_parking_smoke] command publisher:"
   cat "${command_publisher_log}"
@@ -521,7 +550,7 @@ fi
 require_runner_log() {
   local pattern="$1"
   local message="$2"
-  if ! grep -Eq "${pattern}" "${runner_log}"; then
+  if ! grep -Eq "${pattern}" "${runner_log}" 2>/dev/null; then
     echo "[valet_parking_smoke] ${message}" >&2
     validation_status=8
   fi
@@ -530,7 +559,7 @@ require_runner_log() {
 require_subscriber_log() {
   local pattern="$1"
   local message="$2"
-  if ! grep -Eq "${pattern}" "${subscriber_log}"; then
+  if ! grep -Eq "${pattern}" "${subscriber_log}" 2>/dev/null; then
     echo "[valet_parking_smoke] ${message}" >&2
     validation_status=8
   fi
@@ -539,7 +568,7 @@ require_subscriber_log() {
 require_publisher_log() {
   local pattern="$1"
   local message="$2"
-  if ! grep -Eq "${pattern}" "${publisher_log}"; then
+  if ! grep -Eq "${pattern}" "${publisher_log}" 2>/dev/null; then
     echo "[valet_parking_smoke] ${message}" >&2
     validation_status=8
   fi
@@ -548,7 +577,7 @@ require_publisher_log() {
 require_command_log() {
   local pattern="$1"
   local message="$2"
-  if ! grep -Eq "${pattern}" "${command_publisher_log}"; then
+  if ! grep -Eq "${pattern}" "${command_publisher_log}" 2>/dev/null; then
     echo "[valet_parking_smoke] ${message}" >&2
     validation_status=8
   fi
@@ -557,10 +586,22 @@ require_command_log() {
 reject_runner_log() {
   local pattern="$1"
   local message="$2"
-  if grep -Eq "${pattern}" "${runner_log}"; then
+  if grep -Eq "${pattern}" "${runner_log}" 2>/dev/null; then
     echo "[valet_parking_smoke] ${message}" >&2
     validation_status=8
   fi
+}
+
+aux_mode_expects_path_provider_early_stop() {
+  [[ "${with_aux_inputs}" == "1" ]] || return 1
+  case "${aux_mode}" in
+    far-localization|far-obstacles|many-obstacles)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 case "${slot_mode}" in
@@ -573,6 +614,8 @@ case "${slot_mode}" in
           "missing controlled ROI-seed fallback after PATH_PROVIDER timeout"
         require_subscriber_log "is_estop=false" \
           "missing subscriber output after PATH_PROVIDER timeout fallback"
+      elif aux_mode_expects_path_provider_early_stop; then
+        :
       else
         require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
           "missing threaded OpenSpacePathProvider target plan evidence"
@@ -646,6 +689,17 @@ case "${slot_mode}" in
 esac
 
 if [[ "${command_mode}" != "none" ]]; then
+  if [[ "${command_reset_history}" == "1" ]]; then
+    require_command_log "reset_history=true" \
+      "missing reset_history=true in command publisher log"
+    require_runner_log "command #[0-9]+ mode=.*reset_history=true" \
+      "missing reset_history=true in runner command consumption log"
+    require_runner_log "command reset_history consumed mode=.*\\(one_shot\\)" \
+      "missing one-shot reset_history consumption log"
+    require_runner_log "STAGE_CONTROL .*reset_history=true" \
+      "missing reset_history=true in stage-control reason"
+  fi
+
   case "${command_mode}" in
     parking-in)
       require_command_log "enum=PARKING_IN" \
@@ -662,6 +716,10 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD command consumption in runner log"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_FORWARD stage-control trajectory reason"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*command_action=DIRECT_FORWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH" \
+        "missing DIRECT_FORWARD standardized stage-control contract"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD.*trajectory_type=NORMAL.*parking_status=direct_(stop_path|moving)" \
+        "missing DIRECT_FORWARD trajectory_type/parking_status diagnostics"
       require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
         "missing DIRECT_FORWARD OPEN_SPACE_STRAIGHT_PATH execution evidence"
       require_runner_log "SPEED_OPTIMIZER ok" \
@@ -688,6 +746,10 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD command consumption in runner log"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_BACKWARD stage-control trajectory reason"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*command_action=DIRECT_BACKWARD.*stage_status=direct_control.*task=OPEN_SPACE_STRAIGHT_PATH" \
+        "missing DIRECT_BACKWARD standardized stage-control contract"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD.*trajectory_type=NORMAL.*parking_status=direct_(stop_path|moving)" \
+        "missing DIRECT_BACKWARD trajectory_type/parking_status diagnostics"
       require_runner_log "OPEN_SPACE_STRAIGHT_PATH" \
         "missing DIRECT_BACKWARD OPEN_SPACE_STRAIGHT_PATH execution evidence"
       require_runner_log "SPEED_OPTIMIZER ok" \
@@ -716,6 +778,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing PAUSE command consumption in runner log"
       require_runner_log "STAGE_CONTROL PAUSE.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing PAUSE stage-control reason"
+      require_runner_log "STAGE_CONTROL PAUSE.*command_action=PAUSE.*stage_status=paused.*task=STAGE_CONTROL_STOP.*trajectory_type=SHORT_PATH.*parking_status=stage_control_stop" \
+        "missing PAUSE standardized stop contract"
       reject_runner_log "ROI_DECIDER ok" \
         "PAUSE should not run ROI_DECIDER"
       require_subscriber_log "points=1" \
@@ -730,6 +794,8 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing BRAKE command consumption in runner log"
       require_runner_log "STAGE_CONTROL BRAKE.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing BRAKE stage-control reason"
+      require_runner_log "STAGE_CONTROL BRAKE.*command_action=BRAKE.*stage_status=braking.*task=STAGE_CONTROL_STOP.*trajectory_type=SHORT_PATH.*parking_status=stage_control_stop" \
+        "missing BRAKE standardized stop contract"
       reject_runner_log "ROI_DECIDER ok" \
         "BRAKE should not run ROI_DECIDER"
       require_subscriber_log "points=1" \
@@ -742,8 +808,10 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing FINISH command publisher evidence"
       require_runner_log "command #[0-9]+ mode=FINISH" \
         "missing FINISH command consumption in runner log"
-      require_runner_log "STAGE_CONTROL FINISH.*MISSIONFINISHED.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
+      require_runner_log "STAGE_CONTROL FINISH.*skip=ROI_PATH_PROVIDER_PATH_PARTITION.*MISSIONFINISHED" \
         "missing FINISH/MISSIONFINISHED stage-control reason"
+      require_runner_log "STAGE_CONTROL FINISH.*command_action=FINISH.*stage_status=mission_finished.*task=STAGE_CONTROL_STOP.*finish_status=MISSIONFINISHED.*trajectory_type=SHORT_PATH.*parking_status=mission_finished" \
+        "missing FINISH standardized stop contract"
       reject_runner_log "ROI_DECIDER ok" \
         "FINISH should not run ROI_DECIDER"
       require_subscriber_log "points=1" \
@@ -752,6 +820,37 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing non-estop stop trajectory for FINISH command mode"
       require_subscriber_log "reason: replan=.*MISSIONFINISHED" \
         "missing MISSIONFINISHED reason in subscriber output"
+      ;;
+    parking-out-left|parking-out-right|parking-out-front|parking-out-back)
+      parking_out_enum=""
+      case "${command_mode}" in
+        parking-out-left)
+          parking_out_enum="PARKING_OUT_LEFT"
+          ;;
+        parking-out-right)
+          parking_out_enum="PARKING_OUT_RIGHT"
+          ;;
+        parking-out-front)
+          parking_out_enum="PARKING_OUT_FRONT"
+          ;;
+        parking-out-back)
+          parking_out_enum="PARKING_OUT_BACK"
+          ;;
+      esac
+      require_command_log "enum=${parking_out_enum}" \
+        "missing ${parking_out_enum} command publisher evidence"
+      require_runner_log "command #[0-9]+ mode=${parking_out_enum}" \
+        "missing ${parking_out_enum} command consumption in runner log"
+      require_runner_log "STAGE_CONTROL ${parking_out_enum}.*command_action=${parking_out_enum}.*stage_status=unsupported.*task=UNSUPPORTED_PARKING_OUT.*trajectory_type=SHORT_PATH.*parking_status=parking_out_unsupported.*unsupported_in_mvp" \
+        "missing ${parking_out_enum} unsupported parking-out contract"
+      reject_runner_log "ROI_DECIDER ok" \
+        "${parking_out_enum} should not run ROI_DECIDER in MVP unsupported branch"
+      require_subscriber_log "points=1" \
+        "missing one-point stop trajectory for ${parking_out_enum}"
+      require_subscriber_log "is_estop=false" \
+        "missing non-estop stop trajectory for ${parking_out_enum}"
+      require_subscriber_log "reason: replan=.*parking_out_unsupported" \
+        "missing parking_out_unsupported reason in subscriber output"
       ;;
     invalid)
       require_command_log "is_valid=false" \
@@ -772,7 +871,7 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
   require_log() {
     local pattern="$1"
     local message="$2"
-    if ! grep -Eq "${pattern}" "${runner_log}"; then
+    if ! grep -Eq "${pattern}" "${runner_log}" 2>/dev/null; then
       echo "[valet_parking_smoke] ${message}" >&2
       validation_status=8
     fi
@@ -781,7 +880,7 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
   require_aux_log() {
     local pattern="$1"
     local message="$2"
-    if ! grep -Eq "${pattern}" "${aux_publisher_log}"; then
+    if ! grep -Eq "${pattern}" "${aux_publisher_log}" 2>/dev/null; then
       echo "[valet_parking_smoke] ${message}" >&2
       validation_status=8
     fi
@@ -790,7 +889,7 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
   reject_log() {
     local pattern="$1"
     local message="$2"
-    if grep -Eq "${pattern}" "${runner_log}"; then
+    if grep -Eq "${pattern}" "${runner_log}" 2>/dev/null; then
       echo "[valet_parking_smoke] ${message}" >&2
       validation_status=8
     fi
@@ -922,7 +1021,7 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing far localization sample"
         require_log "vehicle_lot_precheck failed: vehicle outside selected lot envelope" \
           "missing vehicle_lot_precheck failure in far-localization mode"
-        if ! grep -Eq "is_estop=true" "${subscriber_log}"; then
+        if ! grep -Eq "is_estop=true" "${subscriber_log}" 2>/dev/null; then
           echo "[valet_parking_smoke] missing estop trajectory in far-localization mode" >&2
           validation_status=8
         fi

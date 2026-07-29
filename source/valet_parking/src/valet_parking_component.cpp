@@ -1358,6 +1358,10 @@ bool ValetParkingComponent::BuildTrajectoryFromInput(const SelectedSlot& input_s
       status_reason);
   if (latest_parking_command_ != nullptr &&
       latest_parking_command_->reset_history()) {
+    std::cout << kModuleTag
+              << " command reset_history consumed mode="
+              << ParkingCommandModeToString(latest_parking_command_->mode())
+              << " (one_shot)" << std::endl;
     latest_parking_command_->reset_history(false);
   }
   return ok;
