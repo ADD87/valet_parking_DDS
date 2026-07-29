@@ -518,3 +518,48 @@ result=all smoke cases passed
 - `FINISH_HOLD` 只是当前 Adapter 的轻量 Stage 退出锁存，不是完整原车 `FinishScenario()`。
 - collision/wheel mask、完整 `Frame/OpenSpaceInfo/PlanningContext` 和 NLP smoother 仍未完整接入。
 - m57 尚未做板端 runtime。
+
+## BATCH-073_076 已减少的差异
+
+| 原始流程节点 | 之前差异 | 本批次收敛 |
+|---|---|---|
+| PathProvider 失败/timeout fallback | timeout 分支已有 `fallback to ROI seed`，但 Stage 级别的 fallback 事件、fallback 动作、MissionState 和生命周期语义不完整 | 新增 `STAGE_OUTPUT fallback`，输出 `fallback_event=path_provider_failed`、`fallback_action=publish_roi_seed`、`mission_state=MISSION_FALLBACK`、`runtime_lifecycle_event=path_provider_fallback` |
+| PathProvider PreCheck 失败 | far/many obstacles 只证明会 estop，缺少 Stage 级别说明“这是 PreCheck 失败触发的 estop fallback” | PreCheck 失败分支新增 `fallback_event=precheck_failed`、`fallback_action=publish_estop`、`mission_state=MISSION_ESTOP`、`runtime_lifecycle_event=precheck_fallback` |
+| PathPartition 失败 fallback | 真实算法分支很难稳定触发，之前没有 smoke 固定“失败后发布 PathProvider 粗路径”的 Stage 语义 | 新增 smoke-only `VALET_PARKING_FORCE_PATH_PARTITION_FAIL`，smoke 验证 `fallback_event=path_partition_failed`、`fallback_action=publish_path_provider_path` |
+| SpeedOptimizer 失败 fallback | 真实算法分支很难稳定触发，之前只靠自然错误风险，缺少稳定回归验证 | 新增 smoke-only `VALET_PARKING_FORCE_SPEED_OPTIMIZER_FAIL`，smoke 验证 `fallback_event=speed_optimizer_failed`、`fallback_action=publish_path_partition_path`，并保留 `STAGE_OUTPUT open_space speed_optimizer=fallback` |
+| 批量回归矩阵 | batch smoke 覆盖正常、命令、finish、部分负向输入，但后段 task fallback 不完整 | `smoke_valet_parking_batch_042_046.sh` 新增 forced path partition fallback 和 forced speed optimizer fallback 两个 case |
+
+## BATCH-073_076 验证
+
+通过：
+```text
+git diff --check
+bash -n source/valet_parking_tools/smoke_valet_parking_x86.sh
+bash -n source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+bash source/valet_parking_tools/build_valet_parking.sh --out-dir /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_073_076
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_073_076/valet_parking_mvp/x86 --domain-id 123 --expect-path-provider-timeout --expect-thread-provider-stop
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_073_076/valet_parking_mvp/x86 --domain-id 124 --force-path-partition-fail --expect-thread-provider-stop
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_073_076/valet_parking_mvp/x86 --domain-id 125 --force-speed-optimizer-fail --expect-thread-provider-stop
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_073_076/valet_parking_mvp/x86 --domain-id 126 --with-aux-inputs --aux-mode far-obstacles
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_073_076/valet_parking_mvp/x86 --domain-id 127 --with-aux-inputs --aux-mode many-obstacles
+bash source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_073_076/valet_parking_mvp/x86 --first-domain-id 160 --timeout-ms 25000
+```
+
+产物：
+```text
+out/valet_parking_flow_gap_073_076/valet_parking_mvp/x86/lib/libvalet_parking.so
+out/valet_parking_flow_gap_073_076/valet_parking_mvp/m57/lib/libvalet_parking.so
+```
+
+批量 smoke：
+```text
+first-domain-id=160
+result=all smoke cases passed
+```
+
+仍保留的核心差异：
+- `STAGE_OUTPUT fallback` 仍通过 `replan_reason/estop.reason` 文本承载，不是正式 IDL 字段。
+- early Stage 输入失败分支还没有全部统一成 fallback Stage contract。
+- direct 分支内部 `OPEN_SPACE_STRAIGHT_PATH` 失败与 direct speed fallback 还没有独立负向 smoke。
+- collision/wheel mask、完整 `Frame/OpenSpaceInfo/PlanningContext` 和 NLP smoother 仍未完整接入。
+- m57 尚未做板端 runtime。

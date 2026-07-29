@@ -36,6 +36,10 @@ constexpr uint32_t kMaxExternalObstacleCount = 128U;
 constexpr double kDefaultPathProviderTimeoutS = 8.5;
 constexpr const char* kPathProviderTimeoutEnv =
     "VALET_PARKING_PATH_PROVIDER_TIMEOUT_S";
+constexpr const char* kForcePathPartitionFailEnv =
+    "VALET_PARKING_FORCE_PATH_PARTITION_FAIL";
+constexpr const char* kForceSpeedOptimizerFailEnv =
+    "VALET_PARKING_FORCE_SPEED_OPTIMIZER_FAIL";
 constexpr double kStageFinishStandstillThresholdMps = 0.05;
 constexpr uint32_t kStageFinishRequiredConsecutiveFrames = 2U;
 constexpr double kPathProviderPreCheckObstacleNearPoseThresholdM = 0.75;
@@ -1225,6 +1229,18 @@ double ReadPathProviderTimeoutS() {
     return kDefaultPathProviderTimeoutS;
   }
   return parsed;
+}
+
+bool IsSmokeFlagEnabled(const char* name) {
+  const char* env_value = std::getenv(name);
+  if (env_value == nullptr || env_value[0] == '\0') {
+    return false;
+  }
+
+  const std::string value(env_value);
+  return value == "1" || value == "true" || value == "TRUE" ||
+         value == "yes" || value == "YES" || value == "on" ||
+         value == "ON";
 }
 
 TL::planning::OpenSpacePathProvider* EnsureThreadedPathProvider(
@@ -2986,6 +3002,45 @@ std::string BuildOpenSpaceStageOutputContract(
   return stream.str();
 }
 
+std::string BuildFallbackStageOutputContract(
+    const std::string& fallback_event,
+    const std::string& fallback_action,
+    const std::string& stage_status,
+    const std::string& parking_status,
+    PlanningTrajectoryType trajectory_type,
+    const std::string& mission_state,
+    const std::string& next_stage,
+    bool finish_scenario_intent,
+    const FunctionManagerProjection* function_projection,
+    const PathProviderRuntimeState* provider_state,
+    bool has_last_speed_frame,
+    bool direct_command_active,
+    const std::string& runtime_lifecycle_event,
+    const std::string& stage_exit_action,
+    const std::string& path_history_action,
+    const std::string& speed_frame_action,
+    const std::string& direct_state_action) {
+  std::ostringstream stream;
+  stream << "STAGE_OUTPUT fallback";
+  AppendStageProjectionContract("fallback_output", &stream);
+  stream << ", fallback_event=" << fallback_event
+         << ", fallback_action=" << fallback_action
+         << ", stage_status=" << stage_status
+         << ", trajectory_type=" << TrajectoryTypeName(trajectory_type)
+         << ", parking_status=" << parking_status;
+  AppendMissionStateContract(mission_state, next_stage,
+                             finish_scenario_intent, &stream);
+  if (function_projection != nullptr) {
+    AppendFunctionManagerProjectionContract(*function_projection, &stream);
+  }
+  AppendRuntimeLifecycleContract(
+      runtime_lifecycle_event, stage_exit_action, path_history_action,
+      speed_frame_action, direct_state_action,
+      provider_state != nullptr && provider_state->has_history,
+      has_last_speed_frame, direct_command_active, &stream);
+  return stream.str();
+}
+
 bool RunPathPartition(const valet_parking_config_t& config,
                       const InputMetadata& metadata,
                       const TL::planning::RoiDeciderOutput& roi_output,
@@ -3001,6 +3056,14 @@ bool RunPathPartition(const valet_parking_config_t& config,
                       std::string* status_reason) {
   if (partition == nullptr || partition_output == nullptr ||
       status_reason == nullptr) {
+    return false;
+  }
+
+  if (IsSmokeFlagEnabled(kForcePathPartitionFailEnv)) {
+    std::ostringstream stream;
+    stream << "PATH_PARTITION failed: forced_by_smoke_env";
+    AppendOpenSpaceTaskContract("path_partition_output", &stream);
+    *status_reason = stream.str();
     return false;
   }
 
@@ -3135,6 +3198,14 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
                        std::string* status_reason) {
   if (optimizer == nullptr || speed_output == nullptr ||
       status_reason == nullptr) {
+    return false;
+  }
+
+  if (IsSmokeFlagEnabled(kForceSpeedOptimizerFailEnv)) {
+    std::ostringstream stream;
+    stream << "SPEED_OPTIMIZER failed: forced_by_smoke_env";
+    AppendOpenSpaceTaskContract("speed_optimizer_output", &stream);
+    *status_reason = stream.str();
     return false;
   }
 
@@ -4408,6 +4479,22 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   if (!precheck_result.ok) {
     runtime_->ResetPlanningState();
     metadata.status_reason = precheck_reason + "; " +
+                             BuildFallbackStageOutputContract(
+                                 "precheck_failed", "publish_estop",
+                                 "fallback_estop", "precheck_failed",
+                                 PlanningTrajectoryType::
+                                     TRAJECTORY_TYPE_UNKNOWN,
+                                 "MISSION_ESTOP", "PARKING", false,
+                                 &function_projection,
+                                 &runtime_->path_provider,
+                                 runtime_->has_last_speed_frame,
+                                 runtime_->direct_command.active,
+                                 "precheck_fallback",
+                                 "stay_in_parking_stage",
+                                 "reset_on_precheck_failure",
+                                 "reset_on_precheck_failure",
+                                 "already_clear") +
+                             "; " +
                              BuildFunctionManagerProjectionReason(
                                  function_projection) +
                              "; " + roi_reason;
@@ -4485,6 +4572,34 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       }
       metadata.status_reason =
           speed_optimizer_reason + "; fallback to PATH_PARTITION; " +
+          BuildFallbackStageOutputContract(
+              "speed_optimizer_failed", "publish_path_partition_path",
+              stage_finish_evaluation.ready_to_finish
+                  ? "mission_finished"
+                  : "speed_optimizer_fallback",
+              stage_finish_evaluation.ready_to_finish
+                  ? "mission_finished"
+                  : "path_partition_fallback",
+              StageTrajectoryType(partition_output, nullptr,
+                                  &stage_finish_evaluation),
+              stage_finish_evaluation.ready_to_finish ? "MISSION_FINISHED"
+                                                       : "MISSION_FALLBACK",
+              stage_finish_evaluation.ready_to_finish ? "FINISH" : "PARKING",
+              stage_finish_evaluation.ready_to_finish,
+              &function_projection, &runtime_->path_provider,
+              runtime_->has_last_speed_frame,
+              runtime_->direct_command.active, "speed_optimizer_fallback",
+              stage_finish_evaluation.ready_to_finish
+                  ? "latch_finish_hold_after_publish"
+                  : "continue_parking_with_fallback",
+              stage_finish_evaluation.ready_to_finish
+                  ? "keep_until_stage_reset"
+                  : "keep_path_partition_fallback",
+              stage_finish_evaluation.ready_to_finish
+                  ? "keep_until_stage_reset"
+                  : "clear_failed_speed_frame",
+              "already_clear") +
+          "; " +
           BuildOpenSpaceStageOutputContract(partition_output, nullptr,
                                             &stage_finish_evaluation,
                                             &function_projection,
@@ -4502,6 +4617,17 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
     runtime_->ResetPlanningState();
     metadata.status_reason =
         path_partition_reason + "; fallback to PATH_PROVIDER; " +
+        BuildFallbackStageOutputContract(
+            "path_partition_failed", "publish_path_provider_path",
+            "path_partition_fallback", "path_provider_fallback",
+            PlanningTrajectoryType::TRAJECTORY_TYPE_PATH_FALLBACK,
+            "MISSION_FALLBACK", "PARKING", false,
+            &function_projection, &runtime_->path_provider,
+            runtime_->has_last_speed_frame, runtime_->direct_command.active,
+            "path_partition_fallback", "continue_parking_with_fallback",
+            "reset_after_path_partition_failure",
+            "reset_after_path_partition_failure", "already_clear") +
+        "; " +
         BuildFunctionManagerProjectionReason(function_projection) + "; " +
         path_provider_reason + "; " + precheck_reason + "; " + roi_reason;
     *status_reason = metadata.status_reason;
@@ -4513,6 +4639,17 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   runtime_->ResetPlanningState();
   metadata.status_reason =
       path_provider_reason + "; fallback to ROI seed; " +
+      BuildFallbackStageOutputContract(
+          "path_provider_failed", "publish_roi_seed",
+          "path_provider_fallback", "roi_seed_fallback",
+          PlanningTrajectoryType::TRAJECTORY_TYPE_PATH_FALLBACK,
+          "MISSION_FALLBACK", "PARKING", false,
+          &function_projection, &runtime_->path_provider,
+          runtime_->has_last_speed_frame, runtime_->direct_command.active,
+          "path_provider_fallback", "continue_parking_with_fallback",
+          "reset_after_path_provider_failure",
+          "reset_after_path_provider_failure", "already_clear") +
+      "; " +
       BuildFunctionManagerProjectionReason(function_projection) + "; " +
       precheck_reason + "; " + roi_reason;
   *status_reason = metadata.status_reason;

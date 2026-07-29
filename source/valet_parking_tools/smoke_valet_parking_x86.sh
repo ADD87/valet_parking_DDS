@@ -59,6 +59,10 @@ Options:
   --expect-path-provider-timeout
                        Expect PATH_PROVIDER TARGET_TIMEOUT instead of normal
                        TARGET_READY for valid/no-command smoke.
+  --force-path-partition-fail
+                       Force PATH_PARTITION failure through smoke-only env.
+  --force-speed-optimizer-fail
+                       Force SPEED_OPTIMIZER failure through smoke-only env.
   --expect-thread-provider-stop
                        Require OpenSpaceThreadManager stop/destructor evidence
                        in runner log after runner exits.
@@ -94,6 +98,8 @@ aux_interval_ms=200
 disable_aux_input_topics=0
 path_provider_timeout_s=""
 expect_path_provider_timeout=0
+force_path_partition_fail=0
+force_speed_optimizer_fail=0
 expect_thread_provider_stop=0
 
 while [[ $# -gt 0 ]]; do
@@ -188,6 +194,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --expect-path-provider-timeout)
       expect_path_provider_timeout=1
+      shift
+      ;;
+    --force-path-partition-fail)
+      force_path_partition_fail=1
+      shift
+      ;;
+    --force-speed-optimizer-fail)
+      force_speed_optimizer_fail=1
       shift
       ;;
     --expect-thread-provider-stop)
@@ -377,6 +391,12 @@ fi
 runner_env=()
 if [[ -n "${path_provider_timeout_s}" ]]; then
   runner_env+=("VALET_PARKING_PATH_PROVIDER_TIMEOUT_S=${path_provider_timeout_s}")
+fi
+if [[ "${force_path_partition_fail}" == "1" ]]; then
+  runner_env+=("VALET_PARKING_FORCE_PATH_PARTITION_FAIL=1")
+fi
+if [[ "${force_speed_optimizer_fail}" == "1" ]]; then
+  runner_env+=("VALET_PARKING_FORCE_SPEED_OPTIMIZER_FAIL=1")
 fi
 
 env "${runner_env[@]}" "${runner}" "${runner_args[@]}" >"${runner_log}" 2>&1 &
@@ -710,8 +730,36 @@ case "${slot_mode}" in
           "missing expected threaded OpenSpacePathProvider timeout evidence"
         require_runner_log "fallback to ROI seed" \
           "missing controlled ROI-seed fallback after PATH_PROVIDER timeout"
+        require_runner_log "STAGE_OUTPUT fallback.*fallback_event=path_provider_failed.*fallback_action=publish_roi_seed.*runtime_lifecycle_event=path_provider_fallback" \
+          "missing Stage fallback lifecycle evidence after PATH_PROVIDER timeout"
         require_subscriber_log "is_estop=false" \
           "missing subscriber output after PATH_PROVIDER timeout fallback"
+      elif [[ "${force_path_partition_fail}" == "1" ]]; then
+        require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
+          "missing threaded OpenSpacePathProvider target plan evidence before forced PathPartition failure"
+        require_runner_log "PATH_PARTITION failed: forced_by_smoke_env.*task_contract=lightweight_open_space_task_projection.*task_contract_record=path_partition_output" \
+          "missing forced PathPartition failure task projection"
+        require_runner_log "fallback to PATH_PROVIDER" \
+          "missing controlled PathProvider fallback after PathPartition failure"
+        require_runner_log "STAGE_OUTPUT fallback.*fallback_event=path_partition_failed.*fallback_action=publish_path_provider_path.*runtime_lifecycle_event=path_partition_fallback" \
+          "missing Stage fallback lifecycle evidence after PathPartition failure"
+        require_subscriber_log "is_estop=false" \
+          "missing subscriber output after PathPartition fallback"
+      elif [[ "${force_speed_optimizer_fail}" == "1" ]]; then
+        require_runner_log "PATH_PROVIDER ok.*threaded=true.*provider_status=TARGET_READY.*target_source=target_thread" \
+          "missing threaded OpenSpacePathProvider target plan evidence before forced SpeedOptimizer failure"
+        require_runner_log "PATH_PARTITION ok.*task_contract=lightweight_open_space_task_projection.*task_contract_record=path_partition_output" \
+          "missing PathPartition task projection before forced SpeedOptimizer failure"
+        require_runner_log "SPEED_OPTIMIZER failed: forced_by_smoke_env.*task_contract=lightweight_open_space_task_projection.*task_contract_record=speed_optimizer_output" \
+          "missing forced SpeedOptimizer failure task projection"
+        require_runner_log "fallback to PATH_PARTITION" \
+          "missing controlled PathPartition fallback after SpeedOptimizer failure"
+        require_runner_log "STAGE_OUTPUT fallback.*fallback_event=speed_optimizer_failed.*fallback_action=publish_path_partition_path.*runtime_lifecycle_event=speed_optimizer_fallback" \
+          "missing Stage fallback lifecycle evidence after SpeedOptimizer failure"
+        require_runner_log "STAGE_OUTPUT open_space.*speed_optimizer=fallback.*trajectory_type=SPEED_FALLBACK" \
+          "missing open-space Stage fallback projection after SpeedOptimizer failure"
+        require_subscriber_log "is_estop=false" \
+          "missing subscriber output after SpeedOptimizer fallback"
       elif aux_mode_expects_path_provider_early_stop; then
         :
       else
@@ -1317,6 +1365,8 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing obstacle local bounds precheck failure"
         require_log "PATH_PROVIDER_PRECHECK failed: obstacle_segment_outside_xy_bounds\\[[0-9]+\\].*collision_contract=geometry_precheck_only.*wheel_mask_contract=not_exposed_in_current_mvp" \
           "missing collision/wheel-mask contract on far-obstacles precheck failure"
+        require_log "STAGE_OUTPUT fallback.*fallback_event=precheck_failed.*fallback_action=publish_estop.*runtime_lifecycle_event=precheck_fallback" \
+          "missing Stage fallback lifecycle evidence after far-obstacles precheck failure"
         require_log "estop=true" \
           "missing runner estop for far-obstacles mode"
         require_subscriber_log "is_estop=true" \
@@ -1333,6 +1383,8 @@ if [[ "${with_aux_inputs}" == "1" ]]; then
           "missing obstacle segment overload precheck failure"
         require_log "PATH_PROVIDER_PRECHECK failed: too_many_obstacle_segments=[0-9]+.*collision_contract=geometry_precheck_only.*wheel_mask_contract=not_exposed_in_current_mvp" \
           "missing collision/wheel-mask contract on many-obstacles precheck failure"
+        require_log "STAGE_OUTPUT fallback.*fallback_event=precheck_failed.*fallback_action=publish_estop.*runtime_lifecycle_event=precheck_fallback" \
+          "missing Stage fallback lifecycle evidence after many-obstacles precheck failure"
         require_log "estop=true" \
           "missing runner estop for many-obstacles mode"
         require_subscriber_log "is_estop=true" \

@@ -16,8 +16,8 @@ Options:
 This batch runs the BATCH-042_046 command/status hardening smoke matrix:
   valid, timeout, multi-lot, direct, reset_history, pause/brake/finish,
   invalid clear, parking-out unsupported, and core target/obstacle regressions.
-  BATCH-065_068 and BATCH-069_072 also reuse this matrix for finish-boundary,
-  lifecycle-contract, and combined-state regressions.
+  BATCH-065_068, BATCH-069_072, and BATCH-073_076 also reuse this matrix for
+  finish-boundary, lifecycle-contract, combined-state, and fallback regressions.
 EOF
 }
 
@@ -94,6 +94,14 @@ run_case "valid-threaded-provider" \
 
 run_case "timeout-cancel-fallback" \
   --expect-path-provider-timeout \
+  --expect-thread-provider-stop
+
+run_case "forced-path-partition-fallback" \
+  --force-path-partition-fail \
+  --expect-thread-provider-stop
+
+run_case "forced-speed-optimizer-fallback" \
+  --force-speed-optimizer-fail \
   --expect-thread-provider-stop
 
 run_case "multi-lot-preplan-candidate" \
