@@ -40,6 +40,10 @@ constexpr const char* kForcePathPartitionFailEnv =
     "VALET_PARKING_FORCE_PATH_PARTITION_FAIL";
 constexpr const char* kForceSpeedOptimizerFailEnv =
     "VALET_PARKING_FORCE_SPEED_OPTIMIZER_FAIL";
+constexpr const char* kForceRoiDeciderFailEnv =
+    "VALET_PARKING_FORCE_ROI_DECIDER_FAIL";
+constexpr const char* kForceStraightPathFailEnv =
+    "VALET_PARKING_FORCE_STRAIGHT_PATH_FAIL";
 constexpr double kStageFinishStandstillThresholdMps = 0.05;
 constexpr uint32_t kStageFinishRequiredConsecutiveFrames = 2U;
 constexpr double kPathProviderPreCheckObstacleNearPoseThresholdM = 0.75;
@@ -3041,6 +3045,23 @@ std::string BuildFallbackStageOutputContract(
   return stream.str();
 }
 
+std::string BuildEarlyEstopFallbackContract(
+    const std::string& fallback_event,
+    const std::string& parking_status,
+    const FunctionManagerProjection& function_projection,
+    const PathProviderRuntimeState* provider_state,
+    bool has_last_speed_frame,
+    bool direct_command_active) {
+  return BuildFallbackStageOutputContract(
+      fallback_event, "publish_estop", "fallback_estop", parking_status,
+      PlanningTrajectoryType::TRAJECTORY_TYPE_UNKNOWN, "MISSION_ESTOP",
+      "PARKING", false, &function_projection, provider_state,
+      has_last_speed_frame, direct_command_active,
+      fallback_event + "_fallback", "stay_in_parking_stage",
+      "reset_on_early_failure", "reset_on_early_failure",
+      direct_command_active ? "reset_failed_direct_command" : "already_clear");
+}
+
 bool RunPathPartition(const valet_parking_config_t& config,
                       const InputMetadata& metadata,
                       const TL::planning::RoiDeciderOutput& roi_output,
@@ -3625,6 +3646,17 @@ bool RunOpenSpaceStraightPath(
     return false;
   }
 
+  if (IsSmokeFlagEnabled(kForceStraightPathFailEnv)) {
+    std::ostringstream stream;
+    stream << "OPEN_SPACE_STRAIGHT_PATH failed: forced_by_smoke_env"
+           << ", task_contract=lightweight_direct_path_projection"
+           << ", task_contract_record=open_space_straight_path_output"
+           << ", task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER"
+           << ", task_status_transport=replan_reason_text";
+    *status_reason = stream.str();
+    return false;
+  }
+
   TL::planning::OpenSpaceStraightPathOutput straight_output;
   try {
     const TL::planning::OpenSpaceStraightPathInput input =
@@ -4200,21 +4232,61 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         const std::string direct_parking_status =
             straight_partition_output.is_stop_path ? "direct_stop_path"
                                                    : "direct_moving";
+        const bool can_publish_straight_path =
+            straight_partition_output.chosen_partitioned_path.first.size() >=
+                2U &&
+            !straight_partition_output.is_stop_path;
         metadata.status_reason =
             speed_optimizer_reason +
             "; fallback to OPEN_SPACE_STRAIGHT_PATH; " +
+            BuildFallbackStageOutputContract(
+                "direct_speed_optimizer_failed",
+                can_publish_straight_path ? "publish_open_space_straight_path"
+                                          : "publish_stage_control_stop",
+                "direct_speed_optimizer_fallback",
+                direct_parking_status,
+                PlanningTrajectoryType::TRAJECTORY_TYPE_SPEED_FALLBACK,
+                "DIRECT_CONTROL_FALLBACK", "PARKING", false,
+                &function_projection, &runtime_->path_provider,
+                runtime_->has_last_speed_frame,
+                runtime_->direct_command.active,
+                "direct_speed_optimizer_fallback",
+                "continue_direct_control_with_fallback",
+                "preserve_ordinary_history",
+                "clear_failed_speed_frame", "keep_direct_command") +
+            "; " +
             stage_control_reason + ", parking_status=" +
             direct_parking_status + "; " + straight_path_reason;
         *status_reason = metadata.status_reason;
-        *output_sample = BuildTrajectoryFromPathPartition(
-            config_, metadata, straight_partition_output,
-            metadata.status_reason);
+        if (can_publish_straight_path) {
+          *output_sample = BuildTrajectoryFromPathPartition(
+              config_, metadata, straight_partition_output,
+              metadata.status_reason);
+        } else {
+          *output_sample = BuildStageControlStopTrajectory(
+              config_, metadata, runtime_->vehicle_input,
+              metadata.status_reason, ::GearPosition::GEAR_PARKING);
+        }
         return true;
       }
 
+      const bool direct_active_before_reset = runtime_->direct_command.active;
       runtime_->ResetPlanningState();
       metadata.status_reason =
-          stage_control_reason + "; " + straight_path_reason;
+          stage_control_reason + "; " + straight_path_reason + "; " +
+          BuildFallbackStageOutputContract(
+              "open_space_straight_path_failed",
+              "publish_stage_control_stop",
+              "direct_path_fallback", "direct_path_fallback_stop",
+              PlanningTrajectoryType::TRAJECTORY_TYPE_SHORT_PATH,
+              "DIRECT_CONTROL_FALLBACK", "PARKING", false,
+              &function_projection, &runtime_->path_provider,
+              runtime_->has_last_speed_frame, direct_active_before_reset,
+              "direct_straight_path_fallback",
+              "stay_in_parking_stage_with_stop",
+              "reset_after_direct_path_failure",
+              "reset_after_direct_path_failure",
+              "reset_failed_direct_command");
       *status_reason = metadata.status_reason;
       *output_sample = BuildStageControlStopTrajectory(
           config_, metadata, runtime_->vehicle_input, metadata.status_reason,
@@ -4311,7 +4383,12 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   if (!input_sample.is_valid()) {
     runtime_->ResetPlanningState();
-    metadata.status_reason = "selected_slot.is_valid is false";
+    metadata.status_reason =
+        "selected_slot.is_valid is false; " +
+        BuildEarlyEstopFallbackContract(
+            "selected_slot_invalid", "selected_slot_invalid",
+            function_projection, &runtime_->path_provider,
+            runtime_->has_last_speed_frame, runtime_->direct_command.active);
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
     return true;
@@ -4320,7 +4397,12 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   const auto& lots = input_sample.parking_lots();
   if (input_sample.count() == 0U || lots.empty()) {
     runtime_->ResetPlanningState();
-    metadata.status_reason = "selected_slot has no parking_lots";
+    metadata.status_reason =
+        "selected_slot has no parking_lots; " +
+        BuildEarlyEstopFallbackContract(
+            "selected_slot_empty", "selected_slot_empty",
+            function_projection, &runtime_->path_provider,
+            runtime_->has_last_speed_frame, runtime_->direct_command.active);
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
     return true;
@@ -4328,7 +4410,13 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   if (static_cast<std::size_t>(input_sample.count()) > lots.size()) {
     runtime_->ResetPlanningState();
-    metadata.status_reason = "selected_slot count exceeds parking_lots size";
+    metadata.status_reason =
+        "selected_slot count exceeds parking_lots size; " +
+        BuildEarlyEstopFallbackContract(
+            "selected_slot_count_overflow",
+            "selected_slot_count_overflow", function_projection,
+            &runtime_->path_provider, runtime_->has_last_speed_frame,
+            runtime_->direct_command.active);
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
     return true;
@@ -4428,7 +4516,12 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   const ParkingLot* selected_lot = SelectParkingLot(input_sample);
   if (selected_lot == nullptr) {
     runtime_->ResetPlanningState();
-    metadata.status_reason = "selected_slot selected lot is unavailable";
+    metadata.status_reason =
+        "selected_slot selected lot is unavailable; " +
+        BuildEarlyEstopFallbackContract(
+            "selected_lot_unavailable", "selected_lot_unavailable",
+            function_projection, &runtime_->path_provider,
+            runtime_->has_last_speed_frame, runtime_->direct_command.active);
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
     return true;
@@ -4436,14 +4529,30 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   TL::perception::ParkingLotOut parking_lot;
   if (!ConvertParkingLot(*selected_lot, &parking_lot, &metadata.status_reason)) {
+    const std::string failure_reason = metadata.status_reason;
     runtime_->ResetPlanningState();
+    metadata.status_reason =
+        failure_reason + "; " +
+        BuildEarlyEstopFallbackContract(
+            "parking_lot_convert_failed",
+            "parking_lot_convert_failed", function_projection,
+            &runtime_->path_provider, runtime_->has_last_speed_frame,
+            runtime_->direct_command.active);
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
     return true;
   }
   if (!ValidateVehicleNearParkingLot(parking_lot, runtime_->vehicle_input,
                                      &metadata.status_reason)) {
+    const std::string failure_reason = metadata.status_reason;
     runtime_->ResetPlanningState();
+    metadata.status_reason =
+        failure_reason + "; " +
+        BuildEarlyEstopFallbackContract(
+            "vehicle_lot_precheck_failed",
+            "vehicle_lot_precheck_failed", function_projection,
+            &runtime_->path_provider, runtime_->has_last_speed_frame,
+            runtime_->direct_command.active);
     *status_reason = metadata.status_reason;
     *output_sample =
         BuildEstopTrajectory(config_, metadata, metadata.status_reason);
@@ -4458,12 +4567,36 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       TL::planning::RoiDeciderConfig::GetDefault());
   TL::planning::RoiDeciderOutput roi_output;
 
+  if (IsSmokeFlagEnabled(kForceRoiDeciderFailEnv)) {
+    std::ostringstream stream;
+    stream << "ROI_DECIDER failed: forced_by_smoke_env";
+    AppendOpenSpaceTaskContract("roi_decider_output", &stream);
+    runtime_->ResetPlanningState();
+    metadata.status_reason =
+        stream.str() + "; " +
+        BuildEarlyEstopFallbackContract(
+            "roi_decider_failed", "roi_decider_failed",
+            function_projection, &runtime_->path_provider,
+            runtime_->has_last_speed_frame, runtime_->direct_command.active);
+    *status_reason = metadata.status_reason;
+    *output_sample =
+        BuildEstopTrajectory(config_, metadata, metadata.status_reason);
+    return true;
+  }
+
   const int roi_ret = roi_decider.Process(parking_lot, vehicle_state, &roi_output);
   if (roi_ret != 0) {
     runtime_->ResetPlanningState();
     metadata.status_reason = "ROI_DECIDER failed: ret=" + std::to_string(roi_ret) +
                              ", lot_status=" +
-                             std::to_string(static_cast<int>(roi_output.lot_status));
+                             std::to_string(static_cast<int>(roi_output.lot_status)) +
+                             "; " +
+                             BuildEarlyEstopFallbackContract(
+                                 "roi_decider_failed", "roi_decider_failed",
+                                 function_projection,
+                                 &runtime_->path_provider,
+                                 runtime_->has_last_speed_frame,
+                                 runtime_->direct_command.active);
     *status_reason = metadata.status_reason;
     *output_sample = BuildEstopTrajectory(config_, metadata, metadata.status_reason);
     return true;

@@ -16,8 +16,9 @@ Options:
 This batch runs the BATCH-042_046 command/status hardening smoke matrix:
   valid, timeout, multi-lot, direct, reset_history, pause/brake/finish,
   invalid clear, parking-out unsupported, and core target/obstacle regressions.
-  BATCH-065_068, BATCH-069_072, and BATCH-073_076 also reuse this matrix for
-  finish-boundary, lifecycle-contract, combined-state, and fallback regressions.
+  BATCH-065_068, BATCH-069_072, BATCH-073_076, and BATCH-077_080 also reuse
+  this matrix for finish-boundary, lifecycle-contract, combined-state, fallback,
+  and early-exit regressions.
 EOF
 }
 
@@ -96,6 +97,9 @@ run_case "timeout-cancel-fallback" \
   --expect-path-provider-timeout \
   --expect-thread-provider-stop
 
+run_case "forced-roi-decider-fallback" \
+  --force-roi-decider-fail
+
 run_case "forced-path-partition-fallback" \
   --force-path-partition-fail \
   --expect-thread-provider-stop
@@ -103,6 +107,18 @@ run_case "forced-path-partition-fallback" \
 run_case "forced-speed-optimizer-fallback" \
   --force-speed-optimizer-fail \
   --expect-thread-provider-stop
+
+run_case "empty-selected-slot-fallback" \
+  --slot-mode empty
+
+run_case "overflow-selected-slot-fallback" \
+  --slot-mode overflow
+
+run_case "nan-parking-lot-fallback" \
+  --slot-mode nan
+
+run_case "degenerate-parking-lot-fallback" \
+  --slot-mode degenerate-corners
 
 run_case "multi-lot-preplan-candidate" \
   --slot-mode multi-lot-seq-switch \
@@ -133,6 +149,14 @@ run_case "direct-backward-moving-contract" \
   --aux-mode all-valid \
   --aux-chassis-gear reverse \
   --direct-speed 1.2
+
+run_case "direct-forward-straight-path-fallback" \
+  --command-mode direct-forward \
+  --force-straight-path-fail
+
+run_case "direct-forward-speed-fallback" \
+  --command-mode direct-forward \
+  --force-speed-optimizer-fail
 
 run_case "direct-forward-release-finish-contract" \
   --command-mode direct-forward-release
@@ -178,6 +202,10 @@ run_case "target-update-regression" \
 
 run_case "path-id-update-regression" \
   --slot-mode parking-seq-changes
+
+run_case "vehicle-lot-precheck-fallback" \
+  --with-aux-inputs \
+  --aux-mode far-localization
 
 run_case "far-obstacles-regression" \
   --with-aux-inputs \

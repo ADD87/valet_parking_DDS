@@ -563,3 +563,55 @@ result=all smoke cases passed
 - direct 分支内部 `OPEN_SPACE_STRAIGHT_PATH` 失败与 direct speed fallback 还没有独立负向 smoke。
 - collision/wheel mask、完整 `Frame/OpenSpaceInfo/PlanningContext` 和 NLP smoother 仍未完整接入。
 - m57 尚未做板端 runtime。
+
+## BATCH-077_080 已减少的差异
+
+| 原始流程节点 | 之前差异 | 本批次收敛 |
+|---|---|---|
+| early Stage 输入失败 | invalid `SelectedSlot`、empty/overflow、车位转换失败、vehicle-lot precheck、ROI fail 等分支会直接输出 estop 或局部错误 reason，缺少统一 Stage 级 fallback 语义 | 新增 `BuildEarlyEstopFallbackContract()`，统一输出 `STAGE_OUTPUT fallback`、`fallback_event`、`fallback_action=publish_estop`、`mission_state=MISSION_ESTOP`、FunctionManagerProjection 和 runtime lifecycle |
+| ROI_DECIDER 失败 | ROI 失败分支难稳定触发，缺少可回归验证 | 新增 smoke-only `VALET_PARKING_FORCE_ROI_DECIDER_FAIL`，smoke 验证 `fallback_event=roi_decider_failed` 与 estop fallback |
+| SelectedSlot 边界 | empty、overflow、NaN、角点退化等输入边界已有部分保护，但 Stage fallback 口径不统一 | smoke 断言 `selected_slot_invalid`、`selected_slot_count_overflow`、`parking_lot_convert_failed` 等 `fallback_event`，把输入边界固定到 Stage 输出契约 |
+| vehicle-lot precheck | far-localization 能触发 estop，但之前缺少“vehicle-lot precheck failed”的 Stage 输出闭环 | far-localization smoke 验证 `fallback_event=vehicle_lot_precheck_failed`、`fallback_action=publish_estop` |
+| direct `OPEN_SPACE_STRAIGHT_PATH` 失败 | direct 分支内部路径失败没有独立 Stage fallback 语义，容易退化成不清晰 estop 或短路径错误 | 新增 smoke-only `VALET_PARKING_FORCE_STRAIGHT_PATH_FAIL`；direct forward/backward 均验证 `fallback_event=open_space_straight_path_failed`、`fallback_action=publish_stage_control_stop`、非 estop stop |
+| direct `SPEED_OPTIMIZER` 失败 | direct speed fallback 之前没有独立负向 smoke，fallback 轨迹不足时可能错误进入 estop | direct forward/backward 均验证 `fallback_event=direct_speed_optimizer_failed`；如果 straight path 不足以发布，则降级为非 estop stage-control stop |
+| 批量回归矩阵 | batch smoke 尚未覆盖 early Stage 输入失败和 direct 内部失败 | `smoke_valet_parking_batch_042_046.sh` 新增 forced ROI、empty/overflow、NaN/degenerate、direct straight fail、direct speed fail、vehicle-lot precheck 等用例 |
+
+## BATCH-077_080 验证
+
+通过：
+```text
+git diff --check
+bash -n source/valet_parking_tools/smoke_valet_parking_x86.sh
+bash -n source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+bash source/valet_parking_tools/build_valet_parking.sh --out-dir /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 129 --force-roi-decider-fail
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 130 --slot-mode empty
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 131 --slot-mode overflow
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 132 --slot-mode nan
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 133 --slot-mode degenerate-corners
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 134 --with-aux-inputs --aux-mode far-localization
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 136 --command-mode direct-forward --force-straight-path-fail
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 138 --command-mode direct-forward --force-speed-optimizer-fail
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 139 --command-mode direct-backward --force-straight-path-fail
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --domain-id 141 --command-mode direct-backward --force-speed-optimizer-fail
+bash source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86 --first-domain-id 170 --timeout-ms 25000
+```
+
+产物：
+```text
+out/valet_parking_flow_gap_077_080/valet_parking_mvp/x86/lib/libvalet_parking.so
+out/valet_parking_flow_gap_077_080/valet_parking_mvp/m57/lib/libvalet_parking.so
+```
+
+批量 smoke：
+```text
+first-domain-id=170
+result=all smoke cases passed
+```
+
+仍保留的核心差异：
+- `STAGE_OUTPUT fallback` 和 direct fallback 仍通过 `replan_reason/estop.reason` 文本承载，不是正式 IDL 字段。
+- `selected_lot_unavailable` 代码路径已统一，但缺少稳定自然触发或 smoke-only 入口覆盖。
+- direct speed fallback 的 task chain 仍复用通用 `SPEED_OPTIMIZER` 输出诊断，后续可拆成 direct 专用 task contract。
+- collision/wheel mask、完整 `Frame/OpenSpaceInfo/PlanningContext` 和 NLP smoother 仍未完整接入。
+- m57 尚未做板端 runtime。
