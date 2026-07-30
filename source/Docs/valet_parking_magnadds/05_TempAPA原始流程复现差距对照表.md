@@ -698,3 +698,47 @@ result=all smoke cases passed
 - `stage_process_contract` 等内容仍承载在 `replan_reason/estop.reason` 文本中，不是 formal typed DDS 字段。
 - Adapter 仍有 5000+ 行，下一批必须开始物理瘦身：让 Adapter 退回 DDS 壳，把 Stage 输入构造、上下文更新、输出契约外移。
 - m57 仍只完成交叉编译和 ELF/依赖检查，尚未做板端 runtime。
+
+## BATCH-089_092 已减少的差异
+
+| 原始流程节点 | 之前差异 | 本批次收敛 |
+|---|---|---|
+| Stage 层归属 | `StageProcessContextLite` 虽已存在，但输入构造和上下文更新函数仍直接堆在 Adapter 文件里 | 新增 `valet_parking_stage_facade_lite.h/.cpp`，把 Stage skeleton 输入构造、lite 上下文更新、direct release/finish hold 标记搬出 Adapter |
+| `OpenSpaceInfo` 更新点 | ROI、PathProvider、PathPartition、SpeedOptimizer 的 ready 标记更新在 Adapter 中散落 | `MarkStageRoiOutput`、`MarkStagePathProviderOutput`、`MarkStagePathPartitionOutput`、`MarkStageSpeedOutput` 统一归入 Stage facade |
+| finish/release 状态 | direct release 和 finish hold 的 StageContext 字段手写在 Adapter 主流程中 | `MarkStageDirectRelease`、`MarkStageFinishHold` 归入 Stage facade，Adapter 不再逐字段改 `stage_context` |
+| 路径点计数工具 | `CountPathProviderPoints` 属于 Stage/OpenSpaceInfo 读写支撑，却放在 Adapter | 已迁移到 Stage facade，被 Adapter 和 facade 共同复用 |
+| Adapter 可维护性 | Adapter 继续承接 Stage helper，有继续膨胀风险 | Adapter 行数从约 5217 降到 5073；仍偏大，但本批已建立“业务 helper 外移”的方向 |
+
+## BATCH-089_092 验证
+
+通过：
+```text
+git diff --check
+bash -n source/valet_parking_tools/build_valet_parking.sh
+bash -n source/valet_parking_tools/smoke_valet_parking_x86.sh
+bash -n source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+bash source/valet_parking_tools/build_valet_parking.sh --out-dir /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_089_092
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86 --domain-id 187 --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86 --domain-id 188 --command-mode direct-forward --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86 --first-domain-id 189 --timeout-ms 25000
+```
+
+产物：
+```text
+out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/lib/libvalet_parking.so
+out/valet_parking_flow_gap_089_092/valet_parking_mvp/m57/lib/libvalet_parking.so
+```
+
+批量 smoke：
+```text
+first-domain-id=189
+result=all smoke cases passed
+last-domain=223
+```
+
+仍保留的核心差异：
+
+- 本批只完成 Stage facade 外移第一刀，Stage 输出契约构造仍主要留在 Adapter。
+- Adapter 仍有 5000+ 行，后续还要继续迁移 `BuildOpenSpaceStageOutputContract`、`BuildFallbackStageOutputContract` 和 `AppendStageControlContract` 等输出契约。
+- `StageFacadeInputLite` 仍由 Adapter 从 DDS/runtime 私有类型映射而来，正式 typed DDS 字段尚未接入。
+- m57 仍只完成交叉编译和 ELF/依赖检查，尚未做板端 runtime。

@@ -25,10 +25,10 @@ local_git:
 current_phase:
   id: Fast-2
   name: .so + typed DDS + localized valet parking algorithm sources
-  status: PASS_BATCH_085_088_STAGE_SKELETON_LITE_CONTEXT_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  status: PASS_BATCH_089_092_STAGE_FACADE_ADAPTER_SLIMMING_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
   description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathProvider + OpenSpaceThreadManager + OpenSpacePathGenerator + HybridAStar 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路。NEXT-039 已把 direct_speed_mps 映射到 direct 分支速度优化器 speed bound，新增 aux chassis signed speed 输入和速度方向冲突 smoke，并在 direct 输出原因中补 target_gear、direct_speed_bound_min/max、trajectory_type 和 parking_status 诊断。NEXT-040 已接入本地化 OpenSpacePathProvider / OpenSpaceThreadManager 线程骨架，普通主链经 TargetPlan 生成当前车位路径，多车位非选中 lot 经 PrePlan 进入 search threads；复验阶段补充了 PrePlan 队列硬化，避免覆盖 has_task=true 的候选输入。NEXT-041 已补充线程生命周期硬化：search/target worker 持有 shared early_stop，StopThreads/CancelTargetPlan 可取消正在跑的 Hybrid A*；timeout 负向路径可观测 provider_status=TARGET_TIMEOUT、target_cancel=true 和 fallback to ROI seed；BATCH-049_052 已按原始流程图补充普通主链轻量 Stage 输出收口：PathPartition 输出 decision_name/finish_name/destination_reached，SpeedOptimizer 输出 stage_name，STAGE_OUTPUT 统一输出 stage_status、target_gear、trajectory_type、parking_status 和 finish_priority。BATCH-053_056 已继续对照原始流程图缩小差异：补轻量 StageFinish 连续帧状态机、FunctionManager/sys_command/sys_run_state/sys_warning_info/parking_type 投影、ROI/OpenSpaceInfo 最小字段诊断、PreCheck/collision/wheel mask 可观测契约。BATCH-057_060 已补 direct finish 命令失活诊断、FunctionManager unsupported/default/NOSTATE 负向路径 smoke、ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约与 collision/wheel mask 成功/负向断言。BATCH-073_076 已补后段失败/降级路径统一 STAGE_OUTPUT fallback。BATCH-077_080 已补 early Stage 输入失败和 direct 分支内部失败的 Stage fallback / stage-control fallback：ROI fail、SelectedSlot empty/overflow、parking lot convert fail、vehicle-lot precheck fail、direct straight path fail、direct speed fallback 均有 x86 smoke 和 batch smoke 约束。当前仍使用临时 IDL 契约和简化 Topic，parking_status、FunctionManagerProjection、stage_finish_state、OpenSpaceInfo、fallback 契约仍只是 replan_reason/estop.reason 诊断文本，不是正式 DDS 字段；仍未接完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。m57 板端 runtime 尚未验证。
   execution_policy: NEXT-041 后执行节奏切换为批量硬化：先批量检测和契约扫描，再批量修订代码/脚本/文档，再统一 x86/m57 编译和 x86 smoke 矩阵，最后集中排错并统一提交推送。
-  latest_batch_summary: BATCH-085_088 已完成：新增轻量 ValetParkingStageParking Stage 骨架与 StageProcessContextLite，把 Process、SetParkingType、ExecuteTaskOnOpenSpace、IsReadyToFinishStage、FinishScenario 的方法序列投影到普通主链、direct 分支、stage-control 和 fallback/early fallback 分支；同步补 Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel-mask lite 契约。x86 正常链路 smoke、direct-forward smoke、batch smoke 通过，x86/m57 构建通过；m57 仍未做板端 runtime。
+  latest_batch_summary: BATCH-089_092 已完成：新增 valet_parking_stage_facade_lite.h/.cpp，把 Stage skeleton 输入构造、lite 上下文更新、direct release/finish hold 状态标记和 CountPathProviderPoints 从 Adapter 外移；Adapter 行数从约 5217 降到 5073，仍然偏大但不再继续承接这部分 Stage helper。x86 normal smoke、direct-forward smoke、batch smoke 通过，x86/m57 构建通过；m57 仍未做板端 runtime。
   active_batch: NONE
   completed_batches:
     - id: BATCH-042_046
@@ -80,34 +80,46 @@ current_phase:
       status: PASS_BATCH_085_088_STAGE_SKELETON_LITE_CONTEXT_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
       date: 2026-07-30
       summary: 已把原始 Stage 主方法序列接入为轻量 Stage 骨架，并将 Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel-mask lite 契约输出到正常、direct、stage-control、finish-hold 和 fallback 分支；x86 normal/direct smoke 与 first-domain-id=152 batch smoke 通过，x86/m57 构建通过，m57 仍未做板端 runtime。
+    - id: BATCH-089_092
+      status: PASS_BATCH_089_092_STAGE_FACADE_ADAPTER_SLIMMING_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+      date: 2026-07-30
+      summary: 已新增 Stage facade lite 文件，迁移 Stage skeleton 输入构造、lite 上下文更新、direct release/finish hold 标记和 path point 计数逻辑；Adapter 保留 DDS/runtime 到 StageFacadeInputLite 的薄桥接。x86 normal/direct smoke 与 first-domain-id=189 batch smoke 通过，x86/m57 构建通过，m57 仍未做板端 runtime。
 last_completed_snapshot:
-  id: 085_088
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/085_088_项目状态快照_Stage骨架与轻量上下文接入.md
-  status: PASS_BATCH_085_088_STAGE_SKELETON_LITE_CONTEXT_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  id: 089_092
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/089_092_项目状态快照_StageFacade外移与Adapter瘦身.md
+  status: PASS_BATCH_089_092_STAGE_FACADE_ADAPTER_SLIMMING_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
 
 last_plan_update:
   date: 2026-07-30
-  summary: BATCH-085_088 已完成：先把原车流程的骨架和血管接上，字段暂用 lite/stub 契约。新增 ValetParkingStageParkingStageLite 与 StageProcessContextLite，普通主链、direct、stage-control、finish-hold、early fallback 和 task fallback 均输出轻量 Stage 方法序列及 Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel-mask 契约。x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍未做板端 runtime。
+  summary: BATCH-089_092 已完成：按 Adapter 瘦身计划新增 Stage facade lite，把 Stage skeleton helper 从 Adapter 外移，当前 Adapter 只保留 DDS/runtime 私有类型到 StageFacadeInputLite 的薄映射。normal、direct、stage-control、finish-hold、early fallback/task fallback 的 Stage skeleton 契约保持不变。x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍未做板端 runtime。
   evidence:
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/085_088_项目状态快照_Stage骨架与轻量上下文接入.md
-    - out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_flow_gap_085_088/valet_parking_mvp/m57/lib/libvalet_parking.so
-    - out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86/smoke_latest/domain_150_20260730_054428_2749
-    - out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86/smoke_latest/domain_151_20260730_054428_2752
-    - out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86/smoke_latest/domain_152_20260730_054448_3044
-    - out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86/smoke_latest/domain_186_20260730_055015_7506
-    - applications/source/valet_parking/src/valet_parking_stage_process_lite.h
-    - applications/source/valet_parking/src/valet_parking_stage_process_lite.cpp
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/089_092_项目状态快照_StageFacade外移与Adapter瘦身.md
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/smoke_latest/domain_187_20260730_073421_727
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/smoke_latest/domain_188_20260730_073438_904
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/smoke_latest/domain_189_20260730_073453_1071
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/smoke_latest/domain_223_20260730_074008_5483
+    - applications/source/valet_parking/src/valet_parking_stage_facade_lite.h
+    - applications/source/valet_parking/src/valet_parking_stage_facade_lite.cpp
     - applications/source/valet_parking/src/valet_parking_stage_parking_adapter.cpp
-    - applications/source/valet_parking_tools/smoke_valet_parking_x86.sh
-    - applications/source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh
+    - applications/source/valet_parking/CMakeLists.txt
     - applications/source/Docs/valet_parking_magnadds/05_TempAPA原始流程复现差距对照表.md
     - applications/source/Docs/valet_parking_magnadds/14_原始流程差异收敛执行记录.md
 
 last_successful_action:
   date: 2026-07-30
-  summary: 已完成 BATCH-085_088：轻量 Stage 骨架和 lite 上下文已接入 Adapter 主要分支，普通主链、direct、stage-control、finish-hold、early fallback/task fallback 都能输出 Process/SetParkingType/ExecuteTaskOnOpenSpace/IsReadyToFinishStage/FinishScenario 方法序列以及 Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel-mask stub 契约；x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍不代表板端 runtime 通过。
+  summary: 已完成 BATCH-089_092：Stage facade lite 外移第一刀完成，Stage skeleton 输入构造、lite 上下文更新、direct release/finish hold 标记和 CountPathProviderPoints 已从 Adapter 搬出；Adapter 保留薄桥接，后续继续搬 Stage 输出契约。x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍不代表板端 runtime 通过。
   evidence:
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/089_092_项目状态快照_StageFacade外移与Adapter瘦身.md
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/smoke_latest/domain_187_20260730_073421_727
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/smoke_latest/domain_188_20260730_073438_904
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/smoke_latest/domain_189_20260730_073453_1071
+    - out/valet_parking_flow_gap_089_092/valet_parking_mvp/x86/smoke_latest/domain_223_20260730_074008_5483
+    - applications/source/valet_parking/src/valet_parking_stage_facade_lite.h
+    - applications/source/valet_parking/src/valet_parking_stage_facade_lite.cpp
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/085_088_项目状态快照_Stage骨架与轻量上下文接入.md
     - out/valet_parking_flow_gap_085_088/valet_parking_mvp/x86/lib/libvalet_parking.so
     - out/valet_parking_flow_gap_085_088/valet_parking_mvp/m57/lib/libvalet_parking.so
@@ -386,6 +398,11 @@ runtime_status:
   x86_stage_process_lite_batch_smoke_matrix: PASS
   m57_flow_gap_085_088_static_build: PASS
   original_flow_stage_skeleton_gap_reduction: PASS
+  x86_stage_facade_lite_normal_smoke_test: PASS
+  x86_stage_facade_lite_direct_smoke_test: PASS
+  x86_stage_facade_lite_batch_smoke_matrix: PASS
+  m57_flow_gap_089_092_static_build: PASS
+  original_flow_stage_facade_adapter_slimming: PASS
   topic_contract_gap_table: PASS_DOC_READY
   m57_runtime_package_script: PASS
   m57_runtime_package_manifest: PASS
@@ -400,8 +417,8 @@ runtime_status:
   note: x86 本机 DDS 冒烟显示 valid SelectedSlot 经 ROI_DECIDER、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 后输出 PlanningTrajectory；NEXT-040 后，PATH_PROVIDER 已走本地化 OpenSpacePathProvider + OpenSpaceThreadManager，valid/domain_145 显示 threaded=true、provider_status=TARGET_READY、target_source=target_thread，multi-lot/domain_150 显示 preplan_candidates=1、thread_path_ids=[2,1,...] 且 target_source=preplan_candidate，direct-forward/domain_148 回归保持 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER。NEXT-041 后，valid/domain_160 显示 target_cancel=false 且 runner 退出时 OpenSpaceThreadManager stopped，timeout/domain_161 显示 provider_status=TARGET_TIMEOUT、target_timeout=true、target_cancel=true 和 fallback to ROI seed，multi-lot/domain_162 继续显示 target_source=preplan_candidate，direct-forward/domain_164 回归通过，且 direct 分支按设计跳过 threaded Provider，不要求线程停止日志；build_valet_parking.sh 已修正相对 out-dir 归一化。NLP smoother 评估结论是当前不接入：WSL x86 有 IPOPT 3.11.9，但 OSQP pkg-config 缺失，thirdparty/x86 与 thirdparty/m57 未发现随包 IPOPT/OSQP 实库。NEXT-039 后，direct-forward/domain_131 在 direct_speed=1.2 时输出 direct_speed_bound_max=1.200、parking_status=direct_moving，速度方向冲突 smoke 输出 velocity_direction_conflict 和 direct_stop_path。BATCH-057_060 后，valid/domain_217 输出 ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约，batch first-domain-id=180 全部通过，direct/pause/brake/finish/parking-out/invalid clear 与 far/many obstacles 均有对应契约断言。BATCH-061_064 后，valid/domain_198 输出 MissionState 与 PlanningContext 投影，direct-forward-release/domain_204 与 direct-backward-release/domain_205 均输出 DIRECT_*_RELEASED，batch first-domain-id=180 全部通过；release smoke 断言 release 分支自身跳过 ROI/PathProvider/PathPartition，允许 release 后恢复普通 ROI 链路。BATCH-065_068 后，near-destination/domain_210 可自然触发 destination_reached + standstill finish_ready=true，direct release 后恢复普通泊车和 reset_history + target update 组合 smoke 均通过。BATCH-069_072 后，near-destination/domain_121 显示 finish_ready=true 后锁存 FINISH_HOLD，direct cleanup/domain_122 显示已有 path_history 后 release 输出 reset_after_publish，batch first-domain-id=130 全部通过。BATCH-073_076 后，timeout/domain_123、forced partition/domain_124、forced speed/domain_125、far-obstacles/domain_126、many-obstacles/domain_127 均输出 STAGE_OUTPUT fallback，batch first-domain-id=160 全部通过。BATCH-077_080 后，forced ROI/domain_129、empty/domain_130、overflow/domain_131、NaN/domain_132、degenerate/domain_133、far-localization/domain_134 均输出 early STAGE_OUTPUT fallback；direct-forward forced straight/domain_136、direct-forward forced speed/domain_138、direct-backward forced straight/domain_139、direct-backward forced speed/domain_141 均通过，batch first-domain-id=170 的 32 个用例全部通过。pause/brake/finish/invalid command 的 NEXT-037 历史 smoke 仍作为已验证边界。NEXT-033 到 NEXT-031/030/029/028/027/026/025/024 的历史边界 smoke 仍有效。调试发现当前环境 domain-id >= 231 会 failed to create DomainParticipant，command smoke 应串行执行，并让 command publisher 持续发布等待 runner 收到命令后再发布 SelectedSlot；本批 batch 32 用例约 5 分钟，工具超时需大于 300 秒。m57 只完成交叉编译和 ELF/依赖检查，不能标记为板端运行通过。
 
 next_action:
-  id: BATCH-089_092
-  description: 继续对照 00_ValetParkingStageParking_超详细流程图总览_重要.md 减少架构差异：批量清理几千行 Adapter，把 normal open-space 主链的 Stage 输入构造、lite 上下文更新和 Stage 输出契约逐步外移到 Stage facade/source 文件；Adapter 保持 DDS 收发与少量校验壳，不再继续堆诊断字符串。执行节奏仍是先批量检测和批量修订，再统一 build/smoke，再集中排错。
+  id: BATCH-093_096
+  description: 继续对照 00_ValetParkingStageParking_超详细流程图总览_重要.md 减少架构差异：批量外移 Stage 输出契约构造，优先把 AppendStageProjectionContract、BuildOpenSpaceStageOutputContract、BuildFallbackStageOutputContract、AppendStageControlContract 中可脱离 DDS/runtime 私有类型的部分搬到 Stage facade/contract 文件；Adapter 保持 DDS 收发、少量输入校验和算法调用壳。执行节奏仍是先批量检测和批量修订，再统一 build/smoke，再集中排错。
   allowed_actions:
     - 修改 applications/source/Docs/valet_parking_magnadds/**
     - 修改 applications/source/valet_parking/**
@@ -674,3 +691,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/085_088_项目状态快照_Stage骨架与轻量上下文接入.md
     phase: Fast-2
     status: PASS_BATCH_085_088_STAGE_SKELETON_LITE_CONTEXT_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  - id: 089_092
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/089_092_项目状态快照_StageFacade外移与Adapter瘦身.md
+    phase: Fast-2
+    status: PASS_BATCH_089_092_STAGE_FACADE_ADAPTER_SLIMMING_X86_SMOKE_M57_STATIC_BLOCKED_BOARD

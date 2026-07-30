@@ -8,7 +8,7 @@
 #include "planning/tasks/optimizers/open_space_straight_path/open_space_straight_path_provider.h"
 #include "proto_convert/parking_lot_convert.h"
 #include "proto_convert/vehicle_state_convert.h"
-#include "valet_parking_stage_process_lite.h"
+#include "valet_parking_stage_facade_lite.h"
 #include "valet_parking_topics.h"
 
 #include <algorithm>
@@ -472,11 +472,69 @@ InputMetadata BuildMetadata(const SelectedSlot& sample) {
   return metadata;
 }
 
-std::size_t CountPathProviderPoints(
-    const TL::planning::OpenSpacePathOutput& path_output);
 bool IsDirectCommandMode(ParkingCommandMode mode);
 
-StageProcessInputLite BuildStageProcessInputLite(
+bool IsStageControlOverrideCommandMode(ParkingCommandMode mode) {
+  switch (mode) {
+    case ParkingCommandMode::PARKING_COMMAND_PAUSE:
+    case ParkingCommandMode::PARKING_COMMAND_BRAKE:
+    case ParkingCommandMode::PARKING_COMMAND_FINISH:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_LEFT:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_RIGHT:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_FRONT:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_BACK:
+      return true;
+    case ParkingCommandMode::PARKING_COMMAND_NONE:
+    case ParkingCommandMode::PARKING_COMMAND_PARKING_IN:
+    case ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD:
+    case ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD:
+      return false;
+    default:
+      return false;
+  }
+}
+
+StageFunctionManagerLite BuildStageFunctionManagerLite(
+    const FunctionManagerProjection& projection) {
+  StageFunctionManagerLite function_manager;
+  function_manager.source = projection.source;
+  function_manager.sys_command = projection.sys_command;
+  function_manager.sys_run_state = projection.sys_run_state;
+  function_manager.parking_type = projection.parking_type;
+  function_manager.command = projection.parking_command;
+  function_manager.reset_history = projection.reset_history;
+  return function_manager;
+}
+
+StageFinishEvaluationLite BuildStageFinishEvaluationLite(
+    const StageFinishEvaluation& evaluation) {
+  StageFinishEvaluationLite lite;
+  lite.ready_condition = evaluation.ready_condition;
+  lite.ready_to_finish = evaluation.ready_to_finish;
+  lite.consecutive_ready_frames = evaluation.consecutive_ready_frames;
+  lite.required_consecutive_frames = evaluation.required_consecutive_frames;
+  return lite;
+}
+
+StageFacadeBranchLite StageFacadeBranchForInput(
+    const ParkingCommand* command_sample,
+    bool stage_exit_requested) {
+  const bool has_command =
+      command_sample != nullptr && command_sample->is_valid();
+  if (has_command && IsDirectCommandMode(command_sample->mode())) {
+    return StageFacadeBranchLite::kDirectOpenSpace;
+  }
+  if (has_command &&
+      IsStageControlOverrideCommandMode(command_sample->mode())) {
+    return StageFacadeBranchLite::kStageControlOverride;
+  }
+  if (!has_command && stage_exit_requested) {
+    return StageFacadeBranchLite::kStageFinishHold;
+  }
+  return StageFacadeBranchLite::kNormalOpenSpace;
+}
+
+StageFacadeInputLite BuildStageFacadeInputLite(
     const InputMetadata& metadata,
     const SelectedSlot& input_sample,
     const ParkingCommand* command_sample,
@@ -488,7 +546,9 @@ StageProcessInputLite BuildStageProcessInputLite(
     bool stage_exit_requested,
     bool direct_command_active,
     uint64_t processed_frames) {
-  StageProcessInputLite input;
+  StageFacadeInputLite input;
+  input.branch = StageFacadeBranchForInput(command_sample,
+                                           stage_exit_requested);
   input.frame.seq = metadata.seq;
   input.frame.frame_id = metadata.frame_id;
   input.frame.data_stamp_ms = metadata.data_stamp_ms;
@@ -523,163 +583,10 @@ StageProcessInputLite BuildStageProcessInputLite(
   const ParkingCommandMode command_mode =
       has_command ? command_sample->mode()
                   : ParkingCommandMode::PARKING_COMMAND_NONE;
-  if (IsDirectCommandMode(command_mode)) {
-    input.record_type = "direct_control";
-    input.branch = "direct_open_space";
-    input.task_entry = "OPEN_SPACE_STRAIGHT_PATH";
-    input.task_chain = "OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER";
-  } else if (has_command &&
-             (command_mode == ParkingCommandMode::PARKING_COMMAND_PAUSE ||
-              command_mode == ParkingCommandMode::PARKING_COMMAND_BRAKE ||
-              command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH ||
-              command_mode ==
-                  ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_LEFT ||
-              command_mode ==
-                  ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_RIGHT ||
-              command_mode ==
-                  ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_FRONT ||
-              command_mode ==
-                  ParkingCommandMode::PARKING_COMMAND_PARKING_OUT_BACK)) {
-    input.record_type = "stage_control_override";
-    input.branch = "stage_control_override";
-    input.task_entry = "STAGE_CONTROL";
-    input.task_chain = "STAGE_CONTROL_STOP";
-    input.execute_task_on_open_space = false;
-    input.is_ready_to_finish_stage_called =
-        command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH;
-    input.ready_to_finish =
-        command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH;
-    input.finish_scenario_intent =
-        command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH;
-  } else if (stage_exit_requested) {
-    input.record_type = "stage_finish_hold";
-    input.branch = "stage_finish_hold";
-    input.task_entry = "STAGE_FINISH_HOLD";
-    input.task_chain = "STAGE_FINISH_HOLD";
-    input.execute_task_on_open_space = false;
-    input.ready_to_finish = true;
-    input.finish_scenario_intent = true;
-  }
+  input.finish_requested =
+      has_command && command_mode == ParkingCommandMode::PARKING_COMMAND_FINISH;
 
   return input;
-}
-
-StageProcessContextLite BuildStageProcessContextLite(
-    const InputMetadata& metadata,
-    const SelectedSlot& input_sample,
-    const ParkingCommand* command_sample,
-    const FunctionManagerProjection& function_projection,
-    const RuntimeVehicleInput& vehicle_input,
-    std::size_t obstacle_count,
-    const PathProviderRuntimeState& provider_state,
-    bool has_last_speed_frame,
-    bool stage_exit_requested,
-    bool direct_command_active,
-    uint64_t processed_frames) {
-  const StageProcessInputLite stage_input = BuildStageProcessInputLite(
-      metadata, input_sample, command_sample, function_projection,
-      vehicle_input, obstacle_count, provider_state, has_last_speed_frame,
-      stage_exit_requested, direct_command_active, processed_frames);
-  return ValetParkingStageParkingStageLite().Process(stage_input);
-}
-
-void MarkStageEarlyInputFallback(const std::string& fallback_event,
-                                 StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->record_type = "early_input_fallback";
-  context->branch = "normal_open_space_early_input";
-  context->task_entry = "INPUT_VALIDATION";
-  context->task_chain = "INPUT_VALIDATION";
-  context->execute_task_on_open_space_called = false;
-  context->planning_context.fallback_event = fallback_event;
-}
-
-void MarkStageFallback(const std::string& fallback_event,
-                       StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->record_type = "fallback_output";
-  context->planning_context.fallback_event = fallback_event;
-}
-
-void MarkStageSelectedParkingLot(uint32_t parking_seq,
-                                 StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->open_space_info.target_parking_seq = parking_seq;
-}
-
-void MarkStageRoiOutput(uint32_t parking_seq,
-                        std::size_t /*roi_reference_points*/,
-                        StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->open_space_info.target_parking_seq = parking_seq;
-  context->open_space_info.roi_decider_output_ready = true;
-}
-
-void MarkStagePathProviderOutput(
-    const TL::planning::OpenSpacePathOutput& path_output,
-    StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->open_space_info.path_provider_output_ready = true;
-  context->open_space_info.chosen_path_points = CountPathProviderPoints(path_output);
-}
-
-void MarkStagePathPartitionOutput(
-    const TL::planning::PartitionOutput& partition_output,
-    StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->open_space_info.path_partition_output_ready = true;
-  context->open_space_info.destination_reached =
-      partition_output.destination_reached;
-  context->open_space_info.chosen_path_points =
-      partition_output.chosen_partitioned_path.first.size();
-}
-
-void MarkStageStraightPathOutput(
-    const TL::planning::PartitionOutput& partition_output,
-    StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->open_space_info.straight_path_output_ready = true;
-  context->open_space_info.path_partition_output_ready = true;
-  context->open_space_info.chosen_path_points =
-      partition_output.chosen_partitioned_path.first.size();
-}
-
-void MarkStageSpeedOutput(
-    const TL::planning::SpeedOptimizerOutput& speed_output,
-    StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->open_space_info.speed_optimizer_output_ready = true;
-  context->open_space_info.chosen_path_points =
-      speed_output.trajectory_gear.first.NumOfPoints();
-}
-
-void MarkStageFinishEvaluation(const StageFinishEvaluation& evaluation,
-                               StageProcessContextLite* context) {
-  if (context == nullptr) {
-    return;
-  }
-  context->is_ready_to_finish_stage_called = true;
-  context->planning_context.stage_exit_requested =
-      evaluation.ready_to_finish ||
-      context->planning_context.stage_exit_requested;
-  context->finish_scenario_projected = evaluation.ready_to_finish;
-  context->next_stage = evaluation.ready_to_finish ? "FINISH" : "PARKING";
 }
 
 TL::perception::PSPoint::Position MapPointPosition(PsPointPosition position) {
@@ -2202,15 +2109,6 @@ std::vector<TL::planning::OpenSpacePathInput> BuildPathProviderPrePlanInputs(
         decision.start_point, decision.end_pose, &ignored_strategy_summary));
   }
   return inputs;
-}
-
-std::size_t CountPathProviderPoints(
-    const TL::planning::OpenSpacePathOutput& path_output) {
-  std::size_t count = 0U;
-  for (const auto& path_pair : path_output.partitioned_path) {
-    count += path_pair.first.size();
-  }
-  return count;
 }
 
 void AppendPathProviderAttemptDiagnostics(
@@ -4469,11 +4367,12 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
       BuildFunctionManagerProjection(command_sample, runtime_->path_provider);
   auto build_stage_context = [&]() {
     return BuildStageProcessContextLite(
-        metadata, input_sample, command_sample, function_projection,
-        runtime_->vehicle_input, runtime_->obstacles.size(),
-        runtime_->path_provider, runtime_->has_last_speed_frame,
-        runtime_->stage_exit_requested, runtime_->direct_command.active,
-        runtime_->processed_frames);
+        BuildStageFacadeInputLite(
+            metadata, input_sample, command_sample, function_projection,
+            runtime_->vehicle_input, runtime_->obstacles.size(),
+            runtime_->path_provider, runtime_->has_last_speed_frame,
+            runtime_->stage_exit_requested, runtime_->direct_command.active,
+            runtime_->processed_frames));
   };
   StageProcessContextLite stage_context = build_stage_context();
   if (command_sample != nullptr && command_sample->is_valid()) {
@@ -4792,29 +4691,9 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
            << ", task=DIRECT_COMMAND_RELEASE"
            << ", original_flow_branch=direct_open_space"
            << ", reset_history=false";
-    stage_context.record_type = "direct_release";
-    stage_context.branch = "direct_open_space";
-    stage_context.task_entry = "DIRECT_COMMAND_RELEASE";
-    stage_context.task_chain = "DIRECT_COMMAND_RELEASE";
-    stage_context.execute_task_on_open_space_called = false;
-    stage_context.is_ready_to_finish_stage_called = true;
-    stage_context.finish_scenario_projected =
-        direct_finish_evaluation.ready_to_finish;
-    stage_context.next_stage =
-        direct_finish_evaluation.ready_to_finish ? "FINISH" : "PARKING";
-    stage_context.planning_context.stage_exit_requested =
-        direct_finish_evaluation.ready_to_finish;
-    stage_context.function_manager.source = released_projection.source;
-    stage_context.function_manager.sys_command =
-        released_projection.sys_command;
-    stage_context.function_manager.sys_run_state =
-        released_projection.sys_run_state;
-    stage_context.function_manager.parking_type =
-        released_projection.parking_type;
-    stage_context.function_manager.command =
-        released_projection.parking_command;
-    stage_context.function_manager.reset_history =
-        released_projection.reset_history;
+    MarkStageDirectRelease(direct_finish_evaluation.ready_to_finish,
+                           BuildStageFunctionManagerLite(released_projection),
+                           &stage_context);
     AppendStageProjectionContract("stage_control", &stream, &stage_context);
     AppendFunctionManagerProjectionContract(released_projection, &stream);
     AppendMissionStateContract(
@@ -4868,26 +4747,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
            << ", task=STAGE_FINISH_HOLD"
            << ", original_flow_branch=stage_finish_hold"
            << ", reset_history=false";
-    stage_context.record_type = "stage_finish_hold";
-    stage_context.branch = "stage_finish_hold";
-    stage_context.task_entry = "STAGE_FINISH_HOLD";
-    stage_context.task_chain = "STAGE_FINISH_HOLD";
-    stage_context.execute_task_on_open_space_called = false;
-    stage_context.is_ready_to_finish_stage_called = true;
-    stage_context.finish_scenario_projected = true;
-    stage_context.next_stage = "FINISH";
-    stage_context.planning_context.stage_exit_requested = true;
-    stage_context.function_manager.source = finish_hold_projection.source;
-    stage_context.function_manager.sys_command =
-        finish_hold_projection.sys_command;
-    stage_context.function_manager.sys_run_state =
-        finish_hold_projection.sys_run_state;
-    stage_context.function_manager.parking_type =
-        finish_hold_projection.parking_type;
-    stage_context.function_manager.command =
-        finish_hold_projection.parking_command;
-    stage_context.function_manager.reset_history =
-        finish_hold_projection.reset_history;
+    MarkStageFinishHold(BuildStageFunctionManagerLite(finish_hold_projection),
+                        &stage_context);
     AppendStageProjectionContract("stage_control", &stream, &stage_context);
     AppendFunctionManagerProjectionContract(finish_hold_projection, &stream);
     AppendMissionStateContract("MISSION_FINISHED", "FINISH", true, &stream);
@@ -5011,9 +4872,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
   const std::string roi_reason =
       BuildRoiReason(roi_output, selected_lot->parking_seq());
-  MarkStageRoiOutput(selected_lot->parking_seq(),
-                     DestRegionPointCount(roi_output.dest_region),
-                     &stage_context);
+  MarkStageRoiOutput(selected_lot->parking_seq(), &stage_context);
   const PathProviderPreCheckResult precheck_result =
       RunPathProviderPreCheck(config_, roi_output, runtime_->vehicle_input,
                               runtime_->obstacles);
@@ -5079,7 +4938,9 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
           UpdateStageFinishEvaluation(partition_output,
                                       runtime_->vehicle_input,
                                       &runtime_->stage_finish);
-      MarkStageFinishEvaluation(stage_finish_evaluation, &stage_context);
+      MarkStageFinishEvaluation(
+          BuildStageFinishEvaluationLite(stage_finish_evaluation),
+          &stage_context);
       TL::planning::SpeedOptimizerOutput speed_output;
       std::string speed_optimizer_reason;
       if (RunSpeedOptimizer(config_, metadata, roi_output, partition_output,
