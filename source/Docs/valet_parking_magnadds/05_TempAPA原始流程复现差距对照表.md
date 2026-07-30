@@ -815,3 +815,29 @@ m57 board runtime: NOT VERIFIED
 - Adapter 仍负责部分输入构造、算法调用和 fallback 编排，后续还要继续把流程节点本身拆成更明确的 Stage/task 组件。
 - `replan_reason` / `estop.reason` 仍承载大部分可读诊断，不能视为正式 DDS 业务字段。
 - m57 仍只完成交叉编译，未完成板端 runtime 闭环。
+
+## BATCH-101_104 后的差异
+
+| 原始流程节点 | 本批前差异 | 本批次收敛 |
+|---|---|---|
+| `FunctionManager` / `SetParkingType()` 投影 | `ParkingCommandModeToString()`、`ProjectSysCommandName()`、`ProjectSysRunStateName()`、`ProjectParkingTypeName()` 等映射逻辑仍在 Adapter 内部，和 DDS/runtime/算法调用混在一起 | 新增 `valet_parking_function_manager_lite.h/.cpp`，把 command -> `sys_command/sys_run_state/sys_warning_info/parking_type` 的轻量投影、direct release 投影和 StageFinish hold 投影外移 |
+| direct finish / direct release | DIRECT_FORWARD/DIRECT_BACKWARD 命令释放后的 `direct_finish_ready`、`DIRECT_*_RELEASED`、finish condition 文本由 Adapter 拼接 | `BuildDirectFinishEvaluation()`、`AppendDirectFinishContract()`、`DirectReleasedActionName()` 外移；Adapter 只传入车辆速度、命令 active 状态和阈值 |
+| `IsReadyToFinishStage` 轻量替代 | `StageFinishRuntimeState`、`StageFinishEvaluation`、连续帧计数和 finish 输出桥接仍定义在 Adapter 内 | 新增 `valet_parking_stage_finish_lite.h/.cpp`，迁移 `UpdateStageFinishEvaluation()`、`BuildStageFinishEvaluationLite()`、`BuildStageFinishOutputContractLite()` 和 finish-aware `StageTrajectoryType()` |
+| Adapter 职责 | Adapter 已降到约 4080 行，但仍承载 FunctionManager/StageFinish 的稳定业务状态 helper | Adapter 降到约 3744 行；职责继续收敛为 DDS 收发、运行态持有、算法输入构造、任务调用和少量 lite DTO 桥接 |
+
+本批验证：
+
+```text
+x86 normal/domain_224: PASS
+x86 direct/domain_225: PASS
+batch first-domain-id=189, last-domain=223: PASS
+x86/m57 build: PASS
+m57 board runtime: NOT VERIFIED
+```
+
+本批后仍存在的流程差异：
+
+- `FunctionManagerProjection` 和 `StageFinish` 仍是当前 DDS MVP 的 lite/stub 投影，不是原车完整 `FunctionManagerIn/Out`、`FinishScenario()` 或 formal typed DDS 字段。
+- Adapter 仍承载 `BuildPathProviderInput`、`BuildPathPartitionInput`、`BuildSpeedOptimizerInput`、fallback 编排和 runtime 写回；下一批继续批量扫描哪些可以安全外移。
+- 完整 `Frame/OpenSpaceInfo/PlanningContext/HMI/collision/wheel mask/NLP smoother` 仍未完整接入。
+- m57 仍只完成交叉编译和 ELF/依赖检查，未完成板端 runtime 闭环。
