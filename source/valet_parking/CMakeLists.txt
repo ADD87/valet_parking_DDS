@@ -70,6 +70,7 @@ set(SOURCES
     src/valet_parking_stage_facade_lite.cpp
     src/valet_parking_stage_finish_lite.cpp
     src/valet_parking_stage_process_lite.cpp
+    src/valet_parking_stage_runtime_lite.cpp
     src/valet_parking_task_contract_lite.cpp
     src/valet_parking_stage_parking_adapter.cpp
     src/valet_parking_c_api.cpp

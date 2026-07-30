@@ -841,3 +841,29 @@ m57 board runtime: NOT VERIFIED
 - Adapter 仍承载 `BuildPathProviderInput`、`BuildPathPartitionInput`、`BuildSpeedOptimizerInput`、fallback 编排和 runtime 写回；下一批继续批量扫描哪些可以安全外移。
 - 完整 `Frame/OpenSpaceInfo/PlanningContext/HMI/collision/wheel mask/NLP smoother` 仍未完整接入。
 - m57 仍只完成交叉编译和 ELF/依赖检查，未完成板端 runtime 闭环。
+
+## BATCH-105_108 后的差异
+
+| 原始流程节点 | 本批前差异 | 本批次收敛 |
+|---|---|---|
+| Stage facade 输入桥接 | `StageFacadeInputLite` 由 Adapter 直接逐字段装配，Frame/OpenSpaceInfo/PlanningContext/FunctionManager lite 字段散在主文件里 | 新增 `valet_parking_stage_runtime_lite.h/.cpp`，把 StageFacadeInput 构造和 command -> facade branch 判定外移；Adapter 只传 metadata、SelectedSlot 摘要、function projection、path/speed/direct runtime 状态 |
+| RuntimeLifecycle 投影 | Adapter 内保留 `BuildStageRuntimeLifecycleContractLite()` 和 `AppendRuntimeLifecycleContract()` 的运行态文本桥接 | Runtime lifecycle bridge 外移到 Stage runtime helper；输入变成 `path_history_available/has_last_speed_frame/direct_command_active` 等简单状态，不泄漏 Adapter 私有 `RuntimeContext` |
+| open-space / fallback Stage 输出桥接 | Adapter 用私有 `PathProviderRuntimeState*`、`FunctionManagerProjection*`、`StageFinishEvaluation*` 拼接 Stage contract helper 入参 | `BuildOpenSpaceStageOutputContract()`、`BuildFallbackStageOutputContract()`、`BuildEarlyEstopFallbackContract()` 的 Stage runtime overload 外移；Adapter 只传布尔 runtime 状态和 lite 投影 |
+| Adapter 职责 | Adapter 行数约 3744，仍混有大量 Stage runtime DTO 装配代码 | Adapter 降到约 3527 行；职责继续收敛为 DDS/runtime、算法输入构造、任务调用和 PathProvider 私有运行态写回 |
+
+本批验证：
+
+```text
+x86 normal/domain_224: PASS
+x86 direct/domain_225: PASS
+batch first-domain-id=189, last-domain=223: PASS
+x86/m57 build: PASS
+m57 board runtime: NOT VERIFIED
+```
+
+本批后仍存在的流程差异：
+
+- `StageRuntime` 仍是 MVP 内 lite/stub 桥接，不是完整原车 `Frame/DependencyInjector/PlanningContext/FunctionManager` 对象，也不是 formal typed DDS 字段。
+- Adapter 仍承载 `BuildPathProviderInput`、`BuildPathPartitionInput`、`BuildSpeedOptimizerInput`、`BuildOpenSpaceStraightPathInput`、`NormalizePathProviderPathSet` 和 runtime 写回，下一批继续评估可外移边界。
+- `replan_reason` / `estop.reason` 仍承载大部分可读诊断，不能视为正式 DDS 业务字段。
+- m57 仍只完成交叉编译和 ELF/依赖检查，未完成板端 runtime 闭环。
