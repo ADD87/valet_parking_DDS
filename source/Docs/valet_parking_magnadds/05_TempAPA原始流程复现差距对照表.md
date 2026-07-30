@@ -788,3 +788,30 @@ result=all smoke cases passed
 - task 输出契约（ROI/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER/OPEN_SPACE_STRAIGHT_PATH 的 reason builder）仍主要留在 Adapter，下一批继续外移。
 - `StageFunctionManagerProjectionContractLite` 等仍是文本诊断契约，不是正式 typed DDS 字段。
 - 完整 `Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel mask/NLP smoother` 仍未完整接入。
+
+## BATCH-097_100 后的差异
+
+| 原始流程节点 | 本批前差异 | 本批次收敛 |
+|---|---|---|
+| ROI_DECIDER task 输出 | ROI reason、OpenSpaceInfo 轻量字段和 task chain 直接在 Adapter 拼接 | `BuildRoiReason()`、`AppendRoiOpenSpaceInfoContract()` 和通用 task contract 外移到 `valet_parking_task_contract_lite` |
+| PATH_PROVIDER task 输出 | 普通生成、历史复用、线程失败、输出不足等分支重复拼接诊断文本 | 外移 `BuildPathProviderReuseReason()`、`BuildPathProviderFailureReason()`、`BuildPathProviderGeneratedReason()`，并用 lite DTO 接收 Adapter 私有运行态 |
+| PATH_PARTITION / SPEED_OPTIMIZER | 输出 reason 与 task contract 和算法分支混在 Adapter | 外移强制失败、输出不足、成功输出、速度优化失败/不足/成功 reason builder |
+| OPEN_SPACE_STRAIGHT_PATH | direct 分支 reason 同时承载算法结果和 direct task contract | 外移 direct task contract 及 straight-path failure/insufficient/output reason builder |
+| Adapter 职责 | 既调算法，又负责大量 task 文本契约构造 | 保留输入转换、算法调用、运行态写回和 lite DTO 薄桥接；task-level 文本契约独立成 helper |
+
+本批验证：
+
+```text
+x86 normal/domain_224: PASS
+x86 direct/domain_225: PASS
+batch first-domain-id=189, last-domain=223: PASS
+x86/m57 build: PASS
+m57 board runtime: NOT VERIFIED
+```
+
+本批后仍存在的流程差异：
+
+- `Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel mask/NLP smoother` 仍是 lite/stub 或文本投影，不是完整原车对象和 formal typed DDS 字段。
+- Adapter 仍负责部分输入构造、算法调用和 fallback 编排，后续还要继续把流程节点本身拆成更明确的 Stage/task 组件。
+- `replan_reason` / `estop.reason` 仍承载大部分可读诊断，不能视为正式 DDS 业务字段。
+- m57 仍只完成交叉编译，未完成板端 runtime 闭环。

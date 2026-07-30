@@ -25,10 +25,10 @@ local_git:
 current_phase:
   id: Fast-2
   name: .so + typed DDS + localized valet parking algorithm sources
-  status: PASS_BATCH_093_096_STAGE_CONTRACT_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  status: PASS_BATCH_097_100_TASK_CONTRACT_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
   description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathProvider + OpenSpaceThreadManager + OpenSpacePathGenerator + HybridAStar 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路。NEXT-039 已把 direct_speed_mps 映射到 direct 分支速度优化器 speed bound，新增 aux chassis signed speed 输入和速度方向冲突 smoke，并在 direct 输出原因中补 target_gear、direct_speed_bound_min/max、trajectory_type 和 parking_status 诊断。NEXT-040 已接入本地化 OpenSpacePathProvider / OpenSpaceThreadManager 线程骨架，普通主链经 TargetPlan 生成当前车位路径，多车位非选中 lot 经 PrePlan 进入 search threads；复验阶段补充了 PrePlan 队列硬化，避免覆盖 has_task=true 的候选输入。NEXT-041 已补充线程生命周期硬化：search/target worker 持有 shared early_stop，StopThreads/CancelTargetPlan 可取消正在跑的 Hybrid A*；timeout 负向路径可观测 provider_status=TARGET_TIMEOUT、target_cancel=true 和 fallback to ROI seed；BATCH-049_052 已按原始流程图补充普通主链轻量 Stage 输出收口：PathPartition 输出 decision_name/finish_name/destination_reached，SpeedOptimizer 输出 stage_name，STAGE_OUTPUT 统一输出 stage_status、target_gear、trajectory_type、parking_status 和 finish_priority。BATCH-053_056 已继续对照原始流程图缩小差异：补轻量 StageFinish 连续帧状态机、FunctionManager/sys_command/sys_run_state/sys_warning_info/parking_type 投影、ROI/OpenSpaceInfo 最小字段诊断、PreCheck/collision/wheel mask 可观测契约。BATCH-057_060 已补 direct finish 命令失活诊断、FunctionManager unsupported/default/NOSTATE 负向路径 smoke、ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约与 collision/wheel mask 成功/负向断言。BATCH-073_076 已补后段失败/降级路径统一 STAGE_OUTPUT fallback。BATCH-077_080 已补 early Stage 输入失败和 direct 分支内部失败的 Stage fallback / stage-control fallback：ROI fail、SelectedSlot empty/overflow、parking lot convert fail、vehicle-lot precheck fail、direct straight path fail、direct speed fallback 均有 x86 smoke 和 batch smoke 约束。当前仍使用临时 IDL 契约和简化 Topic，parking_status、FunctionManagerProjection、stage_finish_state、OpenSpaceInfo、fallback 契约仍只是 replan_reason/estop.reason 诊断文本，不是正式 DDS 字段；仍未接完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。m57 板端 runtime 尚未验证。
   execution_policy: NEXT-041 后执行节奏切换为批量硬化：先批量检测和契约扫描，再批量修订代码/脚本/文档，再统一 x86/m57 编译和 x86 smoke 矩阵，最后集中排错并统一提交推送。
-  latest_batch_summary: BATCH-093_096 已完成：新增 valet_parking_stage_contract_lite.h/.cpp，把 StageProjection、MissionState、FunctionManagerProjection、RuntimeLifecycle、OpenSpace/Fallback StageOutput、StageControl、PathDecision/FinishStatus/TrajectoryType 文本契约从 Adapter 外移；Adapter 保留 FunctionManagerProjection、StageFinishEvaluation、PathProviderRuntimeState 到 lite contract 的薄转换。Adapter 行数从约 5073 降到 4786。x86 normal smoke、direct-forward smoke、batch smoke 通过，x86/m57 构建通过；m57 仍未做板端 runtime。
+  latest_batch_summary: BATCH-097_100 已完成：新增 valet_parking_task_contract_lite.h/.cpp，把 ROI_DECIDER、PATH_PROVIDER_PRECHECK、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER、OPEN_SPACE_STRAIGHT_PATH 的 task-level 输出契约和 diagnostic reason builder 从 Adapter 外移；Adapter 保留 PathProviderDecision、PathProviderStrategySummary、PathProviderRuntimeState 到 lite contract 的薄转换。Adapter 行数从约 4786 降到 4080。x86 normal/domain_224、direct/domain_225、first-domain-id=189 batch smoke 全部通过；x86/m57 构建通过，m57 仍未做板端 runtime。
   active_batch: NONE
   completed_batches:
     - id: BATCH-042_046
@@ -88,22 +88,28 @@ current_phase:
       status: PASS_BATCH_093_096_STAGE_CONTRACT_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
       date: 2026-07-30
       summary: 已新增 Stage contract lite 文件，迁移 StageProjection、MissionState、FunctionManagerProjection、RuntimeLifecycle、OpenSpace/Fallback StageOutput、StageControl 和 path/finish/trajectory 字符串契约；Adapter 保留私有运行时到 lite contract 的薄桥接。x86 normal/domain_224、direct/domain_225、first-domain-id=189 batch smoke 全部通过；x86/m57 构建通过，m57 仍未做板端 runtime。注意本环境 MagnaDDS domain-id 231 起会 failed to create DomainParticipant，batch smoke 必须让 35 个 case 落在 230 以内。
+    - id: BATCH-097_100
+      status: PASS_BATCH_097_100_TASK_CONTRACT_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+      date: 2026-07-30
+      summary: 已新增 Task contract lite 文件，迁移 ROI/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER/OPEN_SPACE_STRAIGHT_PATH 的 task-level reason builder 与 PATH_PROVIDER diagnostics/PlanningContext projection 文本构造；Adapter 保留私有运行态到 lite DTO 的薄桥接。x86 normal/domain_224、direct/domain_225、first-domain-id=189 batch smoke 全部通过；x86/m57 构建通过，m57 仍未做板端 runtime。
 last_completed_snapshot:
-  id: 093_096
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/093_096_项目状态快照_StageContract外移与Adapter瘦身.md
-  status: PASS_BATCH_093_096_STAGE_CONTRACT_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  id: 097_100
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/097_100_项目状态快照_TaskContract外移与Adapter瘦身.md
+  status: PASS_BATCH_097_100_TASK_CONTRACT_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
 
 last_plan_update:
   date: 2026-07-30
-  summary: BATCH-093_096 已完成：按 Adapter 瘦身计划新增 Stage contract lite，把 Stage 输出契约构造从 Adapter 外移，当前 Adapter 只保留 DDS/runtime 私有类型到 lite contract 的薄映射。normal、direct、stage-control、finish-hold、early fallback/task fallback 的 Stage 输出文本保持不变。x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍未做板端 runtime。复验记录：first-domain-id=226 会跑到 domain 260，231 起 DomainParticipant 创建失败，非代码回归；改用 first-domain-id=189 后 batch 通过。
+  summary: BATCH-097_100 已完成：按 Adapter 瘦身计划新增 Task contract lite，把 task-level 输出契约与 diagnostic reason builder 从 Adapter 外移，覆盖 ROI_DECIDER、PATH_PROVIDER_PRECHECK、PATH_PROVIDER、PATH_PARTITION、SPEED_OPTIMIZER 和 OPEN_SPACE_STRAIGHT_PATH。Adapter 仍保留算法私有运行态与 lite DTO 的薄映射，但不再直接承载大段 task reason 拼接。x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍未做板端 runtime。
   evidence:
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/093_096_项目状态快照_StageContract外移与Adapter瘦身.md
-    - out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_flow_gap_093_096/valet_parking_mvp/m57/lib/libvalet_parking.so
-    - out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86/smoke_latest/domain_224_20260730_083455_640
-    - out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86/smoke_latest/domain_225_20260730_083516_893
-    - out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86/smoke_latest/domain_189_20260730_084442_727
-    - out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86/smoke_latest/domain_223_20260730_084954_5126
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/097_100_项目状态快照_TaskContract外移与Adapter瘦身.md
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/smoke_latest/domain_224_20260730_112757_656
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/smoke_latest/domain_225_20260730_112757_654
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/smoke_latest/domain_189_20260730_112757_744
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/smoke_latest/domain_223_20260730_113312_5346
+    - applications/source/valet_parking/src/valet_parking_task_contract_lite.h
+    - applications/source/valet_parking/src/valet_parking_task_contract_lite.cpp
     - /tmp/valet_batch_093_096.log
     - applications/source/valet_parking/src/valet_parking_stage_contract_lite.h
     - applications/source/valet_parking/src/valet_parking_stage_contract_lite.cpp
@@ -116,8 +122,17 @@ last_plan_update:
 
 last_successful_action:
   date: 2026-07-30
-  summary: 已完成 BATCH-093_096：Stage contract lite 外移完成，Stage 输出契约构造、mission/function/runtime lifecycle contract、open_space/fallback/stage-control contract 已从 Adapter 搬出；Adapter 行数降到 4786，仍保留 DDS/runtime 私有类型到 lite contract 的薄桥接。x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍不代表板端 runtime 通过。
+  summary: 已完成 BATCH-097_100：Task contract lite 外移完成，ROI/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER/OPEN_SPACE_STRAIGHT_PATH 的 task-level reason builder 与 PATH_PROVIDER diagnostics/PlanningContext projection 文本构造已从 Adapter 搬出；Adapter 行数降到约 4080，仍保留 DDS/runtime 私有类型到 lite DTO 的薄桥接。x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍不代表板端 runtime 通过。
   evidence:
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/097_100_项目状态快照_TaskContract外移与Adapter瘦身.md
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/smoke_latest/domain_224_20260730_112757_656
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/smoke_latest/domain_225_20260730_112757_654
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/smoke_latest/domain_189_20260730_112757_744
+    - out/valet_parking_flow_gap_097_100/valet_parking_mvp/x86/smoke_latest/domain_223_20260730_113312_5346
+    - applications/source/valet_parking/src/valet_parking_task_contract_lite.h
+    - applications/source/valet_parking/src/valet_parking_task_contract_lite.cpp
     - applications/source/Docs/valet_parking_magnadds/status_snapshots/093_096_项目状态快照_StageContract外移与Adapter瘦身.md
     - out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86/lib/libvalet_parking.so
     - out/valet_parking_flow_gap_093_096/valet_parking_mvp/m57/lib/libvalet_parking.so
@@ -721,3 +736,7 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/093_096_项目状态快照_StageContract外移与Adapter瘦身.md
     phase: Fast-2
     status: PASS_BATCH_093_096_STAGE_CONTRACT_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  - id: 097_100
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/097_100_项目状态快照_TaskContract外移与Adapter瘦身.md
+    phase: Fast-2
+    status: PASS_BATCH_097_100_TASK_CONTRACT_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD

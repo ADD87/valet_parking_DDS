@@ -10,6 +10,7 @@
 #include "proto_convert/vehicle_state_convert.h"
 #include "valet_parking_stage_contract_lite.h"
 #include "valet_parking_stage_facade_lite.h"
+#include "valet_parking_task_contract_lite.h"
 #include "valet_parking_topics.h"
 
 #include <algorithm>
@@ -994,20 +995,6 @@ BuildObstacleSegments(
   return segments;
 }
 
-struct PathProviderPreCheckResult {
-  bool ok{true};
-  std::string reason{"accepted"};
-  std::size_t obstacle_segment_count{0U};
-  std::size_t roi_obstacle_segment_count{0U};
-  std::size_t external_obstacle_segment_count{0U};
-  std::size_t obstacle_near_start_count{0U};
-  std::size_t obstacle_near_end_count{0U};
-  std::size_t dest_region_point_count{0U};
-  double xy_width{0.0};
-  double xy_height{0.0};
-  bool vehicle_has_state{false};
-};
-
 PathProviderPreCheckResult MakePathProviderPreCheckFailure(
     const std::string& reason) {
   PathProviderPreCheckResult result;
@@ -1037,57 +1024,6 @@ bool IsLocalPointNearBounds(const TL::common::math::Vec2d& point,
          point.x() <= xy_bounds[1] + margin &&
          point.y() >= xy_bounds[2] - margin &&
          point.y() <= xy_bounds[3] + margin;
-}
-
-std::size_t DestRegionPointCount(
-    const TL::planning::DestRegionWithAng& dest_region) {
-  return static_cast<std::size_t>(std::get<0>(dest_region).num_points());
-}
-
-double DestRegionArea(const TL::planning::DestRegionWithAng& dest_region) {
-  return std::fabs(std::get<0>(dest_region).area());
-}
-
-void AppendDestRegionContract(
-    const TL::planning::DestRegionWithAng& dest_region,
-    std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", dest_region_points=" << DestRegionPointCount(dest_region)
-          << ", dest_region_area=" << std::fixed << std::setprecision(3)
-          << DestRegionArea(dest_region)
-          << ", dest_region_angle=[" << std::get<1>(dest_region)
-          << "," << std::get<2>(dest_region) << "]";
-}
-
-void AppendRoiOpenSpaceInfoContract(
-    uint32_t path_info_id,
-    const TL::planning::RoiDeciderOutput& roi_output,
-    std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", open_space_info_contract=roi_output"
-          << ", open_space_path_info_id=" << path_info_id
-          << ", xy_bounds_size=" << roi_output.xy_bounds.size()
-          << ", origin=(" << std::fixed << std::setprecision(3)
-          << roi_output.origin_point.x() << ","
-          << roi_output.origin_point.y() << ","
-          << roi_output.origin_heading << ")";
-  AppendDestRegionContract(roi_output.dest_region, stream);
-}
-
-void AppendOpenSpaceTaskContract(const std::string& record_type,
-                                 std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", task_contract=lightweight_open_space_task_projection"
-          << ", task_contract_record=" << record_type
-          << ", task_contract_chain="
-          << "ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION>SPEED_OPTIMIZER"
-          << ", task_status_transport=replan_reason_text";
 }
 
 PathProviderPreCheckResult RunPathProviderPreCheck(
@@ -1268,39 +1204,6 @@ PathProviderPreCheckResult RunPathProviderPreCheck(
   }
 
   return result;
-}
-
-std::string BuildPathProviderPreCheckReason(
-    const PathProviderPreCheckResult& result) {
-  std::ostringstream stream;
-  if (!result.ok) {
-    stream << "PATH_PROVIDER_PRECHECK failed: " << result.reason;
-    AppendOpenSpaceTaskContract("path_provider_precheck", &stream);
-    stream << ", collision_contract=geometry_precheck_only"
-           << ", collision_input_source=roi_and_external_segments"
-           << ", wheel_mask_contract=not_exposed_in_current_mvp"
-           << ", wheel_mask_input_source=none"
-           << ", wheel_mask_idl_extension=required_before_vehicle_integration";
-    return stream.str();
-  }
-  stream << "PATH_PROVIDER_PRECHECK ok"
-         << ", xy_bounds_span=" << std::fixed << std::setprecision(3)
-         << result.xy_width << "x" << result.xy_height
-         << ", dest_points=" << result.dest_region_point_count
-         << ", obstacle_segments=" << result.obstacle_segment_count
-         << ", roi_segments=" << result.roi_obstacle_segment_count
-         << ", external_segments=" << result.external_obstacle_segment_count
-         << ", near_start_segments=" << result.obstacle_near_start_count
-         << ", near_end_segments=" << result.obstacle_near_end_count
-         << ", vehicle_has_state="
-         << (result.vehicle_has_state ? "true" : "false");
-  AppendOpenSpaceTaskContract("path_provider_precheck", &stream);
-  stream << ", collision_contract=geometry_precheck_only"
-         << ", collision_input_source=roi_and_external_segments"
-         << ", wheel_mask_contract=not_exposed_in_current_mvp"
-         << ", wheel_mask_input_source=none"
-         << ", wheel_mask_idl_extension=required_before_vehicle_integration";
-  return stream.str();
 }
 
 ::GearPosition ConvertGear(TL::soc::GearPosition gear) {
@@ -2112,102 +2015,81 @@ std::vector<TL::planning::OpenSpacePathInput> BuildPathProviderPrePlanInputs(
   return inputs;
 }
 
-void AppendPathProviderAttemptDiagnostics(
+PathProviderAttemptContractLite MakePathProviderAttemptContractLite(
     const PathProviderDecision& decision,
     const std::string& replan_text,
     const PathProviderStrategySummary& strategy_summary,
-    const RuntimeVehicleInput& vehicle_input,
-    std::size_t obstacle_count,
-    std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", replan=" << replan_text
-          << ", reason=" << decision.reason
-          << ", warm_start=" << strategy_summary.warm_start_source
-          << ", warm_start_reject="
-          << strategy_summary.warm_start_reject_reason
-          << ", warm_start_points=" << strategy_summary.warm_start_points
-          << ", warm_start_history_points="
-          << strategy_summary.warm_start_history_points
-          << ", warm_start_s=" << strategy_summary.warm_start_match_s
-          << ", warm_start_l=" << strategy_summary.warm_start_match_l
-          << ", trace_adjust="
-          << (strategy_summary.trace_adjust_enabled ? "true" : "false")
-          << ", trace_adjust_source=" << strategy_summary.trace_adjust_source
-          << ", trace_adjust_reject="
-          << strategy_summary.trace_adjust_reject_reason
-          << ", trace_adjust_points=" << strategy_summary.trace_adjust_points
-          << ", trace_adjust_path_length="
-          << strategy_summary.trace_adjust_path_length
-          << ", trace_adjust_min_length="
-          << strategy_summary.trace_adjust_min_length
-          << ", external_vehicle="
-          << (vehicle_input.has_vehicle_state ? "true" : "false")
-          << ", external_obstacles=" << obstacle_count;
+    bool vehicle_has_state,
+    std::size_t obstacle_count) {
+  PathProviderAttemptContractLite attempt;
+  attempt.replan_text = replan_text;
+  attempt.decision_reason = decision.reason;
+  attempt.warm_start_source = strategy_summary.warm_start_source;
+  attempt.warm_start_reject_reason =
+      strategy_summary.warm_start_reject_reason;
+  attempt.warm_start_points = strategy_summary.warm_start_points;
+  attempt.splice_path_points = strategy_summary.splice_path_points;
+  attempt.warm_start_history_points =
+      strategy_summary.warm_start_history_points;
+  attempt.warm_start_match_s = strategy_summary.warm_start_match_s;
+  attempt.warm_start_match_l = strategy_summary.warm_start_match_l;
+  attempt.warm_start_path_front_s =
+      strategy_summary.warm_start_path_front_s;
+  attempt.warm_start_path_back_s =
+      strategy_summary.warm_start_path_back_s;
+  attempt.strategy_init_moving_direction =
+      strategy_summary.init_moving_direction;
+  attempt.strategy_init_path_direction = strategy_summary.init_path_direction;
+  attempt.strategy_enable_init_kappa_cost =
+      strategy_summary.enable_init_kappa_cost;
+  attempt.strategy_limit_init_steer_margin =
+      strategy_summary.limit_init_steer_margin;
+  attempt.strategy_disable_search = strategy_summary.disable_search;
+  attempt.trace_adjust_enabled = strategy_summary.trace_adjust_enabled;
+  attempt.trace_adjust_source = strategy_summary.trace_adjust_source;
+  attempt.trace_adjust_reject_reason =
+      strategy_summary.trace_adjust_reject_reason;
+  attempt.trace_adjust_points = strategy_summary.trace_adjust_points;
+  attempt.trace_adjust_path_length = strategy_summary.trace_adjust_path_length;
+  attempt.trace_adjust_min_length = strategy_summary.trace_adjust_min_length;
+  attempt.trace_adjust_target_s = strategy_summary.trace_adjust_target_s;
+  attempt.trace_adjust_finish_l_threshold =
+      strategy_summary.trace_adjust_finish_l_threshold;
+  attempt.trace_adjust_finish_theta_threshold =
+      strategy_summary.trace_adjust_finish_theta_threshold;
+  attempt.trace_adjust_bound = strategy_summary.trace_adjust_bound;
+  attempt.external_vehicle = vehicle_has_state;
+  attempt.obstacle_count = obstacle_count;
+  return attempt;
 }
 
-void AppendPlanningContextPathProjection(
+PathProviderHistoryContractLite MakePathProviderHistoryContractLite(
     const PathProviderRuntimeState& provider_state,
-    const std::string& history_state,
     const std::string& replan_text,
-    std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", planning_context_contract=path_provider_runtime_projection"
-          << ", path_history_state=" << history_state
-          << ", path_history_available="
-          << (provider_state.has_history ? "true" : "false")
-          << ", planning_context_path_id=" << provider_state.path_id
-          << ", planning_context_replan_reason=" << replan_text
-          << ", target_update_writeback="
-          << (replan_text == "TARGET_UPDATE" ? "true" : "false")
-          << ", planning_context_history_points="
-          << CountPathProviderPoints(provider_state.last_output);
+    bool vehicle_has_state,
+    std::size_t obstacle_count) {
+  PathProviderHistoryContractLite history;
+  history.replan_text = replan_text;
+  history.last_warm_start_points = provider_state.last_warm_start_points;
+  history.last_strategy_init_moving_direction =
+      provider_state.last_strategy_init_moving_direction;
+  history.generated_count = provider_state.generated_count;
+  history.reused_count = provider_state.reused_count;
+  history.external_vehicle = vehicle_has_state;
+  history.obstacle_count = obstacle_count;
+  return history;
 }
 
-std::string JoinThreadPathIds(const std::vector<int>& path_ids) {
-  if (path_ids.empty()) {
-    return "[]";
-  }
-  std::ostringstream stream;
-  stream << "[";
-  for (std::size_t i = 0U; i < path_ids.size(); ++i) {
-    if (i > 0U) {
-      stream << ",";
-    }
-    stream << path_ids[i];
-  }
-  stream << "]";
-  return stream.str();
-}
-
-void AppendThreadedProviderDiagnostics(
-    const TL::planning::OpenSpacePathProviderDiagnostics& diagnostics,
-    std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", threaded=" << (diagnostics.threaded ? "true" : "false")
-          << ", provider_status=" << diagnostics.provider_status
-          << ", target_plan="
-          << (diagnostics.target_plan_submitted ? "submitted" : "none")
-          << ", target_output="
-          << (diagnostics.target_output_ready ? "ready" : "pending")
-          << ", target_source="
-          << (diagnostics.target_used_candidate_result
-                  ? "preplan_candidate"
-                  : (diagnostics.target_generated_in_target_thread
-                         ? "target_thread"
-                         : "unknown"))
-          << ", target_timeout="
-          << (diagnostics.target_timed_out ? "true" : "false")
-          << ", target_cancel="
-          << (diagnostics.target_cancel_requested ? "true" : "false")
-          << ", wait_s=" << diagnostics.wait_time_s
-          << ", thread_path_ids="
-          << JoinThreadPathIds(diagnostics.thread_path_ids);
+PlanningContextPathProjectionLite MakePlanningContextPathProjectionLite(
+    const PathProviderRuntimeState& provider_state,
+    const std::string& replan_text) {
+  PlanningContextPathProjectionLite projection;
+  projection.has_history = provider_state.has_history;
+  projection.path_id = provider_state.path_id;
+  projection.replan_text = replan_text;
+  projection.history_points =
+      CountPathProviderOutputPoints(provider_state.last_output);
+  return projection;
 }
 
 bool RunPathProvider(const valet_parking_config_t& config,
@@ -2240,122 +2122,73 @@ bool RunPathProvider(const valet_parking_config_t& config,
     path_output->replan_status = 0U;
     ++provider_state->reused_count;
 
-    std::ostringstream stream;
-    stream << "PATH_PROVIDER ok";
-    AppendOpenSpaceTaskContract("path_provider_output", &stream);
-    stream << ", partitions=" << path_output->partitioned_path.size()
-           << ", points=" << CountPathProviderPoints(*path_output)
-           << ", path_type=" << path_output->path_type
-           << ", parking_seq=" << parking_seq
-           << ", open_space_info_contract=path_provider_output"
-           << ", path_info_id=" << parking_seq;
-    AppendDestRegionContract(roi_output.dest_region, &stream);
-    stream
-           << ", smoothed=false"
-           << ", history=reused"
-           << ", replan=" << replan_text
-           << ", warm_start=not_applied"
-           << ", last_warm_start_points="
-           << provider_state->last_warm_start_points
-           << ", last_strategy_init_move="
-           << provider_state->last_strategy_init_moving_direction
-           << ", generated_count=" << provider_state->generated_count
-           << ", reused_count=" << provider_state->reused_count
-           << ", external_vehicle="
-           << (vehicle_input.has_vehicle_state ? "true" : "false")
-           << ", external_obstacles=" << obstacles.size();
-    AppendPlanningContextPathProjection(*provider_state, "reused",
-                                        replan_text, &stream);
-    *status_reason = stream.str();
+    const PathProviderHistoryContractLite history_contract =
+        MakePathProviderHistoryContractLite(
+            *provider_state, replan_text, vehicle_input.has_vehicle_state,
+            obstacles.size());
+    const PlanningContextPathProjectionLite planning_projection =
+        MakePlanningContextPathProjectionLite(*provider_state, replan_text);
+    *status_reason = BuildPathProviderReuseReason(
+        *path_output, parking_seq, roi_output, history_contract,
+        planning_projection);
     return true;
   }
 
   PathProviderStrategySummary strategy_summary;
   TL::planning::OpenSpacePathProviderDiagnostics provider_diagnostics;
+  PathProviderAttemptContractLite attempt_contract =
+      MakePathProviderAttemptContractLite(
+          decision, replan_text, strategy_summary,
+          vehicle_input.has_vehicle_state, obstacles.size());
   try {
     const TL::planning::OpenSpacePathInput input =
         BuildPathProviderInput(metadata, parking_seq, roi_output, obstacles,
                                *provider_state, decision.replan_status,
                                decision.start_point, decision.end_pose,
                                &strategy_summary);
+    attempt_contract = MakePathProviderAttemptContractLite(
+        decision, replan_text, strategy_summary,
+        vehicle_input.has_vehicle_state, obstacles.size());
     TL::planning::OpenSpacePathProvider* provider =
         EnsureThreadedPathProvider(provider_state);
     if (provider == nullptr) {
-      std::ostringstream stream;
-      stream << "PATH_PROVIDER failed: threaded provider unavailable";
-      AppendOpenSpaceTaskContract("path_provider_output", &stream);
-      AppendPathProviderAttemptDiagnostics(decision, replan_text,
-                                           strategy_summary, vehicle_input,
-                                           obstacles.size(), &stream);
-      *status_reason = stream.str();
+      *status_reason = BuildPathProviderFailureReason(
+          "threaded provider unavailable", attempt_contract,
+          preplan_inputs.size(), nullptr);
       return false;
     }
     provider->PrePlan(preplan_inputs);
     const TL::common::Status provider_status =
         provider->Plan(input, path_output, &provider_diagnostics);
     if (!provider_status.ok()) {
-      std::ostringstream stream;
-      stream << "PATH_PROVIDER failed: " << provider_status.error_message();
-      AppendOpenSpaceTaskContract("path_provider_output", &stream);
-      AppendPathProviderAttemptDiagnostics(decision, replan_text,
-                                           strategy_summary, vehicle_input,
-                                           obstacles.size(), &stream);
-      stream << ", preplan_candidates=" << preplan_inputs.size();
-      AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
-      *status_reason = stream.str();
+      *status_reason = BuildPathProviderFailureReason(
+          provider_status.error_message(), attempt_contract,
+          preplan_inputs.size(), &provider_diagnostics);
       return false;
     }
   } catch (const std::exception& ex) {
-    std::ostringstream stream;
-    stream << "PATH_PROVIDER failed: exception: " << ex.what();
-    AppendOpenSpaceTaskContract("path_provider_output", &stream);
-    AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
-                                         vehicle_input, obstacles.size(),
-                                         &stream);
-    stream << ", preplan_candidates=" << preplan_inputs.size();
-    AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildPathProviderFailureReason(
+        std::string("exception: ") + ex.what(), attempt_contract,
+        preplan_inputs.size(), &provider_diagnostics);
     return false;
   } catch (...) {
-    std::ostringstream stream;
-    stream << "PATH_PROVIDER failed: unknown exception";
-    AppendOpenSpaceTaskContract("path_provider_output", &stream);
-    AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
-                                         vehicle_input, obstacles.size(),
-                                         &stream);
-    stream << ", preplan_candidates=" << preplan_inputs.size();
-    AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildPathProviderFailureReason(
+        "unknown exception", attempt_contract, preplan_inputs.size(),
+        &provider_diagnostics);
     return false;
   }
 
   const std::size_t point_count = CountPathProviderPoints(*path_output);
   if (!path_output->error_msg.empty()) {
-    std::ostringstream stream;
-    stream << "PATH_PROVIDER failed: " << path_output->error_msg
-           << ", partitions=" << path_output->partitioned_path.size()
-           << ", points=" << point_count;
-    AppendOpenSpaceTaskContract("path_provider_output", &stream);
-    AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
-                                         vehicle_input, obstacles.size(),
-                                         &stream);
-    stream << ", preplan_candidates=" << preplan_inputs.size();
-    AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildPathProviderOutputFailureReason(
+        path_output->error_msg, *path_output, attempt_contract,
+        preplan_inputs.size(), provider_diagnostics);
     return false;
   }
   if (path_output->partitioned_path.empty() || point_count < 2U) {
-    std::ostringstream stream;
-    stream << "PATH_PROVIDER failed: insufficient path points"
-           << ", partitions=" << path_output->partitioned_path.size()
-           << ", points=" << point_count;
-    AppendOpenSpaceTaskContract("path_provider_output", &stream);
-    AppendPathProviderAttemptDiagnostics(decision, replan_text, strategy_summary,
-                                         vehicle_input, obstacles.size(),
-                                         &stream);
-    stream << ", preplan_candidates=" << preplan_inputs.size();
-    AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildPathProviderOutputFailureReason(
+        "insufficient path points", *path_output, attempt_contract,
+        preplan_inputs.size(), provider_diagnostics);
     return false;
   }
 
@@ -2375,78 +2208,12 @@ bool RunPathProvider(const valet_parking_config_t& config,
       strategy_summary.init_moving_direction;
   ++provider_state->generated_count;
 
-  std::ostringstream stream;
-  stream << "PATH_PROVIDER ok";
-  AppendOpenSpaceTaskContract("path_provider_output", &stream);
-  stream << ", partitions=" << path_output->partitioned_path.size()
-         << ", points=" << point_count
-         << ", path_type=" << path_output->path_type
-         << ", parking_seq=" << parking_seq
-         << ", open_space_info_contract=path_provider_output"
-         << ", path_info_id=" << parking_seq;
-  AppendDestRegionContract(roi_output.dest_region, &stream);
-  stream
-         << ", smoothed=" << (path_output->has_smoothed ? "true" : "false")
-         << ", history=generated"
-         << ", replan=" << replan_text
-         << ", reason=" << decision.reason
-         << ", warm_start=" << strategy_summary.warm_start_source
-         << ", warm_start_reject="
-         << strategy_summary.warm_start_reject_reason
-         << ", warm_start_points=" << strategy_summary.warm_start_points
-         << ", splice_points=" << strategy_summary.splice_path_points
-         << ", warm_start_history_points="
-         << strategy_summary.warm_start_history_points
-         << ", warm_start_s=" << strategy_summary.warm_start_match_s
-         << ", warm_start_l=" << strategy_summary.warm_start_match_l
-         << ", warm_start_path_s=[" << strategy_summary.warm_start_path_front_s
-         << "," << strategy_summary.warm_start_path_back_s << "]"
-         << ", strategy_init_move="
-         << strategy_summary.init_moving_direction
-         << ", strategy_init_path="
-         << strategy_summary.init_path_direction
-         << ", strategy_kappa_cost="
-         << (strategy_summary.enable_init_kappa_cost ? "true" : "false")
-         << ", strategy_limit_steer="
-         << (strategy_summary.limit_init_steer_margin ? "true" : "false")
-         << ", strategy_disable_search="
-         << (strategy_summary.disable_search ? "true" : "false")
-         << ", trace_adjust="
-         << (strategy_summary.trace_adjust_enabled ? "true" : "false")
-         << ", trace_adjust_source=" << strategy_summary.trace_adjust_source
-         << ", trace_adjust_reject="
-         << strategy_summary.trace_adjust_reject_reason
-         << ", trace_adjust_points=" << strategy_summary.trace_adjust_points
-         << ", trace_adjust_path_length="
-         << strategy_summary.trace_adjust_path_length
-         << ", trace_adjust_min_length="
-         << strategy_summary.trace_adjust_min_length
-         << ", trace_adjust_target_s="
-         << strategy_summary.trace_adjust_target_s
-         << ", trace_adjust_finish_l="
-         << strategy_summary.trace_adjust_finish_l_threshold
-         << ", trace_adjust_finish_theta="
-         << strategy_summary.trace_adjust_finish_theta_threshold
-         << ", trace_adjust_bounds=";
-  if (strategy_summary.trace_adjust_enabled) {
-    stream << "[-" << strategy_summary.trace_adjust_bound
-           << "," << strategy_summary.trace_adjust_bound
-           << ",-" << strategy_summary.trace_adjust_bound
-           << "," << strategy_summary.trace_adjust_bound << "]";
-  } else {
-    stream << "none";
-  }
-  stream
-         << ", generated_count=" << provider_state->generated_count
-         << ", reused_count=" << provider_state->reused_count
-         << ", preplan_candidates=" << preplan_inputs.size()
-         << ", external_vehicle="
-         << (vehicle_input.has_vehicle_state ? "true" : "false")
-         << ", external_obstacles=" << obstacles.size();
-  AppendPlanningContextPathProjection(*provider_state, "generated",
-                                      replan_text, &stream);
-  AppendThreadedProviderDiagnostics(provider_diagnostics, &stream);
-  *status_reason = stream.str();
+  const PlanningContextPathProjectionLite planning_projection =
+      MakePlanningContextPathProjectionLite(*provider_state, replan_text);
+  *status_reason = BuildPathProviderGeneratedReason(
+      *path_output, parking_seq, roi_output, attempt_contract,
+      provider_state->generated_count, provider_state->reused_count,
+      preplan_inputs.size(), planning_projection, provider_diagnostics);
   return true;
 }
 
@@ -2648,27 +2415,6 @@ void AppendDirectFinishContract(
           << (evaluation.ready_to_finish ? "true" : "false")
           << ", direct_stage_finish_state="
           << DirectFinishStateName(evaluation);
-}
-
-void AppendDirectTaskContract(const std::string& record_type,
-                              std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", task_contract=lightweight_direct_task_projection"
-          << ", task_contract_record=" << record_type
-          << ", task_contract_chain=OPEN_SPACE_STRAIGHT_PATH>SPEED_OPTIMIZER"
-          << ", task_status_transport=replan_reason_text"
-          << ", original_flow_branch=direct_open_space";
-}
-
-void AppendSpeedOptimizerTaskContract(bool is_rpa_direct_mode,
-                                      std::ostringstream* stream) {
-  if (is_rpa_direct_mode) {
-    AppendDirectTaskContract("direct_speed_optimizer_output", stream);
-  } else {
-    AppendOpenSpaceTaskContract("speed_optimizer_output", stream);
-  }
 }
 
 std::string ProjectSysCommandName(ParkingCommandMode mode) {
@@ -3031,10 +2777,7 @@ bool RunPathPartition(const valet_parking_config_t& config,
   }
 
   if (IsSmokeFlagEnabled(kForcePathPartitionFailEnv)) {
-    std::ostringstream stream;
-    stream << "PATH_PARTITION failed: forced_by_smoke_env";
-    AppendOpenSpaceTaskContract("path_partition_output", &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildPathPartitionForcedFailureReason();
     return false;
   }
 
@@ -3064,46 +2807,14 @@ bool RunPathPartition(const valet_parking_config_t& config,
   const std::size_t chosen_points =
       partition_output->chosen_partitioned_path.first.size();
   if (chosen_points < 2U) {
-    std::ostringstream stream;
-    stream << "PATH_PARTITION failed: insufficient chosen path points"
-           << ", decision=" << static_cast<int>(partition_output->path_decision)
-           << ", chosen_points=" << chosen_points;
-    *status_reason = stream.str();
+    *status_reason = BuildPathPartitionInsufficientReason(*partition_output);
     return false;
   }
 
-  std::ostringstream stream;
-  stream << "PATH_PARTITION ok";
-  AppendOpenSpaceTaskContract("path_partition_output", &stream);
-  stream << ", decision=" << static_cast<int>(partition_output->path_decision)
-          << ", decision_name="
-          << PathDecisionToString(partition_output->path_decision)
-          << ", finish=" << static_cast<int>(partition_output->finish_status)
-          << ", finish_name="
-          << FinishStatusToString(partition_output->finish_status)
-          << ", destination_reached="
-          << (partition_output->destination_reached ? "true" : "false")
-          << ", chosen_idx=(" << partition_output->chosen_path_idx.first
-          << "," << partition_output->chosen_path_idx.second << ")"
-          << ", open_space_info_contract=path_partition_output"
-          << ", partitioned_paths="
-          << partition_output->partitioned_paths.path_set.size()
-          << ", chosen_path_contract=chosen_partitioned_path"
-          << ", chosen_points=" << chosen_points
-          << ", chosen_path_points=" << chosen_points
-          << ", gear=" << static_cast<int>(partition_output->chosen_partitioned_path.second)
-         << ", chosen_path_gear="
-         << static_cast<int>(partition_output->chosen_partitioned_path.second)
-         << ", gear_changed=" << (partition_output->is_gear_changed ? "true" : "false")
-         << ", stop_path=" << (partition_output->is_stop_path ? "true" : "false")
-         << ", external_vehicle="
-         << (vehicle_input.has_vehicle_state ? "true" : "false")
-         << ", external_obstacles=" << obstacles.size();
   const std::string debug = CompactDebugText(partition_output->path_decision_debug);
-  if (!debug.empty()) {
-    stream << ", debug=" << debug;
-  }
-  *status_reason = stream.str();
+  *status_reason = BuildPathPartitionOutputReason(
+      *partition_output, vehicle_input.has_vehicle_state, obstacles.size(),
+      debug);
   return true;
 }
 
@@ -3173,10 +2884,8 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
   }
 
   if (IsSmokeFlagEnabled(kForceSpeedOptimizerFailEnv)) {
-    std::ostringstream stream;
-    stream << "SPEED_OPTIMIZER failed: forced_by_smoke_env";
-    AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildSpeedOptimizerFailureReason(
+        "forced_by_smoke_env", is_rpa_direct_mode);
     return false;
   }
 
@@ -3190,71 +2899,32 @@ bool RunSpeedOptimizer(const valet_parking_config_t& config,
                                  is_rpa_direct_mode);
     const bool ok = optimizer->Execute(input, speed_output);
     if (!ok || !speed_output->success) {
-      std::ostringstream stream;
-      stream << "SPEED_OPTIMIZER failed: " << speed_output->message;
-      AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
-      *status_reason = stream.str();
+      *status_reason = BuildSpeedOptimizerFailureReason(
+          speed_output->message, is_rpa_direct_mode);
       return false;
     }
   } catch (const std::exception& ex) {
-    std::ostringstream stream;
-    stream << "SPEED_OPTIMIZER failed: exception: " << ex.what();
-    AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildSpeedOptimizerFailureReason(
+        std::string("exception: ") + ex.what(), is_rpa_direct_mode);
     return false;
   } catch (...) {
-    std::ostringstream stream;
-    stream << "SPEED_OPTIMIZER failed: unknown exception";
-    AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildSpeedOptimizerFailureReason(
+        "unknown exception", is_rpa_direct_mode);
     return false;
   }
 
   const std::size_t trajectory_points =
       speed_output->trajectory_gear.first.NumOfPoints();
   if (trajectory_points < 2U) {
-    std::ostringstream stream;
-    stream << "SPEED_OPTIMIZER failed: insufficient trajectory points"
-           << ", points=" << trajectory_points
-           << ", message=" << speed_output->message;
-    AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildSpeedOptimizerInsufficientReason(
+        trajectory_points, speed_output->message, is_rpa_direct_mode);
     return false;
   }
 
-  const auto& trajectory = speed_output->trajectory_gear.first;
-  const double total_time =
-      trajectory.TrajectoryPointAt(trajectory_points - 1).relative_time;
-  const double total_s =
-      trajectory.TrajectoryPointAt(trajectory_points - 1).path_point.s -
-      trajectory.TrajectoryPointAt(0).path_point.s;
-  std::ostringstream stream;
-  stream << "SPEED_OPTIMIZER ok";
-  AppendSpeedOptimizerTaskContract(is_rpa_direct_mode, &stream);
-  stream << ", points=" << trajectory_points
-         << ", duration=" << std::fixed << std::setprecision(3)
-         << total_time
-         << ", distance=" << total_s
-         << ", gear=" << static_cast<int>(speed_output->trajectory_gear.second)
-         << ", open_space_info_contract=speed_optimizer_output"
-         << ", chosen_path_points="
-         << partition_output.chosen_partitioned_path.first.size()
-         << ", partitioned_paths="
-         << partition_output.partitioned_paths.path_set.size()
-         << ", stop_path="
-         << (partition_output.is_stop_path ? "true" : "false")
-         << ", speed_optimizer_trajectory_points=" << trajectory_points
-         << ", wheel_mask_considered=false"
-         << ", stage=" << static_cast<int>(speed_output->interactive_stage)
-         << ", stage_name="
-         << TL::planning_internal::SpeedTaskInteractiveStage_Name(
-                speed_output->interactive_stage)
-         << ", last_frame=" << (has_last_frame ? "true" : "false")
-         << ", external_vehicle="
-         << (vehicle_input.has_vehicle_state ? "true" : "false")
-         << ", external_obstacles=" << obstacles.size()
-         << ", message=" << CompactDebugText(speed_output->message);
-  *status_reason = stream.str();
+  *status_reason = BuildSpeedOptimizerOutputReason(
+      partition_output, *speed_output, is_rpa_direct_mode, has_last_frame,
+      vehicle_input.has_vehicle_state, obstacles.size(),
+      CompactDebugText(speed_output->message));
   return true;
 }
 
@@ -3574,10 +3244,8 @@ bool RunOpenSpaceStraightPath(
   }
 
   if (IsSmokeFlagEnabled(kForceStraightPathFailEnv)) {
-    std::ostringstream stream;
-    stream << "OPEN_SPACE_STRAIGHT_PATH failed: forced_by_smoke_env";
-    AppendDirectTaskContract("open_space_straight_path_output", &stream);
-    *status_reason = stream.str();
+    *status_reason =
+        BuildOpenSpaceStraightPathFailureReason("forced_by_smoke_env");
     return false;
   }
 
@@ -3589,24 +3257,17 @@ bool RunOpenSpaceStraightPath(
     const TL::common::Status status =
         provider->Process(input, &straight_output);
     if (!status.ok()) {
-      std::ostringstream stream;
-      stream << "OPEN_SPACE_STRAIGHT_PATH failed: "
-             << status.error_message();
-      AppendDirectTaskContract("open_space_straight_path_output", &stream);
-      *status_reason = stream.str();
+      *status_reason =
+          BuildOpenSpaceStraightPathFailureReason(status.error_message());
       return false;
     }
   } catch (const std::exception& ex) {
-    std::ostringstream stream;
-    stream << "OPEN_SPACE_STRAIGHT_PATH failed: exception: " << ex.what();
-    AppendDirectTaskContract("open_space_straight_path_output", &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildOpenSpaceStraightPathFailureReason(
+        std::string("exception: ") + ex.what());
     return false;
   } catch (...) {
-    std::ostringstream stream;
-    stream << "OPEN_SPACE_STRAIGHT_PATH failed: unknown exception";
-    AppendDirectTaskContract("open_space_straight_path_output", &stream);
-    *status_reason = stream.str();
+    *status_reason =
+        BuildOpenSpaceStraightPathFailureReason("unknown exception");
     return false;
   }
 
@@ -3615,24 +3276,14 @@ bool RunOpenSpaceStraightPath(
   const std::size_t path_points =
       partition_output->chosen_partitioned_path.first.size();
   if (path_points < 2U) {
-    std::ostringstream stream;
-    stream << "OPEN_SPACE_STRAIGHT_PATH failed: insufficient path points"
-           << ", points=" << path_points
-           << ", diagnostic=" << straight_output.diagnostic;
-    AppendDirectTaskContract("open_space_straight_path_output", &stream);
-    *status_reason = stream.str();
+    *status_reason = BuildOpenSpaceStraightPathInsufficientReason(
+        path_points, straight_output.diagnostic);
     return false;
   }
 
-  std::ostringstream stream;
-  stream << straight_output.diagnostic
-         << ", gear_changed="
-         << (straight_output.is_gear_changed ? "true" : "false")
-         << ", external_vehicle="
-         << (vehicle_input.has_vehicle_state ? "true" : "false")
-         << ", direct_speed=" << SelectDirectSpeed(command.direct_speed_mps());
-  AppendDirectTaskContract("open_space_straight_path_output", &stream);
-  *status_reason = stream.str();
+  *status_reason = BuildOpenSpaceStraightPathOutputReason(
+      straight_output, vehicle_input.has_vehicle_state,
+      SelectDirectSpeed(command.direct_speed_mps()));
   return true;
 }
 
@@ -3983,33 +3634,6 @@ PlanningTrajectory BuildTrajectoryFromSpeedOptimizer(
   output.estop(std::move(estop));
   output.trajectory_type(PlanningTrajectoryType::TRAJECTORY_TYPE_NORMAL);
   return output;
-}
-
-std::string BuildRoiReason(const TL::planning::RoiDeciderOutput& output,
-                           uint32_t path_info_id) {
-  std::ostringstream stream;
-  stream << "ROI_DECIDER ok";
-  AppendOpenSpaceTaskContract("roi_decider_output", &stream);
-  stream << ", scenario=" << static_cast<int>(output.scenario_type)
-         << ", lot_status=" << static_cast<int>(output.lot_status)
-         << ", target=(" << std::fixed << std::setprecision(3)
-         << output.end_pose.x << "," << output.end_pose.y << ","
-         << output.end_pose.theta << ")"
-         << ", end_pose=(" << output.end_pose.x << ","
-         << output.end_pose.y << "," << output.end_pose.theta << ")"
-         << ", fine_tuned=" << (output.has_fine_tuned ? "true" : "false")
-         << ", slot_inner_fs_valid="
-         << (output.is_slot_inner_fs_valid ? "true" : "false")
-         << ", scenario_difficulty=" << output.scenario_difficulty
-         << ", obs_segments=" << output.obs_segments.size()
-         << ", linked_obs_segments=" << output.linked_obs_segments.size()
-         << ", high_curb_obs_segments="
-         << output.high_curb_obs_segments.size()
-         << ", roi_wall_segments=" << output.roi_wall_segments.size()
-         << ", virtual_obs_segments="
-         << output.virtual_obs_segments.size();
-  AppendRoiOpenSpaceInfoContract(path_info_id, output, &stream);
-  return stream.str();
 }
 
 }  // namespace
