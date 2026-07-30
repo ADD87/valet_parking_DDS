@@ -65,6 +65,7 @@ set(STANDALONE_STRAIGHT_PATH_SOURCES
 # Source discovery
 set(SOURCES
     src/valet_parking_component.cpp
+    src/valet_parking_stage_contract_lite.cpp
     src/valet_parking_stage_facade_lite.cpp
     src/valet_parking_stage_process_lite.cpp
     src/valet_parking_stage_parking_adapter.cpp

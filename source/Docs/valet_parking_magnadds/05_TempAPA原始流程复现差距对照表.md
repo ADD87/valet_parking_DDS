@@ -742,3 +742,49 @@ last-domain=223
 - Adapter 仍有 5000+ 行，后续还要继续迁移 `BuildOpenSpaceStageOutputContract`、`BuildFallbackStageOutputContract` 和 `AppendStageControlContract` 等输出契约。
 - `StageFacadeInputLite` 仍由 Adapter 从 DDS/runtime 私有类型映射而来，正式 typed DDS 字段尚未接入。
 - m57 仍只完成交叉编译和 ELF/依赖检查，尚未做板端 runtime。
+
+## BATCH-093_096 已减少的差异
+
+| 原始流程节点 | 之前差异 | 本批次收敛 |
+|---|---|---|
+| Stage 输出契约归属 | `STAGE_OUTPUT`、MissionState、FunctionManagerProjection、runtime lifecycle 等输出契约主体仍堆在 Adapter | 新增 `valet_parking_stage_contract_lite.h/.cpp`，把 StageProjection、MissionState、FunctionManagerProjection、RuntimeLifecycle、OpenSpace/Fallback StageOutput、StageControl contract 外移 |
+| normal open-space 输出 | `BuildOpenSpaceStageOutputContract()` 在 Adapter 内部直接读取 `StageFinishEvaluation`、`FunctionManagerProjection`、`PathProviderRuntimeState` | Adapter 只转换为 `StageFinishOutputContractLite`、`StageFunctionManagerProjectionContractLite`、`StageRuntimeLifecycleContractLite`，实际输出文本由 contract helper 构造 |
+| fallback 输出 | 后段/早期失败路径的 fallback contract 与 Adapter 私有运行时耦合 | `BuildFallbackStageOutputContract()` 和 `BuildEarlyEstopFallbackContract()` 主体外移，Adapter 保留私有状态到 lite contract 的薄桥接 |
+| stage-control 输出 | PAUSE/BRAKE/FINISH/direct/parking-out 等 stage-control reason 在 Adapter 内拼接 | `AppendStageControlContract()` 外移，继续输出 `original_flow_branch`、`stage_contract`、`stage_process_contract` |
+| path/finish/trajectory 字符串契约 | `PathDecisionToString`、`FinishStatusToString`、`TrajectoryTypeName` 等属于输出契约层，却放在 Adapter | 已迁入 Stage contract helper，后续 task contract 外移可以复用 |
+| Adapter 可维护性 | Adapter 上批仍约 5073 行，继续承接输出契约会让后续接完整 Stage 更难 | Adapter 降到约 4786 行；职责进一步收敛为 DDS/runtime 私有状态、输入校验、算法调用壳和 lite 转换 |
+
+## BATCH-093_096 验证
+
+通过：
+```text
+git diff --check
+bash source/valet_parking_tools/build_valet_parking.sh --out-dir /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_093_096
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86 --domain-id 224 --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_x86.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86 --domain-id 225 --command-mode direct-forward --timeout-ms 25000
+bash source/valet_parking_tools/smoke_valet_parking_batch_042_046.sh --run-root /mnt/e/APA/DDS/feature_integration/out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86 --first-domain-id 189 --timeout-ms 25000
+```
+
+产物：
+```text
+out/valet_parking_flow_gap_093_096/valet_parking_mvp/x86/lib/libvalet_parking.so
+out/valet_parking_flow_gap_093_096/valet_parking_mvp/m57/lib/libvalet_parking.so
+```
+
+批量 smoke：
+```text
+first-domain-id=189
+last-domain=223
+result=all smoke cases passed
+```
+
+注意事项：
+
+- 本环境 `domain-id >= 231` 会出现 `failed to create DomainParticipant`，不是本批代码回归；batch smoke 需要让最后一个 domain 不超过 230。
+- m57 仍只完成交叉编译和 ELF/依赖检查，尚未做板端 runtime。
+
+仍保留的核心差异：
+
+- task 输出契约（ROI/PATH_PROVIDER/PATH_PARTITION/SPEED_OPTIMIZER/OPEN_SPACE_STRAIGHT_PATH 的 reason builder）仍主要留在 Adapter，下一批继续外移。
+- `StageFunctionManagerProjectionContractLite` 等仍是文本诊断契约，不是正式 typed DDS 字段。
+- 完整 `Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel mask/NLP smoother` 仍未完整接入。

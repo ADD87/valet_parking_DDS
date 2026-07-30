@@ -8,6 +8,7 @@
 #include "planning/tasks/optimizers/open_space_straight_path/open_space_straight_path_provider.h"
 #include "proto_convert/parking_lot_convert.h"
 #include "proto_convert/vehicle_state_convert.h"
+#include "valet_parking_stage_contract_lite.h"
 #include "valet_parking_stage_facade_lite.h"
 #include "valet_parking_topics.h"
 
@@ -2558,81 +2559,6 @@ std::string CompactDebugText(std::string text) {
   return text;
 }
 
-std::string PathDecisionToString(
-    TL::planning::OpenSpacePathDecision decision) {
-  switch (decision) {
-    case TL::planning::OpenSpacePathDecision::TASK_FINISH:
-      return "TASK_FINISH";
-    case TL::planning::OpenSpacePathDecision::TRACK_ABNORMAL:
-      return "TRACK_ABNORMAL";
-    case TL::planning::OpenSpacePathDecision::NO_VALID_PATH:
-      return "NO_VALID_PATH";
-    case TL::planning::OpenSpacePathDecision::CHOOSE_NEW_PATH:
-      return "CHOOSE_NEW_PATH";
-    case TL::planning::OpenSpacePathDecision::CHOOSE_HISTORY_PATH:
-      return "CHOOSE_HISTORY_PATH";
-    case TL::planning::OpenSpacePathDecision::PREPARE_FINISH:
-      return "PREPARE_FINISH";
-    case TL::planning::OpenSpacePathDecision::UNKOWN:
-    default:
-      return "UNKOWN";
-  }
-}
-
-std::string FinishStatusToString(
-    TL::planning_internal::OpenSpaceDebug::FinishStatus status) {
-  using TL::planning_internal::OpenSpaceDebug;
-  switch (status) {
-    case OpenSpaceDebug::REACH_TARGET:
-      return "REACH_TARGET";
-    case OpenSpaceDebug::COLLISION_FINISH:
-      return "COLLISION_FINISH";
-    case OpenSpaceDebug::PREFINISH_BRAKING:
-      return "PREFINISH_BRAKING";
-    case OpenSpaceDebug::REACH_WHEEL_MASK:
-      return "REACH_WHEEL_MASK";
-    case OpenSpaceDebug::BLOCK_BY_CURB_IN_SPOT:
-      return "BLOCK_BY_CURB_IN_SPOT";
-    case OpenSpaceDebug::BLOCK_BY_CAR_IN_SPOT:
-      return "BLOCK_BY_CAR_IN_SPOT";
-    case OpenSpaceDebug::OVER_TIME:
-      return "OVER_TIME";
-    case OpenSpaceDebug::LARGE_ANGLE:
-      return "LARGE_ANGLE";
-    case OpenSpaceDebug::FAR_AWAY:
-      return "FAR_AWAY";
-    case OpenSpaceDebug::VEHICEL_MOVING:
-      return "VEHICEL_MOVING";
-    case OpenSpaceDebug::OUT_OF_PARK_LOT:
-      return "OUT_OF_PARK_LOT";
-    case OpenSpaceDebug::UNKNOWN:
-    default:
-      return "UNKNOWN";
-  }
-}
-
-bool IsFinishSuccessStatus(
-    TL::planning_internal::OpenSpaceDebug::FinishStatus status) {
-  using TL::planning_internal::OpenSpaceDebug;
-  switch (status) {
-    case OpenSpaceDebug::REACH_TARGET:
-    case OpenSpaceDebug::COLLISION_FINISH:
-    case OpenSpaceDebug::REACH_WHEEL_MASK:
-    case OpenSpaceDebug::BLOCK_BY_CURB_IN_SPOT:
-    case OpenSpaceDebug::BLOCK_BY_CAR_IN_SPOT:
-      return true;
-    case OpenSpaceDebug::UNKNOWN:
-    case OpenSpaceDebug::PREFINISH_BRAKING:
-    case OpenSpaceDebug::OVER_TIME:
-    case OpenSpaceDebug::LARGE_ANGLE:
-    case OpenSpaceDebug::FAR_AWAY:
-    case OpenSpaceDebug::VEHICEL_MOVING:
-    case OpenSpaceDebug::OUT_OF_PARK_LOT:
-    default:
-      return false;
-  }
-}
-
 StageFinishEvaluation UpdateStageFinishEvaluation(
     const TL::planning::PartitionOutput& partition_output,
     const RuntimeVehicleInput& vehicle_input,
@@ -2668,13 +2594,6 @@ StageFinishEvaluation UpdateStageFinishEvaluation(
     evaluation.ready_to_finish = evaluation.ready_condition;
   }
   return evaluation;
-}
-
-std::string StageFinishStateName(const StageFinishEvaluation& evaluation) {
-  if (evaluation.ready_to_finish) {
-    return "READY";
-  }
-  return evaluation.ready_condition ? "HOLDING" : "WAITING";
 }
 
 DirectFinishEvaluation BuildDirectFinishEvaluation(
@@ -2731,68 +2650,6 @@ void AppendDirectFinishContract(
           << DirectFinishStateName(evaluation);
 }
 
-void AppendMissionStateContract(const std::string& mission_state,
-                                const std::string& next_stage,
-                                bool finish_scenario_intent,
-                                std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", mission_state_contract=lightweight_stage_projection"
-          << ", mission_state=" << mission_state
-          << ", next_stage=" << next_stage
-          << ", finish_scenario_intent="
-          << (finish_scenario_intent ? "true" : "false")
-          << ", finish_scenario_contract=diagnostic_only";
-}
-
-void AppendStageProjectionContract(
-    const std::string& record_type,
-    std::ostringstream* stream,
-    const StageProcessContextLite* stage_context = nullptr) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", stage_contract=lightweight_valet_parking_stage_projection"
-          << ", stage_contract_record=" << record_type
-          << ", status_transport=replan_reason_text"
-          << ", dds_field_extension=required_before_vehicle_integration"
-          << ", original_flow_reference="
-          << "ValetParkingStageParking.Process>Stage.ExecuteTaskOnOpenSpace"
-          << ", original_flow_contract=lightweight_node_projection";
-  if (stage_context != nullptr) {
-    AppendStageProcessContract(*stage_context, stream);
-  }
-}
-
-std::string OriginalFlowBranchForTask(const std::string& task) {
-  if (task == "OPEN_SPACE_STRAIGHT_PATH") {
-    return "direct_open_space";
-  }
-  if (task == "STAGE_FINISH_HOLD") {
-    return "stage_finish_hold";
-  }
-  if (task == "UNSUPPORTED_PARKING_OUT") {
-    return "unsupported_parking_out";
-  }
-  return "stage_control_override";
-}
-
-std::string OriginalFlowBranchForFallback(
-    const std::string& fallback_event) {
-  if (fallback_event == "open_space_straight_path_failed" ||
-      fallback_event == "direct_speed_optimizer_failed") {
-    return "direct_open_space";
-  }
-  if (fallback_event == "path_provider_failed" ||
-      fallback_event == "precheck_failed" ||
-      fallback_event == "path_partition_failed" ||
-      fallback_event == "speed_optimizer_failed") {
-    return "normal_open_space_task";
-  }
-  return "normal_open_space_early_input";
-}
-
 void AppendDirectTaskContract(const std::string& record_type,
                               std::ostringstream* stream) {
   if (stream == nullptr) {
@@ -2812,33 +2669,6 @@ void AppendSpeedOptimizerTaskContract(bool is_rpa_direct_mode,
   } else {
     AppendOpenSpaceTaskContract("speed_optimizer_output", stream);
   }
-}
-
-void AppendRuntimeLifecycleContract(const std::string& event,
-                                    const std::string& stage_exit_action,
-                                    const std::string& path_history_action,
-                                    const std::string& speed_frame_action,
-                                    const std::string& direct_state_action,
-                                    bool path_history_available,
-                                    bool speed_frame_available,
-                                    bool direct_command_active,
-                                    std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", runtime_lifecycle_contract="
-          << "lightweight_stage_runtime_projection"
-          << ", runtime_lifecycle_event=" << event
-          << ", stage_exit_action=" << stage_exit_action
-          << ", path_history_available="
-          << (path_history_available ? "true" : "false")
-          << ", path_history_action=" << path_history_action
-          << ", speed_frame_available="
-          << (speed_frame_available ? "true" : "false")
-          << ", speed_frame_action=" << speed_frame_action
-          << ", direct_command_active="
-          << (direct_command_active ? "true" : "false")
-          << ", direct_state_action=" << direct_state_action;
 }
 
 std::string ProjectSysCommandName(ParkingCommandMode mode) {
@@ -2984,138 +2814,101 @@ FunctionManagerProjection BuildStageFinishHoldFunctionProjection() {
   return projection;
 }
 
+StageFunctionManagerProjectionContractLite
+BuildFunctionManagerProjectionContractLite(
+    const FunctionManagerProjection& projection) {
+  StageFunctionManagerProjectionContractLite lite;
+  lite.source = projection.source;
+  lite.parking_command = projection.parking_command;
+  lite.sys_mode = projection.sys_mode;
+  lite.sys_command = projection.sys_command;
+  lite.sys_run_state = projection.sys_run_state;
+  lite.sys_warning_info = projection.sys_warning_info;
+  lite.parking_type = projection.parking_type;
+  lite.reset_history = projection.reset_history;
+  return lite;
+}
+
+StageFinishOutputContractLite BuildStageFinishOutputContractLite(
+    const StageFinishEvaluation& evaluation) {
+  StageFinishOutputContractLite lite;
+  lite.destination_reached = evaluation.destination_reached;
+  lite.vehicle_standstill = evaluation.vehicle_standstill;
+  lite.ready_condition = evaluation.ready_condition;
+  lite.ready_to_finish = evaluation.ready_to_finish;
+  lite.consecutive_ready_frames = evaluation.consecutive_ready_frames;
+  lite.required_consecutive_frames = evaluation.required_consecutive_frames;
+  return lite;
+}
+
+StageRuntimeLifecycleContractLite BuildStageRuntimeLifecycleContractLite(
+    const PathProviderRuntimeState* provider_state,
+    bool has_last_speed_frame,
+    bool direct_command_active,
+    const std::string& runtime_lifecycle_event,
+    const std::string& stage_exit_action,
+    const std::string& path_history_action,
+    const std::string& speed_frame_action,
+    const std::string& direct_state_action) {
+  StageRuntimeLifecycleContractLite lite;
+  lite.event = runtime_lifecycle_event;
+  lite.stage_exit_action = stage_exit_action;
+  lite.path_history_action = path_history_action;
+  lite.speed_frame_action = speed_frame_action;
+  lite.direct_state_action = direct_state_action;
+  lite.path_history_available =
+      provider_state != nullptr && provider_state->has_history;
+  lite.speed_frame_available = has_last_speed_frame;
+  lite.direct_command_active = direct_command_active;
+  return lite;
+}
+
+void AppendRuntimeLifecycleContract(const std::string& event,
+                                    const std::string& stage_exit_action,
+                                    const std::string& path_history_action,
+                                    const std::string& speed_frame_action,
+                                    const std::string& direct_state_action,
+                                    bool path_history_available,
+                                    bool speed_frame_available,
+                                    bool direct_command_active,
+                                    std::ostringstream* stream) {
+  StageRuntimeLifecycleContractLite lite;
+  lite.event = event;
+  lite.stage_exit_action = stage_exit_action;
+  lite.path_history_action = path_history_action;
+  lite.speed_frame_action = speed_frame_action;
+  lite.direct_state_action = direct_state_action;
+  lite.path_history_available = path_history_available;
+  lite.speed_frame_available = speed_frame_available;
+  lite.direct_command_active = direct_command_active;
+  AppendRuntimeLifecycleContract(lite, stream);
+}
+
 void AppendFunctionManagerProjectionContract(
     const FunctionManagerProjection& projection,
     std::ostringstream* stream) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << ", function_manager_source=" << projection.source
-          << ", function_manager_sys_mode=" << projection.sys_mode
-          << ", function_manager_sys_command=" << projection.sys_command
-          << ", function_manager_sys_run_state=" << projection.sys_run_state
-          << ", function_manager_sys_warning_info="
-          << projection.sys_warning_info
-          << ", function_manager_parking_type=" << projection.parking_type
-          << ", function_manager_command=" << projection.parking_command
-          << ", function_manager_reset_history="
-          << (projection.reset_history ? "true" : "false");
+  AppendFunctionManagerProjectionContract(
+      BuildFunctionManagerProjectionContractLite(projection), stream);
 }
 
 std::string BuildFunctionManagerProjectionReason(
     const FunctionManagerProjection& projection) {
-  std::ostringstream stream;
-  stream << "FUNCTION_MANAGER_INPUT";
-  AppendFunctionManagerProjectionContract(projection, &stream);
-  return stream.str();
-}
-
-std::string StageParkingStatus(
-    const TL::planning::PartitionOutput& partition_output,
-    const TL::planning::SpeedOptimizerOutput* speed_output,
-    const StageFinishEvaluation* finish_evaluation) {
-  if (finish_evaluation != nullptr &&
-      finish_evaluation->ready_to_finish) {
-    return "mission_finished";
-  }
-  if (partition_output.finish_status ==
-      TL::planning_internal::OpenSpaceDebug::PREFINISH_BRAKING) {
-    return "prepare_finish";
-  }
-  if (speed_output != nullptr) {
-    switch (speed_output->interactive_stage) {
-      case TL::planning_internal::AvpSpeedPlanCollisionInfo::WAITOBSTACLE:
-        return "wait_obstacle";
-      case TL::planning_internal::AvpSpeedPlanCollisionInfo::WAITREPLAN:
-        return "wait_replan";
-      case TL::planning_internal::AvpSpeedPlanCollisionInfo::RUNNING:
-      case TL::planning_internal::AvpSpeedPlanCollisionInfo::INIT:
-      default:
-        break;
-    }
-  }
-  if (partition_output.is_stop_path) {
-    return "stop_by_path_partition";
-  }
-  return "running";
-}
-
-std::string StageStatusFromParkingStatus(const std::string& parking_status) {
-  if (parking_status == "mission_finished") {
-    return "mission_finished";
-  }
-  if (parking_status == "wait_obstacle") {
-    return "waiting_obstacle";
-  }
-  if (parking_status == "wait_replan") {
-    return "waiting_replan";
-  }
-  if (parking_status == "prepare_finish") {
-    return "prepare_finish";
-  }
-  if (parking_status == "stop_by_path_partition") {
-    return "stopped_by_path_partition";
-  }
-  return "running";
-}
-
-std::string MissionStateFromParkingStatus(const std::string& parking_status) {
-  if (parking_status == "mission_finished") {
-    return "MISSION_FINISHED";
-  }
-  if (parking_status == "wait_obstacle") {
-    return "WAIT_OBSTACLE";
-  }
-  if (parking_status == "wait_replan") {
-    return "WAIT_REPLAN";
-  }
-  if (parking_status == "prepare_finish") {
-    return "PREPARE_FINISH";
-  }
-  if (parking_status == "stop_by_path_partition") {
-    return "STOP_BY_PATH_PARTITION";
-  }
-  return "MISSION_RUNNING";
-}
-
-std::string TrajectoryTypeName(PlanningTrajectoryType trajectory_type) {
-  switch (trajectory_type) {
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_NORMAL:
-      return "NORMAL";
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_PATH_FALLBACK:
-      return "PATH_FALLBACK";
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_SPEED_FALLBACK:
-      return "SPEED_FALLBACK";
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_PATH_REUSED:
-      return "PATH_REUSED";
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_SHORT_PATH:
-      return "SHORT_PATH";
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_PATH_LANE_KEEP:
-      return "PATH_LANE_KEEP";
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_PATH_LANE_CHANGE:
-      return "PATH_LANE_CHANGE";
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_PATH_PULL_OVER:
-      return "PATH_PULL_OVER";
-    case PlanningTrajectoryType::TRAJECTORY_TYPE_UNKNOWN:
-    default:
-      return "UNKNOWN";
-  }
+  return BuildFunctionManagerProjectionReason(
+      BuildFunctionManagerProjectionContractLite(projection));
 }
 
 PlanningTrajectoryType StageTrajectoryType(
     const TL::planning::PartitionOutput& partition_output,
     const TL::planning::SpeedOptimizerOutput* speed_output,
     const StageFinishEvaluation* finish_evaluation) {
-  if ((finish_evaluation != nullptr &&
-       finish_evaluation->ready_to_finish) ||
-      partition_output.destination_reached ||
-      IsFinishSuccessStatus(partition_output.finish_status) ||
-      partition_output.is_stop_path) {
-    return PlanningTrajectoryType::TRAJECTORY_TYPE_SHORT_PATH;
+  StageFinishOutputContractLite finish_lite;
+  const StageFinishOutputContractLite* finish_lite_ptr = nullptr;
+  if (finish_evaluation != nullptr) {
+    finish_lite = BuildStageFinishOutputContractLite(*finish_evaluation);
+    finish_lite_ptr = &finish_lite;
   }
-  return speed_output == nullptr
-             ? PlanningTrajectoryType::TRAJECTORY_TYPE_SPEED_FALLBACK
-             : PlanningTrajectoryType::TRAJECTORY_TYPE_NORMAL;
+  return StageTrajectoryType(partition_output, speed_output,
+                             finish_lite_ptr);
 }
 
 std::string BuildOpenSpaceStageOutputContract(
@@ -3127,86 +2920,37 @@ std::string BuildOpenSpaceStageOutputContract(
     bool has_last_speed_frame,
     bool direct_command_active,
     const StageProcessContextLite* stage_context = nullptr) {
-  const std::string parking_status =
-      StageParkingStatus(partition_output, speed_output, finish_evaluation);
-  const PlanningTrajectoryType trajectory_type =
-      StageTrajectoryType(partition_output, speed_output, finish_evaluation);
-  const TL::soc::GearPosition target_gear =
-      speed_output == nullptr ? partition_output.chosen_partitioned_path.second
-                              : speed_output->trajectory_gear.second;
-
-  std::ostringstream stream;
-  stream << "STAGE_OUTPUT open_space"
-         << ", stage_contract=lightweight_valet_parking_stage_projection"
-         << ", stage_contract_record=open_space_output"
-         << ", status_transport=replan_reason_text"
-         << ", dds_field_extension=required_before_vehicle_integration"
-         << ", original_flow_reference="
-         << "ValetParkingStageParking.Process>Stage.ExecuteTaskOnOpenSpace"
-         << ", original_flow_contract=lightweight_node_projection"
-         << "";
-  if (stage_context != nullptr) {
-    AppendStageProcessContract(*stage_context, &stream);
-  }
-  stream
-         << ", original_flow_branch=normal_open_space"
-         << ", stage_status=" << StageStatusFromParkingStatus(parking_status)
-         << ", task_chain=ROI_DECIDER>PATH_PROVIDER>PATH_PARTITION";
-  if (speed_output != nullptr) {
-    stream << ">SPEED_OPTIMIZER";
-  } else {
-    stream << ", speed_optimizer=fallback";
-  }
-  stream << ", path_decision="
-         << PathDecisionToString(partition_output.path_decision)
-         << ", finish_status="
-         << FinishStatusToString(partition_output.finish_status)
-         << ", destination_reached="
-         << (partition_output.destination_reached ? "true" : "false")
-         << ", target_gear=" << static_cast<int>(target_gear)
-         << ", trajectory_type=" << TrajectoryTypeName(trajectory_type)
-         << ", parking_status=" << parking_status;
-  const bool finish_scenario_intent =
-      finish_evaluation != nullptr && finish_evaluation->ready_to_finish;
-  AppendMissionStateContract(
-      MissionStateFromParkingStatus(parking_status),
-      finish_scenario_intent ? "FINISH" : "PARKING",
-      finish_scenario_intent, &stream);
+  StageFinishOutputContractLite finish_lite;
+  const StageFinishOutputContractLite* finish_lite_ptr = nullptr;
   if (finish_evaluation != nullptr) {
-    stream << ", finish_condition=destination_reached_and_standstill"
-           << ", finish_ready="
-           << (finish_evaluation->ready_to_finish ? "true" : "false")
-           << ", finish_ready_condition="
-           << (finish_evaluation->ready_condition ? "true" : "false")
-           << ", finish_consecutive_frames="
-           << finish_evaluation->consecutive_ready_frames
-           << ", finish_required_frames="
-           << finish_evaluation->required_consecutive_frames
-           << ", vehicle_standstill="
-           << (finish_evaluation->vehicle_standstill ? "true" : "false")
-           << ", stage_finish_state="
-           << StageFinishStateName(*finish_evaluation);
+    finish_lite = BuildStageFinishOutputContractLite(*finish_evaluation);
+    finish_lite_ptr = &finish_lite;
   }
+
+  StageFunctionManagerProjectionContractLite function_lite;
+  const StageFunctionManagerProjectionContractLite* function_lite_ptr =
+      nullptr;
   if (function_projection != nullptr) {
-    AppendFunctionManagerProjectionContract(*function_projection, &stream);
+    function_lite =
+        BuildFunctionManagerProjectionContractLite(*function_projection);
+    function_lite_ptr = &function_lite;
   }
+
   const bool finish_ready =
       finish_evaluation != nullptr && finish_evaluation->ready_to_finish;
-  AppendRuntimeLifecycleContract(
-      finish_ready ? "stage_finish_ready" : "normal_open_space",
-      finish_ready ? "latch_finish_hold_after_publish" : "continue_parking",
-      finish_ready ? "keep_until_stage_reset" : "keep_for_reuse",
-      finish_ready ? "keep_until_stage_reset" : "keep_for_speed_warm_start",
-      direct_command_active ? "unexpected_active" : "already_clear",
-      provider_state != nullptr && provider_state->has_history,
-      has_last_speed_frame, direct_command_active, &stream);
-  if (speed_output != nullptr) {
-    stream << ", speed_interactive_stage="
-           << TL::planning_internal::SpeedTaskInteractiveStage_Name(
-                  speed_output->interactive_stage);
-  }
-  stream << ", finish_priority=finish_over_interactive";
-  return stream.str();
+  const StageRuntimeLifecycleContractLite runtime_lifecycle =
+      BuildStageRuntimeLifecycleContractLite(
+          provider_state, has_last_speed_frame, direct_command_active,
+          finish_ready ? "stage_finish_ready" : "normal_open_space",
+          finish_ready ? "latch_finish_hold_after_publish"
+                       : "continue_parking",
+          finish_ready ? "keep_until_stage_reset" : "keep_for_reuse",
+          finish_ready ? "keep_until_stage_reset"
+                       : "keep_for_speed_warm_start",
+          direct_command_active ? "unexpected_active" : "already_clear");
+  return BuildOpenSpaceStageOutputContract(
+      partition_output, speed_output, finish_lite_ptr, function_lite_ptr,
+      runtime_lifecycle, stage_context);
 }
 
 std::string BuildFallbackStageOutputContract(
@@ -3228,27 +2972,23 @@ std::string BuildFallbackStageOutputContract(
     const std::string& speed_frame_action,
     const std::string& direct_state_action,
     const StageProcessContextLite* stage_context = nullptr) {
-  std::ostringstream stream;
-  stream << "STAGE_OUTPUT fallback";
-  AppendStageProjectionContract("fallback_output", &stream, stage_context);
-  stream << ", fallback_event=" << fallback_event
-         << ", fallback_action=" << fallback_action
-         << ", original_flow_branch="
-         << OriginalFlowBranchForFallback(fallback_event)
-         << ", stage_status=" << stage_status
-         << ", trajectory_type=" << TrajectoryTypeName(trajectory_type)
-         << ", parking_status=" << parking_status;
-  AppendMissionStateContract(mission_state, next_stage,
-                             finish_scenario_intent, &stream);
+  StageFunctionManagerProjectionContractLite function_lite;
+  const StageFunctionManagerProjectionContractLite* function_lite_ptr =
+      nullptr;
   if (function_projection != nullptr) {
-    AppendFunctionManagerProjectionContract(*function_projection, &stream);
+    function_lite =
+        BuildFunctionManagerProjectionContractLite(*function_projection);
+    function_lite_ptr = &function_lite;
   }
-  AppendRuntimeLifecycleContract(
-      runtime_lifecycle_event, stage_exit_action, path_history_action,
-      speed_frame_action, direct_state_action,
-      provider_state != nullptr && provider_state->has_history,
-      has_last_speed_frame, direct_command_active, &stream);
-  return stream.str();
+  const StageRuntimeLifecycleContractLite runtime_lifecycle =
+      BuildStageRuntimeLifecycleContractLite(
+          provider_state, has_last_speed_frame, direct_command_active,
+          runtime_lifecycle_event, stage_exit_action, path_history_action,
+          speed_frame_action, direct_state_action);
+  return BuildFallbackStageOutputContract(
+      fallback_event, fallback_action, stage_status, parking_status,
+      trajectory_type, mission_state, next_stage, finish_scenario_intent,
+      function_lite_ptr, runtime_lifecycle, stage_context);
 }
 
 std::string BuildEarlyEstopFallbackContract(
@@ -3259,15 +2999,17 @@ std::string BuildEarlyEstopFallbackContract(
     bool has_last_speed_frame,
     bool direct_command_active,
     const StageProcessContextLite* stage_context = nullptr) {
-  return BuildFallbackStageOutputContract(
-      fallback_event, "publish_estop", "fallback_estop", parking_status,
-      PlanningTrajectoryType::TRAJECTORY_TYPE_UNKNOWN, "MISSION_ESTOP",
-      "PARKING", false, &function_projection, provider_state,
-      has_last_speed_frame, direct_command_active,
-      fallback_event + "_fallback", "stay_in_parking_stage",
-      "reset_on_early_failure", "reset_on_early_failure",
-      direct_command_active ? "reset_failed_direct_command" : "already_clear",
-      stage_context);
+  const StageRuntimeLifecycleContractLite runtime_lifecycle =
+      BuildStageRuntimeLifecycleContractLite(
+          provider_state, has_last_speed_frame, direct_command_active,
+          fallback_event + "_fallback", "stay_in_parking_stage",
+          "reset_on_early_failure", "reset_on_early_failure",
+          direct_command_active ? "reset_failed_direct_command"
+                                : "already_clear");
+  return BuildEarlyEstopFallbackContract(
+      fallback_event, parking_status,
+      BuildFunctionManagerProjectionContractLite(function_projection),
+      runtime_lifecycle, stage_context);
 }
 
 bool RunPathPartition(const valet_parking_config_t& config,
@@ -3692,40 +3434,6 @@ std::string ParkingCommandModeToString(ParkingCommandMode mode) {
       return "FINISH";
   }
   return "UNKNOWN";
-}
-
-std::string BuildStageControlReason(const ParkingCommand& command,
-                                    const std::string& action) {
-  std::ostringstream stream;
-  stream << "STAGE_CONTROL " << action;
-  if (command.parking_seq() != 0U) {
-    stream << ", parking_seq=" << command.parking_seq();
-  }
-  if (!command.reason().empty()) {
-    stream << ", command_reason=" << command.reason();
-  }
-  return stream.str();
-}
-
-void AppendStageControlContract(const ParkingCommand& command,
-                                const std::string& action,
-                                const std::string& stage_status,
-                                const std::string& task,
-                                std::ostringstream* stream,
-                                const StageProcessContextLite* stage_context =
-                                    nullptr) {
-  if (stream == nullptr) {
-    return;
-  }
-  *stream << BuildStageControlReason(command, action)
-          << ", command_action=" << action
-          << ", stage_status=" << stage_status
-          << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
-          << ", task=" << task
-          << ", original_flow_branch=" << OriginalFlowBranchForTask(task)
-          << ", reset_history="
-          << (command.reset_history() ? "true" : "false");
-  AppendStageProjectionContract("stage_control", stream, stage_context);
 }
 
 double SelectDirectDistance(double distance_m) {
