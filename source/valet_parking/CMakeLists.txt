@@ -39,9 +39,29 @@ set(STANDALONE_PATH_PROVIDER_SOURCES
     ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/path_generator.cc
     ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/shape/reeds_shepp_path.cc
     ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/hybrid_a_star.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/geometric_path.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/ilqr_path.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/geometry_path_generator.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/utils/penalty_function_method.cc
     ${STANDALONE_PARKING_ROOT}/planning/open_space/open_space_thread/open_space_thread_manager.cc
     ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_path_generation/open_space_path_generator.cc
     ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_path_generation/open_space_path_provider.cc
+)
+
+set(STANDALONE_ILQR_SOURCES
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/al_constrain.h
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/al_cost.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/al_cost.h
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/al_ilqr.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/al_ilqr.h
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/al_ilqr_interface.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/al_ilqr_interface.h
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/control_constrain.h
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/endpose_constrain.h
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/kinematic_model.cc
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/kinematic_model.h
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/macros.h
+    ${STANDALONE_PARKING_ROOT}/planning/open_space/ilqr_smoother/obs_constrain.h
 )
 
 set(STANDALONE_PATH_PARTITION_SOURCES
@@ -79,6 +99,7 @@ set(SOURCES
     generated/valet_parking_topicsTopicDataType.cpp
     ${STANDALONE_ROI_SOURCES}
     ${STANDALONE_PATH_PROVIDER_SOURCES}
+    ${STANDALONE_ILQR_SOURCES}
     ${STANDALONE_PATH_PARTITION_SOURCES}
     ${STANDALONE_SPEED_OPTIMIZER_SOURCES}
     ${STANDALONE_STRAIGHT_PATH_SOURCES}
@@ -101,7 +122,7 @@ target_include_directories(${MODULE_NAME}
 target_link_libraries(${MODULE_NAME} PRIVATE ${MODULE_DEPENDS})
 target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
 
-set_source_files_properties(${STANDALONE_ROI_SOURCES} ${STANDALONE_PATH_PROVIDER_SOURCES} ${STANDALONE_PATH_PARTITION_SOURCES} ${STANDALONE_SPEED_OPTIMIZER_SOURCES} ${STANDALONE_STRAIGHT_PATH_SOURCES} PROPERTIES
+set_source_files_properties(${STANDALONE_ROI_SOURCES} ${STANDALONE_PATH_PROVIDER_SOURCES} ${STANDALONE_ILQR_SOURCES} ${STANDALONE_PATH_PARTITION_SOURCES} ${STANDALONE_SPEED_OPTIMIZER_SOURCES} ${STANDALONE_STRAIGHT_PATH_SOURCES} PROPERTIES
     COMPILE_OPTIONS "-w;-include;limits"
 )
 

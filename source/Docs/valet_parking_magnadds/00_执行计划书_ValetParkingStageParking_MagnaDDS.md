@@ -1,11 +1,11 @@
 # 执行计划书：ValetParkingStageParking 适配 MagnaDDS
 
 - 项目名称：ValetParkingStageParking MagnaDDS MVP
-- 工作区：`E:\APA\DDS\feature_integration\feature_integration_workspace`
-- 原始代码参考：`E:\APA\DDS\TempAPA_Code`
-- standalone 参考：`E:\APA\DDS\parking_algorithm_standalone`
-- 中间件剥离/修订参考：`E:\APA\DDS\Repair_ValetParkingStageParking_260430-main\planning`
-- MagnaDDS SDK 参考：`E:\APA\DDS\MagnaDDS-SDK-v0.0.4`
+- 工作区：`C:\Users\jasezhan\Desktop\00_git\20260718\02_middleware\feature_integration\feature_integration_workspace`
+- 原始代码参考：`C:\Users\jasezhan\Desktop\00_git\APA\Local_task\TempAPA_Code`
+- standalone 参考：`C:\Users\jasezhan\Desktop\00_git\APA\Local_task\parking_algorithm_standalone`
+- 中间件剥离/修订参考：`C:\Users\jasezhan\Desktop\00_git\APA\Local_task\Repair_ValetParkingStageParking_260430`
+- MagnaDDS SDK 参考：`C:\Users\jasezhan\Desktop\00_git\20260718\02_middleware\DDS\MagnaDDS-SDK-v0.0.4`
 - 当前日期：2026-07-26
 - 当前状态：执行阶段（MVP 快跑优先）
 

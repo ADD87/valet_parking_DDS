@@ -1,5 +1,5 @@
 project: ValetParkingStageParking_MagnaDDS_MVP
-workspace: E:\APA\DDS\feature_integration\feature_integration_workspace
+workspace: C:\Users\jasezhan\Desktop\00_git\20260718\02_middleware\feature_integration\feature_integration_workspace
 created_date: 2026-07-26
 last_updated: 2026-07-31
 
@@ -105,9 +105,9 @@ current_phase:
       date: 2026-07-31
       summary: 已新增 Task runtime lite 文件，迁移 RuntimeVehicleInput/RuntimeObstacleInput/InputMetadata、BuildVehicleState/BuildStartPathPoint、BuildObstacleSegments、NormalizeDiscretizedPath、BuildPathPartitionInput、BuildSpeedOptimizerInput、BuildOpenSpaceStraightPathInput、BuildPartitionOutputFromStraightPath 和 direct speed profile；Adapter 行数降到约 3397，职责继续收敛为 DDS/runtime、任务调用、PathProvider 私有运行态和 fallback 编排。x86 normal/domain_224、direct/domain_225、first-domain-id=189 batch smoke 全部通过；x86/m57 构建通过，m57 仍未做板端 runtime。
 last_completed_snapshot:
-  id: 109_112
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/109_112_项目状态快照_TaskRuntime输入构造外移.md
-  status: PASS_BATCH_109_112_TASK_RUNTIME_HELPER_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  id: '113_116'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/113_116_项目状态快照_全链路深度架构验证与m57编译通过.md
+  status: PASS_ARCHITECTURE_AUDIT_AND_M57_BUILD
 
 last_plan_update:
   date: 2026-07-31
@@ -135,11 +135,13 @@ last_plan_update:
 
 last_successful_action:
   date: 2026-07-31
-  summary: 已完成 BATCH-109_112：Task runtime lite 外移完成，车辆/障碍物简化输入、InputMetadata、任务输入构造、路径归一化和 direct speed profile 已从 Adapter 搬出；Adapter 行数降到约 3397，仍保留 DDS/runtime、任务调用、PathProvider 私有运行态和 fallback 编排。x86 normal/direct smoke、batch smoke 和 x86/m57 build 通过；m57 仍不代表板端 runtime 通过。
+  summary: 完成全链路架构深度验证（字段级审计）+ m57 交叉编译首次通过（build_valet_parking_quick.ps1 -Platform m57）。验证结果：PathProvider 100% 接口完备，PathPartition 100% 接口完备（3 个合理硬编码），SpeedOptimizer 75% 接口完备（6 个默认值由 standalone 内部 guard 安全处理），ROI Decider 核心字段全部被正确消费。m57 产物：libvalet_parking.so (1.2MB, ARM aarch64) + runner + 4 个 mock 工具全部生成，MagnaDDS 依赖验证通过。路径输出已从 MVP 计划书的"假轨迹"升级为完整真实算法链路（HybridAStar + NLP 平滑 + ST 采样）。
   evidence:
-    - applications/source/Docs/valet_parking_magnadds/status_snapshots/109_112_项目状态快照_TaskRuntime输入构造外移.md
-    - out/valet_parking_flow_gap_109_112/valet_parking_mvp/x86/lib/libvalet_parking.so
-    - out/valet_parking_flow_gap_109_112/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - applications/source/Docs/valet_parking_magnadds/status_snapshots/113_项目状态快照_全链路深度架构验证与m57编译通过.md
+    - out/valet_parking_quick_build/valet_parking_mvp/m57/lib/libvalet_parking.so
+    - out/valet_parking_quick_build/valet_parking_mvp/m57/app/valet_parking_runner
+    - out/valet_parking_quick_build/valet_parking_mvp/m57/app/selected_slot_mock_publisher
+    - out/valet_parking_quick_build/valet_parking_mvp/m57/app/planning_trajectory_mock_subscriber
     - out/valet_parking_flow_gap_109_112/valet_parking_mvp/x86/smoke_latest/domain_224_20260731_075530_639
     - out/valet_parking_flow_gap_109_112/valet_parking_mvp/x86/smoke_latest/domain_225_20260731_075551_896
     - out/valet_parking_flow_gap_109_112/valet_parking_mvp/x86/smoke_latest/domain_189_20260731_080156_762
