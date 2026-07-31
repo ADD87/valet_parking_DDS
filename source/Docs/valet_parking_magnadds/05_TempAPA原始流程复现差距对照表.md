@@ -867,3 +867,31 @@ m57 board runtime: NOT VERIFIED
 - Adapter 仍承载 `BuildPathProviderInput`、`BuildPathPartitionInput`、`BuildSpeedOptimizerInput`、`BuildOpenSpaceStraightPathInput`、`NormalizePathProviderPathSet` 和 runtime 写回，下一批继续评估可外移边界。
 - `replan_reason` / `estop.reason` 仍承载大部分可读诊断，不能视为正式 DDS 业务字段。
 - m57 仍只完成交叉编译和 ELF/依赖检查，未完成板端 runtime 闭环。
+
+## BATCH-109_112 后的差异
+
+| 原始流程节点 | 本批前差异 | 本批收敛 |
+|---|---|---|
+| 车辆/障碍物进入 task 输入 | `RuntimeVehicleInput`、`RuntimeObstacleInput`、`BuildVehicleState()`、`BuildStartPathPoint()`、`BuildObstacleSegments()` 直接定义在 Adapter，和 DDS/runtime 逻辑混在同一文件 | 新增 `valet_parking_task_runtime_lite.h/.cpp`，把简化车辆/障碍物 DTO 与转换 helper 外移，后续替换为完整 Frame/OpenSpaceInfo 或 typed DDS 字段时入口更集中 |
+| PathPartition 输入 | `BuildPathPartitionInput()` 和 `NormalizePathProviderPathSet()` 在 Adapter 内装配，Adapter 同时负责调度和任务输入细节 | `BuildPathPartitionInput()`、`NormalizeDiscretizedPath()`、`NormalizePathProviderPathSet()` 外移到 task runtime helper；Adapter 只负责调用 `RunPathPartition()` |
+| SpeedOptimizer 输入 | `BuildSpeedOptimizerInput()` 在 Adapter 内拼接路径、车辆状态、障碍物、last frame 和 direct mode | `BuildSpeedOptimizerInput()` 外移到 task runtime helper；速度层输入边界独立，便于后续替换完整 OpenSpaceInfo/PlanningContext 字段 |
+| OpenSpaceStraightPath 输入 | direct 分支的距离、速度 profile、straight path 输入和 straight output -> partition output 适配散落在 Adapter | `SelectDirectDistance()`、`SelectDirectSpeed()`、`BuildDirectSpeedOptimizerProfile()`、`BuildDirectSpeedOptimizerConfig()`、`BuildOpenSpaceStraightPathInput()`、`BuildPartitionOutputFromStraightPath()` 外移 |
+| Adapter 职责 | Adapter 已降到约 3527 行，但仍承载大量任务输入构造 | Adapter 降到约 3397 行；职责继续收敛为 DDS/runtime、任务调用、PathProvider 私有运行态和 fallback 编排 |
+
+本批验证：
+
+```text
+x86 normal/domain_224: PASS
+x86 direct/domain_225: PASS
+batch first-domain-id=189, last-domain=223: PASS
+x86/m57 build: PASS
+m57 board runtime: NOT VERIFIED
+```
+
+本批后仍存在的流程差异：
+
+- `BuildPathProviderInput`、PathProvider warm_start/trace_adjust 策略切片、`PathProviderRuntimeState` threaded provider 所有权仍在 Adapter。
+- `UpdateAfterPartitionFallback()` 和 `UpdateAfterSpeedOptimizer()` 仍是 `RuntimeContext` 私有写回方法，尚未抽成独立 runtime writeback helper。
+- `Frame/OpenSpaceInfo/PlanningContext/FunctionManager/HMI/collision/wheel mask/NLP smoother` 仍是 lite/stub 或文本投影，不是完整原车对象。
+- formal typed DDS 字段仍未替代 `replan_reason` / `estop.reason` 文本诊断。
+- m57 仍只完成交叉编译和 ELF/依赖检查，未完成板端 runtime 闭环。
