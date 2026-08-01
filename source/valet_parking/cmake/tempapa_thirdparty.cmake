@@ -78,6 +78,34 @@ function(tempapa_validate_library_architecture LIBRARY_PATH)
         ERROR_QUIET
     )
 
+    # If the symlink target is missing (e.g. extracted on Windows), file -L
+    # may return "empty".  Try the next versioned symlink as a fallback.
+    if(TEMPAPA_FILE_DESCRIPTION STREQUAL "empty")
+        # Find a versioned sibling: libfoo.so -> libfoo.so.3 -> libfoo.so.3.14.20
+        file(GLOB TEMPAPA_VERSIONED_SIBLINGS "${LIBRARY_PATH}.*")
+        foreach(TEMPAPA_SIBLING IN LISTS TEMPAPA_VERSIONED_SIBLINGS)
+            if(TEMPAPA_SIBLING STREQUAL "${LIBRARY_PATH}")
+                continue()
+            endif()
+            execute_process(
+                COMMAND "${TEMPAPA_FILE_COMMAND}" -L -b "${TEMPAPA_SIBLING}"
+                OUTPUT_VARIABLE TEMPAPA_FILE_DESCRIPTION
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET
+            )
+            if(NOT TEMPAPA_FILE_DESCRIPTION STREQUAL "empty")
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(TEMPAPA_FILE_DESCRIPTION STREQUAL "empty")
+        message(WARNING
+            "[valet_parking] Cannot validate architecture of ${LIBRARY_PATH} (symlink chain unresolved). "
+            "Skipping architecture check for this library.")
+        return()
+    endif()
+
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
         if(NOT TEMPAPA_FILE_DESCRIPTION MATCHES "x86-64")
             message(FATAL_ERROR
@@ -108,8 +136,26 @@ function(tempapa_define_shared TARGET_NAME LIBRARY_PATH)
     if(NOT TARGET "${TARGET_NAME}")
         add_library("${TARGET_NAME}" SHARED IMPORTED GLOBAL)
     endif()
+    # Resolve symlink to actual binary (symlinks break on NTFS mounts)
+    set(TEMPAPA_REAL_PATH "${LIBRARY_PATH}")
+    if(EXISTS "${LIBRARY_PATH}" AND NOT IS_SYMLINK "${LIBRARY_PATH}")
+        file(SIZE "${LIBRARY_PATH}" TEMPAPA_SIZE)
+        if(TEMPAPA_SIZE EQUAL 0)
+            # Empty file = broken symlink; find versioned sibling
+            file(GLOB TEMPAPA_VERSIONED "${LIBRARY_PATH}.*")
+            foreach(TEMPAPA_CANDIDATE IN LISTS TEMPAPA_VERSIONED)
+                if(EXISTS "${TEMPAPA_CANDIDATE}" AND NOT IS_SYMLINK "${TEMPAPA_CANDIDATE}")
+                    file(SIZE "${TEMPAPA_CANDIDATE}" TEMPAPA_CANDIDATE_SIZE)
+                    if(TEMPAPA_CANDIDATE_SIZE GREATER 0)
+                        set(TEMPAPA_REAL_PATH "${TEMPAPA_CANDIDATE}")
+                        break()
+                    endif()
+                endif()
+            endforeach()
+        endif()
+    endif()
     set_target_properties("${TARGET_NAME}" PROPERTIES
-        IMPORTED_LOCATION "${LIBRARY_PATH}"
+        IMPORTED_LOCATION "${TEMPAPA_REAL_PATH}"
         INTERFACE_LINK_DIRECTORIES "${TEMPAPA_LIBRARY_ROOT}"
         INTERFACE_LINK_OPTIONS "-Wl,-rpath-link,${TEMPAPA_LIBRARY_ROOT}")
 endfunction()
@@ -143,9 +189,17 @@ foreach(TEMPAPA_REQUIRED_INCLUDE
         TEMPAPA_ABSEIL_INCLUDE_DIR
         TEMPAPA_CPPAD_INCLUDE_DIR)
     if(NOT DEFINED ${TEMPAPA_REQUIRED_INCLUDE})
-        message(FATAL_ERROR
-            "[valet_parking] TempAPA third-party header is missing: ${TEMPAPA_REQUIRED_INCLUDE}. "
-            "Root: ${TEMPAPA_LIB_ROOT}")
+        # Eigen/Boost/Abseil may be provided by the workspace thirdparty
+        # rather than the tempapa package; make them non-fatal.
+        if(TEMPAPA_REQUIRED_INCLUDE STREQUAL "TEMPAPA_CPPAD_INCLUDE_DIR")
+            message(FATAL_ERROR
+                "[valet_parking] TempAPA third-party header is missing: ${TEMPAPA_REQUIRED_INCLUDE}. "
+                "Root: ${TEMPAPA_LIB_ROOT}")
+        else()
+            message(WARNING
+                "[valet_parking] TempAPA header-only package not found in tempapa root: ${TEMPAPA_REQUIRED_INCLUDE}. "
+                "Will rely on workspace thirdparty instead.")
+        endif()
     endif()
 endforeach()
 
