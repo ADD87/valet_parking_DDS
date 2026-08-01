@@ -4,6 +4,11 @@
 
 #include "app_build_feature_flags_config.h"
 
+#if ENABLE_PRKVINBUS
+#include "prk_vin_bus.h"
+#include "prk_vin_busTopicDataType.h"
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -31,6 +36,7 @@ constexpr const char* kParkingCommandTopicDefault = "/parking/command";
 constexpr const char* kLocalizationTopicDefault = "/localization/estimate";
 constexpr const char* kChassisTopicDefault = "/chassis/state";
 constexpr const char* kObstacleTopicDefault = "/perception/obstacles";
+constexpr const char* kPrkVinBusTopicDefault = "/PrkVinBus";
 constexpr int kTrajectoryPointCount = 21;
 constexpr std::size_t kMaxOutputWaypointCount = 100U;
 constexpr int kMaxCommandDrainRoundsPerCycle = 64;
@@ -849,6 +855,9 @@ ValetParkingComponent::ValetParkingComponent(const valet_parking_config_t& confi
       obstacle_topic_name_(config.obstacle_topic_name != nullptr
                                ? config.obstacle_topic_name
                                : kObstacleTopicDefault),
+      prk_vin_bus_topic_name_(config.prk_vin_bus_topic_name != nullptr
+                                  ? config.prk_vin_bus_topic_name
+                                  : kPrkVinBusTopicDefault),
       command_topic_enabled_(config.enable_command_topic != 0U),
       aux_input_topics_enabled_(config.enable_aux_input_topics != 0U) {
   if (input_topic_name_.empty()) {
@@ -868,6 +877,9 @@ ValetParkingComponent::ValetParkingComponent(const valet_parking_config_t& confi
   }
   if (obstacle_topic_name_.empty()) {
     obstacle_topic_name_ = kObstacleTopicDefault;
+  }
+  if (prk_vin_bus_topic_name_.empty()) {
+    prk_vin_bus_topic_name_ = kPrkVinBusTopicDefault;
   }
   aux_vehicle_input_.state.is_valid = 1;
   aux_vehicle_input_.state.gear = VALET_PARKING_GEAR_PARKING;
@@ -983,6 +995,17 @@ bool ValetParkingComponent::InitDds() {
     }
   }
 
+#if ENABLE_PRKVINBUS
+  prk_vin_bus_topic_enabled_ = true;
+  prk_vin_bus_topic_type_ = std::make_unique<PrkVinBusTopicDataType>();
+  rc = participant_->register_type(prk_vin_bus_topic_type_.get());
+  if (rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+    SetLastError(std::string("register PrkVinBus type failed: ") + ReturnCodeToString(rc));
+    CleanupDds();
+    return false;
+  }
+#endif
+
   input_topic_ = participant_->create_topic(input_topic_name_, selected_slot_topic_type_->get_name(),
                                             magna::dds::TOPIC_QOS_DEFAULT);
   if (input_topic_ == nullptr) {
@@ -1040,6 +1063,17 @@ bool ValetParkingComponent::InitDds() {
       return false;
     }
   }
+
+#if ENABLE_PRKVINBUS
+  prk_vin_bus_topic_ = participant_->create_topic(
+      prk_vin_bus_topic_name_, prk_vin_bus_topic_type_->get_name(),
+      magna::dds::TOPIC_QOS_DEFAULT);
+  if (prk_vin_bus_topic_ == nullptr) {
+    SetLastError("failed to create PrkVinBus topic: " + prk_vin_bus_topic_name_);
+    CleanupDds();
+    return false;
+  }
+#endif
 
   subscriber_ = participant_->create_subscriber(magna::dds::SUBSCRIBER_QOS_DEFAULT);
   if (subscriber_ == nullptr) {
@@ -1107,6 +1141,16 @@ bool ValetParkingComponent::InitDds() {
     }
   }
 
+#if ENABLE_PRKVINBUS
+  prk_vin_bus_reader_ = subscriber_->create_datareader(
+      prk_vin_bus_topic_, reader_qos, nullptr, magna::dds::STATUS_MASK_NONE);
+  if (prk_vin_bus_reader_ == nullptr) {
+    SetLastError("failed to create datareader for PrkVinBus topic");
+    CleanupDds();
+    return false;
+  }
+#endif
+
   magna::dds::DataWriterQos writer_qos = magna::dds::DATAWRITER_QOS_DEFAULT;
   writer_qos.history.kind = magna::dds::HistoryQosPolicyKind::KEEP_LAST_HISTORY_QOS;
   writer_qos.history.depth = depth;
@@ -1126,6 +1170,7 @@ bool ValetParkingComponent::InitDds() {
 
 void ValetParkingComponent::CleanupDds() noexcept {
   output_writer_ = nullptr;
+  prk_vin_bus_reader_ = nullptr;
   obstacle_reader_ = nullptr;
   chassis_reader_ = nullptr;
   localization_reader_ = nullptr;
@@ -1134,6 +1179,7 @@ void ValetParkingComponent::CleanupDds() noexcept {
   publisher_ = nullptr;
   subscriber_ = nullptr;
   obstacle_topic_ = nullptr;
+  prk_vin_bus_topic_ = nullptr;
   chassis_topic_ = nullptr;
   localization_topic_ = nullptr;
   command_topic_ = nullptr;
@@ -1150,6 +1196,7 @@ void ValetParkingComponent::CleanupDds() noexcept {
   participant_ = nullptr;
   dds_factory_ = nullptr;
   obstacle_topic_type_.reset();
+  prk_vin_bus_topic_type_.reset();
   chassis_topic_type_.reset();
   localization_topic_type_.reset();
   command_topic_type_.reset();
@@ -1423,6 +1470,36 @@ bool ValetParkingComponent::HandleObstacleSample() {
   return true;
 }
 
+#if ENABLE_PRKVINBUS
+bool ValetParkingComponent::HandlePrkVinBusSample() {
+  if (prk_vin_bus_reader_ == nullptr) {
+    return false;
+  }
+
+  PrkVinBus sample;
+  magna::dds::SampleInfo sample_info;
+  const magna::dds::ReturnCode_t read_rc =
+      prk_vin_bus_reader_->take_next_sample(&sample, sample_info);
+  if (read_rc == magna::dds::ReturnCode_t::RETCODE_NO_DATA) {
+    return false;
+  }
+  if (read_rc != magna::dds::ReturnCode_t::RETCODE_OK) {
+    SetLastError(std::string("take PrkVinBus sample failed: ") +
+                 ReturnCodeToString(read_rc));
+    return false;
+  }
+  if (!sample_info.valid_data) {
+    return true;
+  }
+
+  ++handled_prk_vin_samples_;
+  std::cout << kModuleTag
+            << " PrkVinBus sample #" << handled_prk_vin_samples_
+            << " received (stub — full processing TBD)" << std::endl;
+  return true;
+}
+#endif
+
 bool ValetParkingComponent::DrainAuxInputSamples() {
   if (!aux_input_topics_enabled_) {
     return false;
@@ -1610,6 +1687,9 @@ void ValetParkingComponent::WorkerLoop() {
     try {
       handled = DrainCommandSamples();
       handled = DrainAuxInputSamples() || handled;
+#if ENABLE_PRKVINBUS
+      handled = HandlePrkVinBusSample() || handled;
+#endif
       handled = HandleOneSample() || handled;
     } catch (const std::exception& e) {
       SetLastError(std::string("worker exception: ") + e.what());

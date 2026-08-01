@@ -26,6 +26,7 @@ typedef struct valet_parking_config_t {
     const char* localization_topic_name;
     const char* chassis_topic_name;
     const char* obstacle_topic_name;
+    const char* prk_vin_bus_topic_name;
     uint32_t enable_command_topic;
     uint32_t enable_aux_input_topics;
     uint32_t qos_depth;

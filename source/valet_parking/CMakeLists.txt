@@ -79,6 +79,16 @@ set(STANDALONE_STRAIGHT_PATH_SOURCES
     ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_straight_path/open_space_straight_path_provider.cc
 )
 
+# Phase 2: PrkVinBus topic reader — behind ENABLE_PRKVINBUS feature flag
+if(ENABLE_PRKVINBUS)
+    set(PRKVINBUS_GENERATED_SOURCES
+        generated/prk_vin_bus.cpp
+        generated/prk_vin_busTopicDataType.cpp
+    )
+    list(APPEND SOURCES ${PRKVINBUS_GENERATED_SOURCES})
+    message(STATUS "[valet_parking] ENABLE_PRKVINBUS=ON — PrkVinBus topic reader enabled")
+endif()
+
 # Phase 3: NLP Smoother — behind ENABLE_NLP_SMOOTHER feature flag
 # Requires: tempapa third-party binaries manually copied to thirdparty/{x86|m57}/tempapa/
 if(ENABLE_NLP_SMOOTHER)

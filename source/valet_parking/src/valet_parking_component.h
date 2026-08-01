@@ -21,6 +21,7 @@ class SelectedSlotTopicDataType;
 class LocalizationEstimateTopicDataType;
 class ChassisStateTopicDataType;
 class ObstacleArrayTopicDataType;
+class PrkVinBusTopicDataType;
 
 namespace valet_parking {
 
@@ -51,6 +52,7 @@ class ValetParkingComponent final {
     bool HandleLocalizationSample();
     bool HandleChassisSample();
     bool HandleObstacleSample();
+    bool HandlePrkVinBusSample();
     void ApplyAuxVehicleInput();
     bool HandleOneSample();
     bool BuildTrajectoryFromInput(const SelectedSlot& input_sample,
@@ -69,8 +71,10 @@ class ValetParkingComponent final {
     std::string localization_topic_name_;
     std::string chassis_topic_name_;
     std::string obstacle_topic_name_;
+    std::string prk_vin_bus_topic_name_;
     bool command_topic_enabled_{false};
     bool aux_input_topics_enabled_{false};
+    bool prk_vin_bus_topic_enabled_{false};
   std::atomic<bool> running_{false};
   std::mutex mutex_;
   std::condition_variable cv_;
@@ -81,6 +85,7 @@ class ValetParkingComponent final {
     uint64_t handled_localization_samples_{0U};
     uint64_t handled_chassis_samples_{0U};
     uint64_t handled_obstacle_samples_{0U};
+    uint64_t handled_prk_vin_samples_{0U};
 
     struct AuxVehicleInputCache {
       bool has_localization{false};
@@ -96,6 +101,7 @@ class ValetParkingComponent final {
     std::unique_ptr<LocalizationEstimateTopicDataType> localization_topic_type_;
     std::unique_ptr<ChassisStateTopicDataType> chassis_topic_type_;
     std::unique_ptr<ObstacleArrayTopicDataType> obstacle_topic_type_;
+    std::unique_ptr<PrkVinBusTopicDataType> prk_vin_bus_topic_type_;
     magna::dds::DomainParticipantFactory* dds_factory_{nullptr};
     magna::dds::DomainParticipant* participant_{nullptr};
     magna::dds::Topic* input_topic_{nullptr};
@@ -104,6 +110,7 @@ class ValetParkingComponent final {
     magna::dds::Topic* localization_topic_{nullptr};
     magna::dds::Topic* chassis_topic_{nullptr};
     magna::dds::Topic* obstacle_topic_{nullptr};
+    magna::dds::Topic* prk_vin_bus_topic_{nullptr};
     magna::dds::Subscriber* subscriber_{nullptr};
     magna::dds::Publisher* publisher_{nullptr};
     magna::dds::DataReader* input_reader_{nullptr};
@@ -111,6 +118,7 @@ class ValetParkingComponent final {
     magna::dds::DataReader* localization_reader_{nullptr};
     magna::dds::DataReader* chassis_reader_{nullptr};
     magna::dds::DataReader* obstacle_reader_{nullptr};
+    magna::dds::DataReader* prk_vin_bus_reader_{nullptr};
     magna::dds::DataWriter* output_writer_{nullptr};
 };
 
