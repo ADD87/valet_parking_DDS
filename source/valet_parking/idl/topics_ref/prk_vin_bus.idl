@@ -1,0 +1,592 @@
+// AUTOSAR-aligned PrkVinBus topic contract.
+// This file mirrors the full field layout used by Rte_Type_IPC12.h-derived structs.
+
+typedef boolean Boolean;
+typedef uint8 UInt8;
+typedef uint16 UInt16;
+typedef uint32 UInt32;
+typedef uint64 UInt64;
+typedef int8 SInt8;
+typedef int16 SInt16;
+typedef int32 SInt32;
+typedef float Float;
+
+struct EIdcServiceResp_st {
+  UInt16 control_response[3];
+};
+
+struct CCPJFCU {
+  SInt16 m_Ob5Weekseconds;
+  SInt16 padding;
+  Float m_Longitude;
+  Float m_Latitude;
+  Float m_Wgs84Hgt;
+  Float m_MagYaw;
+  UInt32 m_VoteNavHorPosType;
+  UInt32 m_NavpDevErr;
+  UInt32 m_NavsDevErr;
+  UInt32 m_AhrsDevErr;
+  Float m_Ob2Weekseconds;
+  Float m_Quaternion_q0;
+  Float m_Quaternion_q1;
+  Float m_Quaternion_q2;
+  Float m_Quaternion_q3;
+};
+
+struct CCPJIPB {
+  Float m_IPB_VehVertAccel;
+  UInt32 m_IPB_XPU_ParkFailureSts;
+  Boolean m_IPB_VehVertAccelVD;
+  Boolean m_IPB_XPU_ParkDrvBrkOverrideFlg;
+  UInt16 m_IPB_MLWheelSpdEdgesSum;
+  UInt16 m_IPB_MRWheelSpdEdgesSum;
+  Boolean m_IPB_MLWheelSpdVD_E2E;
+  Boolean m_IPB_MRWheelSpdVD_E2E;
+  Float m_IPB_MRWheelSpd_E2E;
+  Float m_IPB_MLWheelSpd_E2E;
+  UInt32 m_IPB_StandStillSt;
+  UInt16 m_IPB_CDD_Current_BrkTq;
+  Boolean m_IPB_ESPFault;
+  Boolean m_IPB_CDD_Current_BrkTqVD;
+  Boolean m_IPB_BrkPedalStVD_E2E;
+  UInt8 padding;
+  UInt16 padding1;
+  UInt32 m_IPB_APAActiveState_E2E;
+  UInt32 m_IPB_MLWheelRotatedDirection;
+  UInt32 m_IPB_MRWheelRotatedDirection;
+  Float m_IPB_PitchRate;
+  Float m_IPB_RollRate;
+  Float m_IPB_YAWRate_E2E;
+};
+
+struct CCPJLA1 {
+  UInt16 m_LA1_Distance_mm;
+  Boolean m_LA1_Unstable;
+  UInt8 padding;
+  UInt32 m_LA1_ErrorState;
+};
+
+struct CCPJLA2 {
+  UInt16 m_LA2_Distance_mm;
+  Boolean m_LA2_Unstable;
+  UInt8 padding;
+  UInt32 m_LA2_ErrorState;
+};
+
+struct CCPJRDCU {
+  UInt32 m_RDCU_BonnetAjarSt;
+  UInt32 m_RDCU_APBActSt;
+  UInt16 m_RDCU_RLSBrightnessFW;
+  Boolean m_RDCU_FliiLampOutputSt;
+  Boolean m_RDCU_ChrgPortLockSt;
+  UInt32 m_RDCU_PsngrDoorLockOutput;
+  UInt32 m_RDCU_RRDoorLockOutput;
+};
+
+struct CCPJRWS {
+  UInt32 m_RWS_SysWarning;
+  Float m_RWS_RLWheelangle;
+};
+
+struct CCPJSRS {
+  Boolean m_SRS_CrashOutputSt;
+};
+
+struct CCPJTBOX {
+  SInt32 m_TBOX_GPSLatitude;
+  SInt32 m_TBOX_GPSLongitude;
+  Float m_TBOX_GPSBearing;
+  Float m_TBOX_GPSAltitude;
+  UInt16 m_TBOX_GPSAccuracy;
+  SInt16 m_TBOX_GPSSpeed;
+  UInt32 m_TBOX_GPSTime;
+  Boolean m_TBOX_FixFlag;
+  UInt8 padding1;
+  UInt16 padding;
+};
+
+struct CCPJXPU {
+  UInt32 m_XPU_ACCSt;
+  Boolean m_XPU_IPB_ABAReq;
+  UInt8 padding1;
+  UInt16 padding;
+};
+
+struct CCpjEps {
+  Boolean m_STAT_EPSAPAErr;
+  Boolean m_EPS_SASFault_E2E;
+  Boolean m_EPS_SASCalibratedSt_E2E;
+  UInt8 padding;
+  UInt32 m_STAT_EPSCtrlAvailable;
+  UInt32 m_STAT_EPSAPAAbort;
+  Float m_EPSTorqueFeedBack_f32;
+  UInt32 m_EPS_Systemstate;
+  UInt32 m_EPS_AngleCtrlMode;
+  UInt32 m_EPS_AngleCtrlSt;
+  UInt32 m_EPS_EndAngleCtrlReason;
+};
+
+struct CCpjFctaWarning {
+  UInt32 m_fctaWarningLH;
+  UInt32 m_fctaWarningRH;
+};
+
+struct CCpjFusaInfo {
+  Boolean m_IdleSafetyFail_b;
+  Boolean m_SupParkSafetyFail_b;
+  Boolean m_PilParkSafetyFail_b;
+};
+
+struct CCpjIHU {
+  UInt16 REQ_AVMTouchPanelX_1;
+  UInt16 REQ_AVMTouchPanelY_1;
+  UInt32 IPC_LanguageMode;
+  Boolean AVM_ExitRequest;
+  Boolean APA_ExitRequest;
+  Boolean AVMCalibrationReq;
+  Boolean AVMSoftKeyRequest;
+  UInt32 MEB_Setting;
+  UInt32 PDCmute_Setting;
+  UInt32 AVM_Setting;
+  UInt32 DOW_Setting;
+  UInt32 BSD_Setting;
+  UInt32 RCW_Setting;
+  UInt32 RCTA_Setting;
+  UInt32 FCTA_Setting;
+  UInt32 HMI_AVM_TouchEventType;
+  UInt32 FAPA_Setting;
+  UInt32 MOD_Setting;
+  Boolean HPA_Voice_FuctionSwitch_display;
+  Boolean HPA_Voice_Confirmed;
+  Boolean APASoftKeyRequest;
+  Boolean NOASoftKeyRequest;
+  UInt32 IHU_CurrentTheme;
+  UInt32 IHU_CurrentThemeMode;
+  UInt32 SET_BSV_Enable;
+  UInt32 Left_Mirror_Status;
+  UInt32 Right_Mirror_Status;
+  UInt32 Door_Lock_Status;
+  UInt32 CDCU_XPU_DisplayMode;
+  UInt32 CDCU_XPU_TranspChassisWorkSt;
+  UInt32 CDCU_XPU_TranBody;
+  Boolean AVMHardKeyRequest;
+  Boolean BMS_ThermPrpgtonRequest;
+  SInt16 CDCU_3603Dangle;
+  UInt32 CDCU_XPU_NRABtn;
+  UInt32 EMU3ChrgDchaConnSts;
+  Boolean CDCU_WashCarSt;
+  Boolean CDCU_ESP_EPBReqVD;
+  Boolean FrntRadarSwt;
+  Boolean RRMDisplayAVMOff;
+  UInt8 CarMdlSetColor;
+  UInt8 Reset_Default;
+  UInt8 OffRoadState;
+  UInt8 padding;
+  Boolean APASoftKeyRequestNoReverse;
+};
+
+struct CCpjLDCU {
+  UInt32 m_LDCU_XPU_ChargerSt;
+  Boolean m_LDCU_XPU_AvailableSt;
+  Boolean m_LDCU_XPU_StopAutoDrive;
+  Boolean m_LDCU_OverRideSt;
+  Boolean m_LDCU_FMotorSpdDirection;
+  UInt32 m_LDCU_RodSignals;
+  UInt32 m_LDCU_DriveModeFeedback;
+  UInt32 m_LDCU_XPU_AvailStFeedback;
+  UInt32 m_LDCU_APBWarningLamp;
+  UInt32 m_LDCU_APBSysSt;
+  UInt32 m_LDCUOffroadDrvMod;
+  SInt16 m_LDCU_RWheelDriverTorqReq;
+  SInt16 m_LDCU_FWheelPeakTorqMin;
+  SInt16 m_LDCU_FWheelPeakTorqMax;
+  SInt16 m_LDCU_FWheelCurTorq;
+  Float m_LDCUHIPUDesTorq;
+  UInt16 m_LDCU_FMotorSpd;
+  UInt16 m_LDCU_MMotorSpd;
+  UInt16 m_LDCU_RMotorSpd;
+  SInt16 m_LDCU_MWheelPeakTorqMin;
+  Float m_LDCUIPUFDesTorq;
+  Float m_LDCUIPURDesTorq;
+  SInt16 m_LDCU_MWheelPeakTorqMax;
+  SInt16 m_LDCU_MWheelCurTorq;
+  UInt32 m_LDCU_BodySysSt1;
+  Boolean m_LDCU_MMotorSpdDirection;
+  Boolean m_LDCU_RMotorSpdDirection;
+  SInt16 m_LDCU_RWheelPeakTorqMin;
+  SInt16 m_LDCU_RWheelPeakTorqMax;
+  SInt16 m_LDCU_RWheelCurTorq;
+  Boolean m_LDCU_DriverDoorLockSt;
+  Boolean m_LDCU_AccPedalSigVD;
+  UInt16 padding;
+  UInt32 m_LDCU_EVSysReadySt;
+  UInt32 m_LDCU_TgatePosSts;
+  UInt32 m_LDCU_TgateMvtSts;
+  UInt32 m_LDCU_CapPosSts;
+  UInt32 m_LDCU_CapMvtSts;
+  UInt32 m_LDCU_TPMSPrWarnFL;
+  UInt32 m_LDCU_TPMSPrWarnFR;
+  UInt32 m_LDCU_TPMSPrWarnRL;
+  UInt32 m_LDCU_TPMSPrWarnRR;
+  UInt32 m_LDCU_TPMSPrWarn3rdL;
+  UInt32 m_LDCU_TPMSPrWarn3rdR;
+  UInt32 m_LDCU_XPU_InteractSt;
+};
+
+struct CCpjLongCtrl {
+  UInt32 m_ESC_LC_FailureSts;
+  UInt32 m_ESC_LC_Status;
+  UInt32 m_ESC_LC_Availability;
+  Boolean m_Active_Vehicle_Hold;
+  Boolean m_ESC_Switch_b;
+  Boolean m_VehInAutoHold_b;
+  Boolean m_MotorHomeConnect_b;
+  Float m_GasPedalPos_f32;
+};
+
+struct CCpjRctaWarning {
+  UInt32 m_rctaWarningLH;
+  UInt32 m_rctaWarningRH;
+};
+
+struct CCpjTDCU {
+  UInt32 m_TDCU_XPU_FunctionMode;
+  Float m_TDCU_XPU_SteerAngleReqVal;
+  UInt32 m_TDCU_XPU_AngCtrlReq;
+  UInt32 m_TDCU_XPU_EPBReq;
+  Boolean m_TDCU_XPU_SteerAngleReqValVD;
+  Boolean m_TDCU_XPU_EPBReqVD;
+  SInt8 m_TdcuAsHgtFLmm;
+  SInt8 m_TdcuAsHgtFRmm;
+  SInt8 m_TdcuAsHgtMLmm;
+  SInt8 m_TdcuAsHgtMRmm;
+  SInt8 m_TdcuAsHgtRLmm;
+  SInt8 m_TdcuAsHgtRRmm;
+  UInt32 m_TdcuSepAndComSt;
+  UInt32 m_TdcuSNCParkReq;
+  UInt32 m_W_VoteNavHorPosType;
+  Float m_TDCU_YAWRate;
+  Float m_TdcuDistanceX_L;
+  Float m_TdcuDistanceX_R;
+  Float m_TdcuLADistanceX;
+  UInt32 m_TdcuDistanceX_L_VD;
+  UInt32 m_TdcuDistanceX_R_VD;
+  Boolean m_TDCU_SepComRKEEnable;
+  Boolean m_TdcuSNCParkPauseReq;
+  Boolean m_TdcuLADistanceX_VD;
+  UInt8 padding;
+};
+
+struct CCpjVehInfo {
+  Boolean m_AccModeIsActive;
+  Boolean m_VehIsCrashed;
+  Boolean m_AEBDecCtrlIsReq;
+  Boolean m_EBDDecCtrlIsReq;
+  Boolean m_AssociatedSysFctActive_b;
+  Boolean m_ActSafeFctActive_b;
+  Boolean m_RCTBDecCtrlReq;
+  UInt8 m_CddHoldActive;
+  UInt32 m_Stat_RCTB;
+  Float m_RCTBTgtDecel;
+  UInt32 m_ParkingFaultCluster;
+  UInt8 m_NoBrakeForce;
+  Boolean m_VehIsPowerLow;
+  Boolean m_ChargeConnected;
+  Boolean m_CameraIsBlocked;
+  Float m_VehPowerValue;
+  UInt16 m_VehRemDrvRange;
+};
+
+struct CCpjTel {
+  UInt32 m_TEL_Phone_ConnectSt;
+  UInt32 m_TEL_RPAKeyPstSt;
+  UInt32 m_TEL_RPADeviceSt;
+  Boolean m_TEL_RPACheckReq;
+  Boolean m_TEL_RPABtnStPressed;
+  SInt8 m_TEL_PhoneBattSOC;
+  Boolean m_TEL_RPACancelBtnStPressed;
+  UInt32 m_TEL_RPAOutDirSel;
+  UInt32 m_TEL_RPADeviceFailReason;
+  UInt8 m_TEL_DrvGestureStOk;
+  Boolean m_TEL_DrvGestureCheckOk;
+  Boolean m_TEL_RPAUndoBtnStPressed;
+  UInt8 m_TEL_BTCountSt_u8;
+  UInt32 m_TEL_IDC_AppParkingStResp;
+  UInt32 m_TEL_APA_AuthSt;
+  UInt32 m_TEL_RPA_AuthSt;
+  UInt32 m_TEL_HPA_AuthSt;
+  UInt32 m_TEL_RPAFunction_en;
+  UInt32 m_TEL_RPADirSel_en;
+  EIdcServiceResp_st m_TEL_RPAServiceResp_st;
+  UInt16 padding;
+  Boolean m_TEL_RPAPowerOffReq;
+  Boolean m_TEL_RPAobscancelCfm;
+};
+
+struct CPfBrakes {
+  UInt32 m_espOpMode;
+  Boolean m_absActive;
+  Boolean m_aebActive;
+  UInt16 padding;
+  UInt32 m_prkgBrkState;
+  UInt32 m_brkPedlState;
+  Float m_masterCylinderPress;
+};
+
+struct CPfCamera {
+  UInt32 m_statusProtectionFlapFront;
+  UInt32 m_statusProtectionFlapRear;
+  UInt32 m_statusRearCamPosition;
+  UInt32 m_statusFrontCamPosition;
+};
+
+struct CPfDoorAndMirror {
+  UInt32 m_stateDoorSwitchFrontLeft;
+  UInt32 m_stateDoorSwitchFrontRight;
+  UInt32 m_stateDoorSwitchRearLeft;
+  UInt32 m_stateDoorSwitchRearRight;
+  UInt32 m_stateExteriorMirrorLeft;
+  UInt32 m_stateExteriorMirrorRight;
+  UInt32 m_mirrFldState;
+  UInt32 m_statusContactBootLid;
+  UInt32 m_statusContactFrontLid;
+  UInt32 m_SrfOperateSts;
+};
+
+struct CPfEnvironment {
+  UInt32 m_dynamometerMode;
+  UInt32 m_absoluteTimeUnix;
+  UInt64 m_steeringWheelAngleSequenceCounter;
+};
+
+struct CPfGear {
+  UInt32 m_gearBoxType;
+  UInt32 m_gearStatus;
+  UInt32 m_TargetGearStatus;
+  Boolean m_APAGearIntervention;
+  UInt8 padding;
+  UInt16 padding1;
+};
+
+struct CPfGnssDateTime {
+  Float m_gnssTmStmp;
+  UInt16 m_gnssDateTimeMilliSecond;
+  UInt16 m_gnssDateTimeYear;
+  UInt8 m_gnssDateTimeSecond;
+  UInt8 m_gnssDateTimeMinute;
+  UInt8 m_gnssDateTimeMonth;
+  UInt8 m_gnssDateTimeDay;
+  UInt8 m_gnssDateTimeHour;
+  UInt8 m_gnssMasterCount1;
+  UInt8 m_gnssMasterCount2;
+  UInt8 m_gnssMasterCount3;
+  UInt8 m_gnssMasterCount4;
+  UInt8 padding1;
+  UInt16 padding;
+};
+
+struct CPfGnssLocalization {
+  Float m_gnssAltitude;
+  Float m_gnssHeading;
+  Float m_gnssLongitude;
+  Float m_gnssLatitude;
+  Float m_gnssLongitudeDeadReck;
+  Float m_gnssLatitudeDeadReck;
+  Float m_gnssVelOvrGrnd;
+  SInt32 m_gnssSampleRate;
+  UInt8 m_gnssVsblSat;
+  UInt8 m_gnssTrackedSat;
+  UInt16 padding;
+  Float m_gnssVdop;
+  Float m_gnssHdop;
+  Float m_gnssPdop;
+  UInt32 m_gnssPosFix;
+};
+
+struct CPfHil {
+  UInt8 m_hilMode;
+};
+
+struct CPfOdometry {
+  Float m_vehicleVelocity;
+  Float m_vehicleVelocityDisplay;
+  Float m_brktrq;
+  Float m_longitudinalAcceleration;
+  Float m_lateralAcceleration;
+  Float m_yawRate;
+  UInt64 m_wheelImpCtrFLTimestamp;
+  UInt64 m_wheelImpCtrFRTimestamp;
+  UInt64 m_wheelImpCtrRLTimestamp;
+  UInt64 m_wheelImpCtrRRTimestamp;
+  UInt16 m_wheelImpCtrFL;
+  UInt16 m_wheelImpCtrFR;
+  UInt16 m_wheelImpCtrRL;
+  UInt16 m_wheelImpCtrRR;
+  UInt32 m_vehicleDrvDir;
+  UInt32 m_qualifierVehicleVelocity;
+  UInt32 m_wheelDrvDirFL;
+  UInt32 m_wheelDrvDirFR;
+  UInt32 m_wheelDrvDirRL;
+  UInt32 m_wheelDrvDirRR;
+  UInt32 m_wheelRotationFLQualifier;
+  UInt32 m_wheelRotationFRQualifier;
+  UInt32 m_wheelRotationRLQualifier;
+  UInt32 m_wheelRotationRRQualifier;
+  UInt32 m_lateralAccelerationQualifier;
+  UInt32 m_longitudinalAccelerationQualifier;
+  UInt32 m_qualifierYawVelocityVehicle;
+  Float m_PboxImuAcc_X;
+  Float m_PboxImuAcc_Y;
+  Float m_PboxImuAcc_Z;
+  Float m_PboxImuGyro_X;
+  Float m_PboxImuGyro_Y;
+  Float m_PboxImuGyro_Z;
+  Float m_PitchInstallAngle_f32;
+  Float m_reserve1_f32;
+  Float m_reserve2_f32;
+  Float m_reserve3_f32;
+};
+
+struct CPfPmaFixedPoint {
+  Float m_steeringWheelAngle;
+  UInt16 m_vehSpeed;
+  UInt16 m_wheelRotationFL;
+  UInt16 m_wheelRotationFR;
+  UInt16 m_wheelRotationRL;
+  Float m_wheelSpeedFL;
+  Float m_wheelSpeedFR;
+  Float m_wheelSpeedRL;
+  Float m_wheelSpeedRR;
+  UInt16 m_wheelRotationRR;
+  SInt8 m_outsideTemp;
+  UInt8 padding;
+  UInt32 m_vehicleStopState;
+};
+
+struct CPfSteering {
+  Float m_frontWheelAngle;
+  Float m_frontWheelAngleOffset;
+  Float m_steeringWheelAngle;
+  Float m_steeringWheelAngleSpd;
+  Float m_rearAxleSteeringAngle;
+  Boolean m_frontWheelAngleValid;
+  Boolean m_frontWheelAngleOffsetValid;
+  Boolean m_rearAxleSteeringAngleValid;
+  UInt8 padding;
+  UInt32 m_qualifierSteeringAngle;
+  UInt32 m_frontWheelAngleStatus;
+  Float m_steerWhlTrq;
+  Float m_steerWhlTrqOffset;
+  Float m_steerWhlTrqHys;
+  Float m_steerWhlRimTrqHys;
+  UInt32 m_epsStatus;
+  UInt64 m_frontWheelAngleTimestamp;
+  UInt32 m_epsStatusRas;
+  UInt32 m_rearWheelAngleStatus;
+};
+
+struct CPfTirePress {
+  Float m_tirePressFL;
+  Float m_tirePressFR;
+  Float m_tirePressRL;
+  Float m_tirePressRR;
+  UInt32 m_tirePressQualifier;
+};
+
+struct CPfTrailer {
+  Boolean m_trailerState;
+  Boolean m_trailerHitchPresent;
+};
+
+struct CPfVehicleInfo {
+  UInt32 m_ignSwState;
+  UInt32 m_indicatorStatus;
+  UInt32 m_turnSWStatus;
+  UInt8 m_uBatt;
+  Boolean m_KL15_status;
+  Boolean m_lowBeamLeft;
+  Boolean m_lowBeamRight;
+  Boolean m_highBeamLeft;
+  Boolean m_highBeamRight;
+  Boolean m_fogLampFront;
+  Boolean m_fogLampRear;
+  Boolean m_brkLightAct;
+  Boolean m_DriverSeatBeltNotBuckled;
+  Boolean m_externalFuncAct;
+  Boolean m_chargeState;
+  UInt32 m_engineStart;
+  Float m_accPedalPosition;
+  Boolean m_engineIsRunning;
+  Boolean m_accPedalIntervened;
+  UInt16 padding;
+  UInt32 m_VehDriveMode;
+  UInt32 m_bgLightState;
+  UInt32 m_dayNightModeState;
+  Float m_motorTorqFeedback_nm;
+  Boolean m_engineIsReady;
+  Boolean m_CarModeValid;
+  UInt8 m_CarMode;
+  UInt8 m_LicenseNum[8];
+  Boolean APASoftKeyRequest;
+  Boolean APASoftKeyRequestNoReverse;
+};
+
+struct CPfVehicleLevel {
+  Float m_relativeVehicleLevel;
+  Float m_vehicleLevelFL;
+  Float m_vehicleLevelFR;
+  Float m_vehicleLevelRL;
+  Float m_vehicleLevelRR;
+  UInt32 m_qualifierVehicleLevel;
+};
+
+struct ValInOutputCpj {
+  CCpjIHU m_IHU;
+  CCpjTel m_TEL;
+  CCpjEps m_Eps;
+  CCpjLongCtrl m_LongCtrl;
+  CCpjRctaWarning m_rctaWarning;
+  CCpjFctaWarning m_fctaWarning;
+  CCpjVehInfo m_vehInfo;
+  CCpjFusaInfo m_FusaInfo;
+  CCpjTDCU m_TDCU;
+  CCpjLDCU m_LDCU;
+  CCPJFCU m_FCU;
+  CCPJIPB m_IPB;
+  CCPJLA1 m_LA1;
+  CCPJLA2 m_LA2;
+  CCPJRDCU m_RDCU;
+  CCPJRWS m_RWS;
+  CCPJSRS m_SRS;
+  CCPJTBOX m_TBOX;
+  CCPJXPU m_XPU;
+  CPfGnssLocalization m_pfGnssLocalization;
+  CPfGnssDateTime m_pfGnssDateTime;
+  UInt64 m_senderCallTimestamp;
+};
+
+struct ValInOutputPf {
+  CPfGear m_pfGear;
+  CPfCamera m_pfCamera;
+  CPfDoorAndMirror m_pfDoorAndMirror;
+  CPfOdometry m_pfOdometry;
+  CPfPmaFixedPoint m_pfPmaFixedPoint;
+  CPfSteering m_pfSteering;
+  CPfTrailer m_pfTrailer;
+  CPfVehicleLevel m_pfVehicleLevel;
+  CPfVehicleInfo m_pfVehicleInfo;
+  CPfTirePress m_pfTirePress;
+  CPfBrakes m_pfBrakes;
+  CPfEnvironment m_pfEnvironment;
+  CPfHil m_pfHil;
+  UInt64 m_senderCallTimestamp;
+  UInt64 m_timeStampVehicleUtcUs;
+};
+
+typedef ValInOutputPf PrkVinBusValInOutputPf;
+typedef ValInOutputCpj PrkVinBusValInOutputCpj;
+
+struct PrkVinBus {
+  PrkVinBusValInOutputPf ValInOutputPf;
+  PrkVinBusValInOutputCpj ValIOutPutCpj;
+};

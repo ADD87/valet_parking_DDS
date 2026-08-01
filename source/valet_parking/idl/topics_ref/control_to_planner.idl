@@ -1,0 +1,7 @@
+struct ControlToPlanner
+{
+    Header header;
+    boolean is_valid;
+    FKM fkm;
+    PlannerSemantic planner_semantic;
+};

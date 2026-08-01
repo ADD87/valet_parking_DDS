@@ -2,6 +2,8 @@
 #include "valet_parking_topics.h"
 #include "valet_parking_topicsTopicDataType.h"
 
+#include "app_build_feature_flags_config.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -30,6 +32,7 @@ constexpr const char* kLocalizationTopicDefault = "/localization/estimate";
 constexpr const char* kChassisTopicDefault = "/chassis/state";
 constexpr const char* kObstacleTopicDefault = "/perception/obstacles";
 constexpr int kTrajectoryPointCount = 21;
+constexpr std::size_t kMaxOutputWaypointCount = 100U;
 constexpr int kMaxCommandDrainRoundsPerCycle = 64;
 constexpr int kMaxAuxDrainRoundsPerCycle = 64;
 
@@ -710,6 +713,15 @@ PlanningTrajectory BuildPlanningTrajectory(const valet_parking_config_t& config,
     points.push_back(trajectory_point);
   }
 
+  // Phase 2: waypoint output protection — truncate if exceeding configured limit
+  if (points.size() > kMaxOutputWaypointCount) {
+    std::cerr << kModuleTag
+              << " WARNING: trajectory point count " << points.size()
+              << " exceeds max " << kMaxOutputWaypointCount
+              << ", truncating" << std::endl;
+    points.resize(kMaxOutputWaypointCount);
+  }
+
   EStop estop_sample;
   estop_sample.is_estop(is_estop);
   estop_sample.reason(input.status_reason);
@@ -730,6 +742,86 @@ PlanningTrajectory BuildPlanningTrajectory(const valet_parking_config_t& config,
                                   : PlanningTrajectoryType::TRAJECTORY_TYPE_NORMAL);
   return output;
 }
+
+// ============================================================
+// Phase 2: PrkVinBus coordinate transform utilities
+// Enabled via --features=ENABLE_PRKVINBUS
+// ============================================================
+#if ENABLE_PRKVINBUS
+
+namespace {
+
+double NormalizeAngle(double angle) {
+  constexpr double kPi = 3.14159265358979323846;
+  constexpr double kTwoPi = 2.0 * kPi;
+  while (angle >= kPi) {
+    angle -= kTwoPi;
+  }
+  while (angle < -kPi) {
+    angle += kTwoPi;
+  }
+  return angle;
+}
+
+void ConvertKmPoseToPlannerFrame(double km_x,
+                                 double km_y,
+                                 double km_heading,
+                                 double* planner_x,
+                                 double* planner_y,
+                                 double* planner_heading) {
+  if (planner_x == nullptr || planner_y == nullptr || planner_heading == nullptr) {
+    return;
+  }
+  // KM frame: +x backward, +y right. Planner internal: +x forward, +y left.
+  constexpr double kPi = 3.14159265358979323846;
+  *planner_x = -km_x;
+  *planner_y = -km_y;
+  *planner_heading = NormalizeAngle(km_heading + kPi);
+}
+
+// VALin Mapping-pf normalized gear: 0=P, 1=R, 2=N, 3=D, 4=GEAR_NOSIGNAL.
+valet_parking_gear_position_t MapPrkVinGearStatus(uint32_t gear_status) {
+  switch (gear_status) {
+    case 0U:
+      return VALET_PARKING_GEAR_PARKING;
+    case 1U:
+      return VALET_PARKING_GEAR_REVERSE;
+    case 2U:
+      return VALET_PARKING_GEAR_NEUTRAL;
+    case 3U:
+      return VALET_PARKING_GEAR_DRIVE;
+    case 4U:
+      return VALET_PARKING_GEAR_NONE;
+    default:
+      return VALET_PARKING_GEAR_INVALID;
+  }
+}
+
+// VALin Mapping-pf normalized m_vehicleDrvDir: 1=forward, 2=backward, 15=unknown.
+double SignedPrkVinVelocity(double absolute_speed,
+                            uint32_t vehicle_drive_direction,
+                            valet_parking_gear_position_t gear) {
+  const double magnitude = std::fabs(absolute_speed);
+  if (vehicle_drive_direction == 1U) {
+    return magnitude;
+  }
+  if (vehicle_drive_direction == 2U) {
+    return -magnitude;
+  }
+  // Conservative fallback: use normalized gear position.
+  switch (gear) {
+    case VALET_PARKING_GEAR_DRIVE:
+      return magnitude;
+    case VALET_PARKING_GEAR_REVERSE:
+      return -magnitude;
+    default:
+      return 0.0;
+  }
+}
+
+}  // namespace
+
+#endif  // ENABLE_PRKVINBUS
 
 }  // namespace
 
