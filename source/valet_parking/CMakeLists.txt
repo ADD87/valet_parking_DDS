@@ -79,6 +79,22 @@ set(STANDALONE_STRAIGHT_PATH_SOURCES
     ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_straight_path/open_space_straight_path_provider.cc
 )
 
+# Phase 3: NLP Smoother — behind ENABLE_NLP_SMOOTHER feature flag
+# Requires: tempapa third-party binaries manually copied to thirdparty/{x86|m57}/tempapa/
+if(ENABLE_NLP_SMOOTHER)
+    include(cmake/tempapa_thirdparty.cmake)
+    list(APPEND MODULE_DEPENDS thirdparty::tempapa)
+
+    set(STANDALONE_NLP_SMOOTHER_SOURCES
+        ${STANDALONE_PARKING_ROOT}/planning/open_space/nlp_path_smoother/nlp_path_smoother_lite.cc
+        ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/shape/scs_shape_path.cc
+        ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/utils/penalty_function_method.cc
+        ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/geometry_path_generator.cc
+    )
+    list(APPEND SOURCES ${STANDALONE_NLP_SMOOTHER_SOURCES})
+    message(STATUS "[valet_parking] ENABLE_NLP_SMOOTHER=ON — NLP path smoother + geometry path generator enabled")
+endif()
+
 # Source discovery
 set(SOURCES
     src/valet_parking_component.cpp
