@@ -1,0 +1,17 @@
+// ============================================================
+// ParkingCommand input topic type
+// Extracted from valet_parking_topics.idl (Phase 1 modularization)
+// Backward compatible — all names and fields unchanged
+// ============================================================
+
+struct ParkingCommand
+{
+    Header header;
+    boolean is_valid;
+    ParkingCommandMode mode;
+    uint32 parking_seq;
+    double direct_distance_m;
+    double direct_speed_mps;
+    boolean reset_history;
+    string reason;
+};

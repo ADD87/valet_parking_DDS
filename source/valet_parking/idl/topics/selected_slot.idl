@@ -1,0 +1,55 @@
+// ============================================================
+// SelectedSlot input topic types
+// Extracted from valet_parking_topics.idl (Phase 1 modularization)
+// Backward compatible — all names and fields unchanged
+// ============================================================
+
+struct PsPoint
+{
+    Point3D point;
+    PsPointPosition position;
+    PsPointQuality quality;
+};
+
+struct ParkingPathPoint
+{
+    double x;
+    double y;
+    double z;
+    double yaw;
+    double accumulate_s;
+    uint32 gear;
+};
+
+struct ParkingLot
+{
+    uint32 parking_seq;
+    ParkingType type;
+    ParkingStatus status;
+    ParkingSensorType sensor_type;
+    boolean is_private_ps;
+    sequence<PsPoint> pts_vrf;
+    double time_creation;
+    sequence<PsPoint> pts_enu;
+    double hmi_angle;
+    double hmi_depth;
+    double hmi_width;
+    double hmi_direction;
+    double hmi_type;
+    double hmi_status;
+    ParkingSpaceSize park_size;
+};
+
+struct SelectedSlot
+{
+    Header header;
+    uint32 count;
+    uint32 loc_seq;
+    uint32 opt_parking_seq;
+    sequence<ParkingLot> parking_lots;
+    boolean is_valid;
+    uint32 path_point_size;
+    sequence<ParkingPathPoint> traced_path;
+    boolean hpp_cruising_to_parking;
+    boolean enable_trigger;
+};

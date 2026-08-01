@@ -1,0 +1,26 @@
+// ============================================================
+// Obstacle / ObstacleArray input topic types
+// Extracted from valet_parking_topics.idl (Phase 1 modularization)
+// Backward compatible — all names and fields unchanged
+// ============================================================
+
+struct Obstacle
+{
+    uint32 id;
+    ObstacleType type;
+    boolean is_dynamic;
+    double center_x;
+    double center_y;
+    double heading;
+    double length;
+    double width;
+    double velocity_x;
+    double velocity_y;
+};
+
+struct ObstacleArray
+{
+    Header header;
+    boolean is_valid;
+    sequence<Obstacle> obstacles;
+};

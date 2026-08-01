@@ -1,0 +1,14 @@
+// ============================================================
+// ChassisState input topic type
+// Extracted from valet_parking_topics.idl (Phase 1 modularization)
+// Backward compatible — all names and fields unchanged
+// ============================================================
+
+struct ChassisState
+{
+    Header header;
+    boolean is_valid;
+    double speed_mps;
+    double acceleration_mps2;
+    GearPosition gear;
+};
