@@ -26,8 +26,9 @@ if(NOT TEMPAPA_LIB_ROOT)
             "Expected x86 or m57.")
     endif()
 
+    # CMAKE_SOURCE_DIR = compile/ ; thirdparty is at ../thirdparty
     set(TEMPAPA_LIB_ROOT
-        "${FEATURE_WORKSPACE_ROOT}/thirdparty/${CMAKE_CROSS_BUILD}/tempapa")
+        "${CMAKE_SOURCE_DIR}/../thirdparty/${CMAKE_CROSS_BUILD}/tempapa")
 endif()
 
 if(NOT TEMPAPA_LIB_ROOT)

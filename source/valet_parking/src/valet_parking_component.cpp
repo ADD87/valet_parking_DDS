@@ -814,6 +814,11 @@ double SignedPrkVinVelocity(double absolute_speed,
       return magnitude;
     case VALET_PARKING_GEAR_REVERSE:
       return -magnitude;
+    case VALET_PARKING_GEAR_NEUTRAL:
+    case VALET_PARKING_GEAR_PARKING:
+    case VALET_PARKING_GEAR_LOW:
+    case VALET_PARKING_GEAR_INVALID:
+    case VALET_PARKING_GEAR_NONE:
     default:
       return 0.0;
   }
