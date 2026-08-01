@@ -79,13 +79,13 @@ set(STANDALONE_STRAIGHT_PATH_SOURCES
     ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_straight_path/open_space_straight_path_provider.cc
 )
 
-# Phase 2: PrkVinBus topic reader — behind ENABLE_PRKVINBUS feature flag
+# Phase 2: PrkVinBus topic reader — generated code always compiled (unique_ptr destructor needs complete type)
+set(PRKVINBUS_GENERATED_SOURCES
+    generated/prk_vin_bus.cpp
+    generated/prk_vin_busTopicDataType.cpp
+)
+list(APPEND SOURCES ${PRKVINBUS_GENERATED_SOURCES})
 if(ENABLE_PRKVINBUS)
-    set(PRKVINBUS_GENERATED_SOURCES
-        generated/prk_vin_bus.cpp
-        generated/prk_vin_busTopicDataType.cpp
-    )
-    list(APPEND SOURCES ${PRKVINBUS_GENERATED_SOURCES})
     message(STATUS "[valet_parking] ENABLE_PRKVINBUS=ON — PrkVinBus topic reader enabled")
 endif()
 

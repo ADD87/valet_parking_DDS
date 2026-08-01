@@ -3,10 +3,11 @@
 #include "valet_parking_topicsTopicDataType.h"
 
 #include "app_build_feature_flags_config.h"
-
-#if ENABLE_PRKVINBUS
 #include "prk_vin_bus.h"
 #include "prk_vin_busTopicDataType.h"
+
+#if ENABLE_PRKVINBUS
+// PrkVinBus processing logic (reader creation, HandlePrkVinBusSample, etc.)
 #endif
 
 #include <algorithm>
