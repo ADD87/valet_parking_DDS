@@ -39,10 +39,7 @@ set(STANDALONE_PATH_PROVIDER_SOURCES
     ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/path_generator.cc
     ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/shape/reeds_shepp_path.cc
     ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/hybrid_a_star.cc
-    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/geometric_path.cc
     ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/ilqr_path.cc
-    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/geometry_path_generator.cc
-    ${STANDALONE_PARKING_ROOT}/planning/open_space/coarse_path_generator/utils/penalty_function_method.cc
     ${STANDALONE_PARKING_ROOT}/planning/open_space/open_space_thread/open_space_thread_manager.cc
     ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_path_generation/open_space_path_generator.cc
     ${STANDALONE_PARKING_ROOT}/planning/tasks/optimizers/open_space_path_generation/open_space_path_provider.cc

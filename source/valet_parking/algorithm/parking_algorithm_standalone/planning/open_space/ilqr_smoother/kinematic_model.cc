@@ -22,7 +22,7 @@ void KinematicModel::Simulate(
     cur_control[0] = param_.min_acc;
   }
   auto steer = [&](double spd, double sterr_limit) {
-    return TL::(std::fabs(param_.wheelbase) < 1e-6)
+    return std::fabs(param_.wheelbase) < 1e-6
                ? sterr_limit
                : spd * std::tan(sterr_limit) / param_.wheelbase;
   };

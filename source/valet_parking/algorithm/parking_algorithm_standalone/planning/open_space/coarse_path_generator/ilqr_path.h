@@ -79,7 +79,7 @@ class ILQR : public PathGenerator {
  * @param obstacles_segments_vec 
  * @return double
  */
-  static double GetStraightenDist(
+  double GetStraightenDist(
       double x, double y, double theta,
       const std::vector<std::pair<common::math::LineSegment2d, double>>&
           obstacles_segments_vec);

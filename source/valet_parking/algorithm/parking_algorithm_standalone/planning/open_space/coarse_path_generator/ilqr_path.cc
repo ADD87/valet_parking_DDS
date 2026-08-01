@@ -4,7 +4,7 @@
  */
 
 #include "planning/open_space/coarse_path_generator/ilqr_path.h"
-#include "proto_convert/planning_internal_convert.h"  // 独立编译改造
+#include "proto_convert/planning_internal_convert.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,18 +15,22 @@
 #include <limits>
 #include <memory>
 
-#include "planning/common/planning_gflags.h"
 #include "planning/open_space/ilqr_smoother/al_ilqr_interface.h"
-#include "proto_convert/pnc_point_convert.h"  // 独立编译改造
-#include "proto_convert/vehicle_config_convert.h"  // 独立编译改造
+#include "planning/open_space/vehicle_param.h"
+#include "proto_convert/pnc_point_convert.h"
+#include "proto_convert/vehicle_config_convert.h"
 
 namespace TL {
 namespace planning {
 
+// Default collision buffer: 0.3m (original FLAGS value)
+static constexpr double kDefaultEgoInflatedCollisionBuffer = 0.3;
+
 ILQR::ILQR(const WarmStartConfig& warm_start_config)
-    : PathGenerator(warm_start_config),
+    : PathGenerator(TL::planning::HybridAStarConfig(),
+                    TL::planning::LoadEP30VehicleParam()),
       extra_collision_buffer_(
-          warm_start_config_.extra_distance_for_geometry_path()) {
+          warm_start_config.extra_distance_for_geometry_path) {
   Param param;
   al_ilqr_interface_ = std::make_unique<ALILQR_INTERFACE>(param);
 }
@@ -41,12 +45,12 @@ bool ILQR::Plan(
     const PathSearchStrategy& path_search_strategy,
     PathGeneratorResult* const result) {
   xy_bounds_ = xy_bounds;
-  double x1 = start_point.x();
-  double y1 = start_point.y();
-  double theta1 = start_point.theta();
-  double x2 = end_point.x();
-  double y2 = end_point.y();
-  double theta2 = end_point.theta();
+  double x1 = start_point.x;
+  double y1 = start_point.y;
+  double theta1 = start_point.theta;
+  double x2 = end_point.x;
+  double y2 = end_point.y;
+  double theta2 = end_point.theta;
   const bool is_lat_spot =
       path_search_strategy.space_structure == SpaceStructure::LAT_PARK_LOT;
   if (!is_lat_spot) {
@@ -76,9 +80,9 @@ bool ILQR::Plan(
     }
   }
   if (!is_lat_spot) {
-    result->x.insert(result->x.end(), end_point.x());
-    result->y.insert(result->y.end(), end_point.y());
-    result->phi.insert(result->phi.end(), end_point.theta());
+    result->x.insert(result->x.end(), end_point.x);
+    result->y.insert(result->y.end(), end_point.y);
+    result->phi.insert(result->phi.end(), end_point.theta);
   }
 
   std::vector<std::pair<common::math::LineSegment2d, double>>
@@ -90,14 +94,14 @@ bool ILQR::Plan(
       obstacles_without_virtual.push_back(obstacles_segments);
     }
   }
-  common::math::LineSegment2d line_1(Vec2d(xy_bounds.at(0), xy_bounds.at(2)),
-                                     Vec2d(xy_bounds.at(0), xy_bounds.at(3)));
-  common::math::LineSegment2d line_2(Vec2d(xy_bounds.at(1), xy_bounds.at(2)),
-                                     Vec2d(xy_bounds.at(1), xy_bounds.at(3)));
-  common::math::LineSegment2d line_3(Vec2d(xy_bounds.at(0), xy_bounds.at(2)),
-                                     Vec2d(xy_bounds.at(1), xy_bounds.at(2)));
-  common::math::LineSegment2d line_4(Vec2d(xy_bounds.at(0), xy_bounds.at(3)),
-                                     Vec2d(xy_bounds.at(1), xy_bounds.at(3)));
+  common::math::LineSegment2d line_1(common::math::Vec2d(xy_bounds.at(0), xy_bounds.at(2)),
+                                     common::math::Vec2d(xy_bounds.at(0), xy_bounds.at(3)));
+  common::math::LineSegment2d line_2(common::math::Vec2d(xy_bounds.at(1), xy_bounds.at(2)),
+                                     common::math::Vec2d(xy_bounds.at(1), xy_bounds.at(3)));
+  common::math::LineSegment2d line_3(common::math::Vec2d(xy_bounds.at(0), xy_bounds.at(2)),
+                                     common::math::Vec2d(xy_bounds.at(1), xy_bounds.at(2)));
+  common::math::LineSegment2d line_4(common::math::Vec2d(xy_bounds.at(0), xy_bounds.at(3)),
+                                     common::math::Vec2d(xy_bounds.at(1), xy_bounds.at(3)));
   obstacles_without_virtual.emplace_back(line_1, kEpsilon);
   obstacles_without_virtual.emplace_back(line_2, kEpsilon);
   obstacles_without_virtual.emplace_back(line_3, kEpsilon);
@@ -135,22 +139,22 @@ double ILQR::GetStraightenDist(
   const double kMinDis = 0.5;
   const double kMaxDis = 3.5;
   const double step = 0.25;
-  const double back_edge_to_center = common::VehicleConfigHelper::GetConfig()
-                                         .vehicle_param()
-                                         .back_edge_to_center();
+  const double back_edge_to_center =
+      vehicle_param_.back_edge_to_center;
   double straighten_dist = kMinDis;
   while (straighten_dist < kMaxDis) {
     double x_tmp =
         x + (straighten_dist + back_edge_to_center) * std::cos(theta);
     double y_tmp =
         y + (straighten_dist + back_edge_to_center) * std::sin(theta);
-    const auto polygon2d = common::VehicleConfigHelper::GetPolygon2dWithBuffer(
-        x_tmp, y_tmp, theta, 0.0, 0.0,
-        FLAGS_avp_ego_inflated_buffer_for_checking_collision,
-        FLAGS_avp_ego_inflated_buffer_for_checking_collision);
+    common::math::Box2d ego_box(
+        common::math::Vec2d(x_tmp, y_tmp), theta,
+        vehicle_param_.length, vehicle_param_.width);
     bool is_collision = false;
     for (const auto& obs_pair : obstacles_segments_vec) {
-      if (obs_pair.second < kEpsilon && polygon2d.HasOverlap(obs_pair.first)) {
+      if (obs_pair.second < kEpsilon &&
+          ego_box.DistanceTo(obs_pair.first) <
+              kDefaultEgoInflatedCollisionBuffer) {
         is_collision = true;
         break;
       }
