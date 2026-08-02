@@ -1170,8 +1170,12 @@ void OpenSpacePathPartition::UpdateFinishStatusBasedOnStatus(
     return;
   }
 
-  if (!adc_status.is_distance_reach || !adc_status.is_execute_last_part_path ||
-      !is_warm_start_) {
+  // MVP-A: when the vehicle is already standstill and both pose dimensions
+  // are reached, do not block finish on internal path-state flags
+  // (is_execute_last_part_path/is_warm_start_). These flags are planner-path
+  // diagnostics and can be false in near-destination handover timing, causing
+  // finish to flap to FAR_AWAY even at target pose.
+  if (!adc_status.is_distance_reach) {
     task_finish_status_ = planning_internal::OpenSpaceDebug::FAR_AWAY;
     return;
   }

@@ -2680,6 +2680,39 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
             runtime_->processed_frames));
   };
   StageProcessContextLite stage_context = build_stage_context();
+  auto publish_finish_hold = [&]() -> bool {
+    const FunctionManagerProjection finish_hold_projection =
+        BuildStageFinishHoldFunctionProjection();
+
+    std::ostringstream stream;
+    stream << "STAGE_CONTROL FINISH_HOLD"
+           << ", command_action=FINISH_HOLD"
+           << ", stage_status=mission_finished"
+           << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
+           << ", task=STAGE_FINISH_HOLD"
+           << ", original_flow_branch=stage_finish_hold"
+           << ", reset_history=false";
+    MarkStageFinishHold(BuildStageFunctionManagerLite(finish_hold_projection),
+                        &stage_context);
+    AppendStageProjectionContract("stage_control", &stream, &stage_context);
+    AppendFunctionManagerProjectionContract(finish_hold_projection, &stream);
+    AppendMissionStateContract("MISSION_FINISHED", "FINISH", true, &stream);
+    AppendRuntimeLifecycleContract(
+        "stage_finish_hold", "hold_until_reset_history_or_new_stage",
+        "keep_until_stage_reset", "keep_until_stage_reset", "already_clear",
+        runtime_->path_provider.has_history, runtime_->has_last_speed_frame,
+        runtime_->direct_command.active, &stream);
+    stream << ", trajectory_type=SHORT_PATH"
+           << ", parking_status=mission_finished";
+
+    metadata.status_reason = stream.str();
+    *status_reason = metadata.status_reason;
+    *output_sample = BuildStageControlStopTrajectory(
+        config_, metadata, runtime_->vehicle_input, metadata.status_reason,
+        ::GearPosition::GEAR_PARKING);
+    return true;
+  };
+
   if (command_sample != nullptr && command_sample->is_valid()) {
     const ParkingCommandMode command_mode = command_sample->mode();
     const std::string command_mode_text =
@@ -2691,6 +2724,10 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         BuildFunctionManagerProjection(command_sample,
                                        runtime_->path_provider.has_history);
     stage_context = build_stage_context();
+
+    if (runtime_->stage_exit_requested) {
+      return publish_finish_hold();
+    }
 
     if (command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_FORWARD ||
         command_mode == ParkingCommandMode::PARKING_COMMAND_DIRECT_BACKWARD) {
@@ -2983,6 +3020,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   if (runtime_->direct_command.active &&
       IsDirectCommandMode(runtime_->direct_command.last_mode)) {
     const ParkingCommandMode released_mode = runtime_->direct_command.last_mode;
+    const bool direct_command_active_before_release =
+        runtime_->direct_command.active;
     const DirectFinishEvaluation direct_finish_evaluation =
         BuildDirectFinishEvaluation(
             runtime_->vehicle_input.has_vehicle_state
@@ -3020,16 +3059,16 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
         direct_finish_evaluation.ready_to_finish ? "direct_release_ready"
                                                  : "direct_release_waiting",
         direct_finish_evaluation.ready_to_finish
-            ? "reset_planning_state_after_publish"
+        ? "latch_finish_hold_after_publish"
             : "wait_for_direct_release_ready",
-        direct_finish_evaluation.ready_to_finish ? "reset_after_publish"
+      direct_finish_evaluation.ready_to_finish ? "keep_until_stage_reset"
                                                  : "keep_until_release_ready",
-        direct_finish_evaluation.ready_to_finish ? "reset_after_publish"
+      direct_finish_evaluation.ready_to_finish ? "keep_until_stage_reset"
                                                  : "keep_until_release_ready",
-        direct_finish_evaluation.ready_to_finish ? "reset_after_publish"
-                                                 : "keep_release_waiting",
+      direct_finish_evaluation.ready_to_finish ? "clear_released_command"
+                           : "keep_release_waiting",
         runtime_->path_provider.has_history, runtime_->has_last_speed_frame,
-        runtime_->direct_command.active, &stream);
+      direct_command_active_before_release, &stream);
     stream << ", previous_direct_command="
            << ParkingCommandModeToString(released_mode)
            << ", trajectory_type=SHORT_PATH"
@@ -3040,7 +3079,8 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
 
     metadata.status_reason = stream.str();
     if (direct_finish_evaluation.ready_to_finish) {
-      runtime_->ResetPlanningState();
+      runtime_->direct_command.Reset();
+      runtime_->stage_exit_requested = true;
     }
     *status_reason = metadata.status_reason;
     *output_sample = BuildStageControlStopTrajectory(
@@ -3050,36 +3090,7 @@ bool ValetParkingStageParkingAdapter::Process(const SelectedSlot& input_sample,
   }
 
   if (runtime_->stage_exit_requested) {
-    const FunctionManagerProjection finish_hold_projection =
-        BuildStageFinishHoldFunctionProjection();
-
-    std::ostringstream stream;
-    stream << "STAGE_CONTROL FINISH_HOLD"
-           << ", command_action=FINISH_HOLD"
-           << ", stage_status=mission_finished"
-           << ", skip=ROI_PATH_PROVIDER_PATH_PARTITION"
-           << ", task=STAGE_FINISH_HOLD"
-           << ", original_flow_branch=stage_finish_hold"
-           << ", reset_history=false";
-    MarkStageFinishHold(BuildStageFunctionManagerLite(finish_hold_projection),
-                        &stage_context);
-    AppendStageProjectionContract("stage_control", &stream, &stage_context);
-    AppendFunctionManagerProjectionContract(finish_hold_projection, &stream);
-    AppendMissionStateContract("MISSION_FINISHED", "FINISH", true, &stream);
-    AppendRuntimeLifecycleContract(
-        "stage_finish_hold", "hold_until_reset_history_or_new_stage",
-        "keep_until_stage_reset", "keep_until_stage_reset", "already_clear",
-        runtime_->path_provider.has_history, runtime_->has_last_speed_frame,
-        runtime_->direct_command.active, &stream);
-    stream << ", trajectory_type=SHORT_PATH"
-           << ", parking_status=mission_finished";
-
-    metadata.status_reason = stream.str();
-    *status_reason = metadata.status_reason;
-    *output_sample = BuildStageControlStopTrajectory(
-        config_, metadata, runtime_->vehicle_input, metadata.status_reason,
-        ::GearPosition::GEAR_PARKING);
-    return true;
+    return publish_finish_hold();
   }
 
   std::string selected_lot_reason;

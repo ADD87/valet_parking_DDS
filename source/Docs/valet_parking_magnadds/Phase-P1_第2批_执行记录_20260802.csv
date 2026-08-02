@@ -1,0 +1,8 @@
+记录编号,阶段,批次,日期,分支,改动文件,验证项,结果,证据,备注
+P1-B2-001,Phase-P1,第2批,2026-08-02,DeepSeeK_V4_pro_20260731,source/valet_parking/src/valet_parking_stage_parking_adapter.cpp,stage_exit_requested优先门禁,Pass,adapter中新增publish_finish_hold并在command分支优先返回,完成态锁存收敛
+P1-B2-002,Phase-P1,第2批,2026-08-02,DeepSeeK_V4_pro_20260731,build_valet_parking.sh,x86编译,Pass,out/valet_parking_phase_p1_118b/valet_parking_mvp/x86/lib/libvalet_parking.so,m57本机受工具链阻塞
+P1-B2-003,Phase-P1,第2批,2026-08-02,DeepSeeK_V4_pro_20260731,smoke_valet_parking_x86.sh,direct-backward-release smoke,Pass,smoke_latest/domain_206_20260802_105722_11032,含pre-command-slot-count=3
+P1-B2-004,Phase-P1,第2批,2026-08-02,DeepSeeK_V4_pro_20260731,smoke_valet_parking_x86.sh,near-destination smoke,Fail,smoke_latest/domain_207_20260802_105839_11200|domain_208_20260802_105948_11526,场景未稳定命中destination_reached=true
+P1-B2-005,Phase-P1,第2批,2026-08-02,DeepSeeK_V4_pro_20260731,algorithm/parking_algorithm_standalone/planning/tasks/optimizers/open_space_path_partition/open_space_path_partition.cc,near-destination完成判定收敛,Pass,放宽泊入完成判定对is_execute_last_part_path与is_warm_start_硬依赖,车辆静止且姿态达标不再误判FAR_AWAY
+P1-B2-006,Phase-P1,第2批,2026-08-02,DeepSeeK_V4_pro_20260731,smoke_valet_parking_x86.sh,near-destination smoke连续回归,Pass,smoke_latest/domain_217_20260802_125715_13364|domain_218|domain_219|domain_220|domain_221,连续5次命中REACH_TARGET+destination_reached=true并进入FINISH_HOLD
+P1-B2-007,Phase-P1,第2批,2026-08-02,DeepSeeK_V4_pro_20260731,smoke_valet_parking_x86.sh,direct-backward-release反向回归,Pass,smoke_latest/domain_222_20260802_*,确认第2批修复未破坏既有direct release能力

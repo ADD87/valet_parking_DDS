@@ -1,7 +1,7 @@
 project: ValetParkingStageParking_MagnaDDS_MVP
 workspace: C:\Users\jasezhan\Desktop\00_git\20260718\02_middleware\feature_integration\feature_integration_workspace
 created_date: 2026-07-26
-last_updated: 2026-07-31
+last_updated: 2026-08-02
 
 state_authority:
   rule: 本文件与 status_snapshots、decision_records 是项目状态的事实来源；聊天记录仅作辅助。
@@ -23,9 +23,9 @@ local_git:
   purpose: 跟踪当前 MVP 范围内的 source、config、Docs 变更；不纳入 compile、thirdparty、out。
 
 current_phase:
-  id: Fast-2
-  name: .so + typed DDS + localized valet parking algorithm sources
-  status: PASS_BATCH_109_112_TASK_RUNTIME_HELPER_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  id: Phase-P1
+  name: Stage完成态与阶段门禁收敛
+  status: IN_PROGRESS_BATCH_2_PENDING_APPROVAL
   description: 已按 runner/component/adapter 分层接入 SelectedSlot -> ROI_DECIDER -> PATH_PROVIDER -> PATH_PARTITION -> SPEED_OPTIMIZER -> PlanningTrajectory。PATH_PROVIDER 当前使用 applications/source/valet_parking/algorithm/parking_algorithm_standalone 中本地化后的 OpenSpacePathProvider + OpenSpaceThreadManager + OpenSpacePathGenerator + HybridAStar 粗路径链路，不再依赖 E:\APA\DDS\parking_algorithm_standalone 外部绝对路径。NEXT-018 至 NEXT-033 已完成轻量运行态复用、warm_start/trace_adjust 诊断、各类 SelectedSlot/辅助输入边界、障碍物变化、目标变化、path_id 变化和多车位 opt_parking_seq 选择 smoke。NEXT-034 至 NEXT-037 已新增 ParkingCommand typed DDS Topic、Component command reader、PAUSE/BRAKE/FINISH 非 estop 停止分支、parking_command_mock_publisher 和 command smoke。NEXT-038 已把 DIRECT_FORWARD/DIRECT_BACKWARD 从 adapter 轻量短直线 shortcut 升级为本地化 OPEN_SPACE_STRAIGHT_PATH -> SPEED_OPTIMIZER -> PlanningTrajectory 链路。NEXT-039 已把 direct_speed_mps 映射到 direct 分支速度优化器 speed bound，新增 aux chassis signed speed 输入和速度方向冲突 smoke，并在 direct 输出原因中补 target_gear、direct_speed_bound_min/max、trajectory_type 和 parking_status 诊断。NEXT-040 已接入本地化 OpenSpacePathProvider / OpenSpaceThreadManager 线程骨架，普通主链经 TargetPlan 生成当前车位路径，多车位非选中 lot 经 PrePlan 进入 search threads；复验阶段补充了 PrePlan 队列硬化，避免覆盖 has_task=true 的候选输入。NEXT-041 已补充线程生命周期硬化：search/target worker 持有 shared early_stop，StopThreads/CancelTargetPlan 可取消正在跑的 Hybrid A*；timeout 负向路径可观测 provider_status=TARGET_TIMEOUT、target_cancel=true 和 fallback to ROI seed；BATCH-049_052 已按原始流程图补充普通主链轻量 Stage 输出收口：PathPartition 输出 decision_name/finish_name/destination_reached，SpeedOptimizer 输出 stage_name，STAGE_OUTPUT 统一输出 stage_status、target_gear、trajectory_type、parking_status 和 finish_priority。BATCH-053_056 已继续对照原始流程图缩小差异：补轻量 StageFinish 连续帧状态机、FunctionManager/sys_command/sys_run_state/sys_warning_info/parking_type 投影、ROI/OpenSpaceInfo 最小字段诊断、PreCheck/collision/wheel mask 可观测契约。BATCH-057_060 已补 direct finish 命令失活诊断、FunctionManager unsupported/default/NOSTATE 负向路径 smoke、ROI/PathProvider/PathPartition/SpeedOptimizer 的 OpenSpaceInfo 最小契约与 collision/wheel mask 成功/负向断言。BATCH-073_076 已补后段失败/降级路径统一 STAGE_OUTPUT fallback。BATCH-077_080 已补 early Stage 输入失败和 direct 分支内部失败的 Stage fallback / stage-control fallback：ROI fail、SelectedSlot empty/overflow、parking lot convert fail、vehicle-lot precheck fail、direct straight path fail、direct speed fallback 均有 x86 smoke 和 batch smoke 约束。当前仍使用临时 IDL 契约和简化 Topic，parking_status、FunctionManagerProjection、stage_finish_state、OpenSpaceInfo、fallback 契约仍只是 replan_reason/estop.reason 诊断文本，不是正式 DDS 字段；仍未接完整 FunctionManager、完整 PreCheck、NLP smoother、完整 Frame/DependencyInjector 和真实车端板端闭环。m57 板端 runtime 尚未验证。
   execution_policy: NEXT-041 后执行节奏切换为批量硬化：先批量检测和契约扫描，再批量修订代码/脚本/文档，再统一 x86/m57 编译和 x86 smoke 矩阵，最后集中排错并统一提交推送。
   latest_batch_summary: BATCH-109_112 已完成：新增 valet_parking_task_runtime_lite.h/.cpp，把 RuntimeVehicleInput/RuntimeObstacleInput/InputMetadata、车辆/障碍物转换、路径归一化、PATH_PARTITION/SPEED_OPTIMIZER/OPEN_SPACE_STRAIGHT_PATH 输入构造和 direct speed profile 从 Adapter 外移；Adapter 保留 DDS/runtime、任务调用、PathProvider 私有运行态和较高层 fallback 编排。Adapter 行数从约 3527 降到 3397。x86 normal/domain_224、direct/domain_225、first-domain-id=189 batch smoke 全部通过；x86/m57 构建通过，m57 仍未做板端 runtime。
@@ -105,9 +105,9 @@ current_phase:
       date: 2026-07-31
       summary: 已新增 Task runtime lite 文件，迁移 RuntimeVehicleInput/RuntimeObstacleInput/InputMetadata、BuildVehicleState/BuildStartPathPoint、BuildObstacleSegments、NormalizeDiscretizedPath、BuildPathPartitionInput、BuildSpeedOptimizerInput、BuildOpenSpaceStraightPathInput、BuildPartitionOutputFromStraightPath 和 direct speed profile；Adapter 行数降到约 3397，职责继续收敛为 DDS/runtime、任务调用、PathProvider 私有运行态和 fallback 编排。x86 normal/domain_224、direct/domain_225、first-domain-id=189 batch smoke 全部通过；x86/m57 构建通过，m57 仍未做板端 runtime。
 last_completed_snapshot:
-  id: '113_116'
-  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/113_116_项目状态快照_全链路深度架构验证与m57编译通过.md
-  status: PASS_ARCHITECTURE_AUDIT_AND_M57_BUILD
+  id: '120'
+  file: applications/source/Docs/valet_parking_magnadds/status_snapshots/120_项目状态快照_Phase-P1_第2批_near_destination稳定收敛.md
+  status: IN_PROGRESS_PHASE_P1_BATCH2_PENDING_APPROVAL
 
 last_plan_update:
   date: 2026-07-31
@@ -423,6 +423,7 @@ runtime_status:
   m57_flow_gap_061_064_static_build: PASS
   original_flow_mission_state_direct_lifecycle_gap_reduction: PASS
   x86_stage_contract_finish_boundary_smoke_test: PASS
+  x86_phase_p1_batch2_near_destination_stability_smoke_test: PASS
   x86_direct_release_restore_target_update_smoke_test: PASS
   x86_reset_history_target_update_smoke_test: PASS
   x86_flow_gap_065_068_batch_smoke_matrix: PASS
@@ -790,3 +791,23 @@ status_snapshots:
     file: applications/source/Docs/valet_parking_magnadds/status_snapshots/109_112_项目状态快照_TaskRuntime输入构造外移.md
     phase: Fast-2
     status: PASS_BATCH_109_112_TASK_RUNTIME_HELPER_EXTERNALIZATION_X86_SMOKE_M57_STATIC_BLOCKED_BOARD
+  - id: 113_116
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/113_116_项目状态快照_全链路深度架构验证与m57编译通过.md
+    phase: Fast-2
+    status: PASS_ARCHITECTURE_AUDIT_AND_M57_BUILD
+  - id: '117'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/117_项目状态快照_Phase-P0_计划书待确认.md
+    phase: Phase-P0
+    status: CREATED
+  - id: '118'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/118_项目状态快照_Phase-P1_第1批_完成态锁存与release语义对齐.md
+    phase: Phase-P1
+    status: IN_PROGRESS
+  - id: '119'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/119_项目状态快照_Phase-P1_第2批_完成态优先锁存门禁与回归.md
+    phase: Phase-P1
+    status: IN_PROGRESS
+  - id: '120'
+    file: applications/source/Docs/valet_parking_magnadds/status_snapshots/120_项目状态快照_Phase-P1_第2批_near_destination稳定收敛.md
+    phase: Phase-P1
+    status: IN_PROGRESS_PENDING_APPROVAL

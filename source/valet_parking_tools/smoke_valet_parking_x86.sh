@@ -1071,11 +1071,13 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_FORWARD release MissionState/next_stage evidence"
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*finish_condition=direct_command_inactive_and_standstill.*direct_command_active=false.*direct_command_inactive=true.*direct_finish_ready=true.*direct_stage_finish_state=READY.*previous_direct_command=DIRECT_FORWARD.*trajectory_type=SHORT_PATH.*parking_status=mission_finished" \
         "missing DIRECT_FORWARD inactive-command finish-ready contract"
-      require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=direct_release_ready.*stage_exit_action=reset_planning_state_after_publish.*path_history_action=reset_after_publish.*speed_frame_action=reset_after_publish.*direct_state_action=reset_after_publish" \
-        "missing DIRECT_FORWARD release runtime cleanup evidence"
+      require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=direct_release_ready.*stage_exit_action=latch_finish_hold_after_publish.*path_history_action=keep_until_stage_reset.*speed_frame_action=keep_until_stage_reset.*direct_state_action=clear_released_command" \
+        "missing DIRECT_FORWARD release runtime latch evidence"
+      require_runner_log "STAGE_CONTROL FINISH_HOLD.*stage_status=mission_finished.*task=STAGE_FINISH_HOLD" \
+        "missing FINISH_HOLD branch after DIRECT_FORWARD release"
       if ((pre_command_slot_count > 0)); then
-        require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*path_history_available=true.*path_history_action=reset_after_publish" \
-          "missing DIRECT_FORWARD release cleanup of existing path history"
+        require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*path_history_available=true.*path_history_action=keep_until_stage_reset" \
+          "missing DIRECT_FORWARD release hold of existing path history"
       fi
       require_runner_log "STAGE_CONTROL DIRECT_FORWARD_RELEASED.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_FORWARD_RELEASED skip evidence for ROI/PathProvider/PathPartition"
@@ -1173,11 +1175,13 @@ if [[ "${command_mode}" != "none" ]]; then
         "missing DIRECT_BACKWARD release MissionState/next_stage evidence"
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*finish_condition=direct_command_inactive_and_standstill.*direct_command_active=false.*direct_command_inactive=true.*direct_finish_ready=true.*direct_stage_finish_state=READY.*previous_direct_command=DIRECT_BACKWARD.*trajectory_type=SHORT_PATH.*parking_status=mission_finished" \
         "missing DIRECT_BACKWARD inactive-command finish-ready contract"
-      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=direct_release_ready.*stage_exit_action=reset_planning_state_after_publish.*path_history_action=reset_after_publish.*speed_frame_action=reset_after_publish.*direct_state_action=reset_after_publish" \
-        "missing DIRECT_BACKWARD release runtime cleanup evidence"
+      require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*runtime_lifecycle_contract=lightweight_stage_runtime_projection.*runtime_lifecycle_event=direct_release_ready.*stage_exit_action=latch_finish_hold_after_publish.*path_history_action=keep_until_stage_reset.*speed_frame_action=keep_until_stage_reset.*direct_state_action=clear_released_command" \
+        "missing DIRECT_BACKWARD release runtime latch evidence"
+      require_runner_log "STAGE_CONTROL FINISH_HOLD.*stage_status=mission_finished.*task=STAGE_FINISH_HOLD" \
+        "missing FINISH_HOLD branch after DIRECT_BACKWARD release"
       if ((pre_command_slot_count > 0)); then
-        require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*path_history_available=true.*path_history_action=reset_after_publish" \
-          "missing DIRECT_BACKWARD release cleanup of existing path history"
+        require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*path_history_available=true.*path_history_action=keep_until_stage_reset" \
+          "missing DIRECT_BACKWARD release hold of existing path history"
       fi
       require_runner_log "STAGE_CONTROL DIRECT_BACKWARD_RELEASED.*skip=ROI_PATH_PROVIDER_PATH_PARTITION" \
         "missing DIRECT_BACKWARD_RELEASED skip evidence for ROI/PathProvider/PathPartition"
